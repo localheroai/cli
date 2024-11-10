@@ -1,0 +1,302 @@
+import chalk from 'chalk';
+import { getProjectConfig } from '../utils/config.js';
+import { checkAuth } from '../utils/auth.js';
+import { findTranslationFiles } from '../utils/files.js';
+import { createTranslationJob, checkJobStatus } from '../api/translations.js';
+import { updateTranslationFile } from '../utils/translation-updater.js';
+import path from 'path';
+
+const DEFAULT_LOCALE_REGEX = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$';
+const MAX_RETRY_ATTEMPTS = 3;
+const BATCH_SIZE = 100;
+
+function validateConfig(config) {
+    const required = ['projectId', 'sourceLocale', 'outputLocales', 'translationFiles'];
+    const missing = required.filter(key => !config[key]);
+
+    if (missing.length) {
+        throw new Error(`Missing required config: ${missing.join(', ')}. Run 'npx localhero init' to set up your project.`);
+    }
+
+    if (!Array.isArray(config.outputLocales) || config.outputLocales.length === 0) {
+        throw new Error('outputLocales must be an array with at least one locale');
+    }
+
+    if (config.outputLocales.length > 10) {
+        throw new Error('Maximum 10 target languages allowed per request');
+    }
+
+    if (!config.translationFiles.paths || !Array.isArray(config.translationFiles.paths)) {
+        throw new Error('translationFiles.paths must be an array of paths');
+    }
+}
+
+function findMissingTranslations(sourceKeys, targetKeys) {
+    const missing = {};
+    for (const [key, value] of Object.entries(sourceKeys)) {
+        if (!targetKeys[key]) {
+            missing[key] = value;
+        }
+    }
+    return missing;
+}
+
+async function retryWithBackoff(operation, attempt = 1) {
+    try {
+        return await operation();
+    } catch (error) {
+        if (attempt >= MAX_RETRY_ATTEMPTS) throw error;
+
+        const backoffTime = Math.min(1000 * Math.pow(2, attempt), 30000);
+        const jitter = Math.random() * 1000;
+        const waitTime = backoffTime + jitter;
+
+        console.log(chalk.yellow(`⚠️  API error, retrying in ${Math.round(waitTime / 1000)}s (attempt ${attempt}/${MAX_RETRY_ATTEMPTS})`));
+        console.log(error);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+
+        return retryWithBackoff(operation, attempt + 1);
+    }
+}
+
+function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SIZE) {
+    const batches = [];
+    let currentBatch = [];
+    let currentKeyCount = 0;
+
+    // First, group all missing translations by source file
+    const sourceFileEntries = new Map();
+
+    for (const [locale, localeData] of Object.entries(missingByLocale)) {
+        const sourceFile = sourceFiles.find(f => f.path === localeData.path);
+        if (!sourceFile) continue;
+
+        if (!sourceFileEntries.has(sourceFile.path)) {
+            sourceFileEntries.set(sourceFile.path, {
+                path: sourceFile.path,
+                keys: {},
+                locales: new Set()
+            });
+        }
+
+        const entry = sourceFileEntries.get(sourceFile.path);
+        entry.keys = { ...entry.keys, ...localeData.keys };
+        entry.locales.add(locale);
+    }
+
+    // Create batches from the grouped entries
+    for (const entry of sourceFileEntries.values()) {
+        const keyCount = Object.keys(entry.keys).length;
+
+        if (currentKeyCount + keyCount > batchSize) {
+            if (currentBatch.length > 0) {
+                batches.push(currentBatch);
+            }
+            currentBatch = [];
+            currentKeyCount = 0;
+        }
+
+        // Create single file entry with all keys for this source file
+        currentBatch.push({
+            path: entry.path,
+            content: Buffer.from(JSON.stringify({ keys: entry.keys })).toString('base64')
+        });
+        currentKeyCount += keyCount;
+    }
+
+    if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+    }
+
+    return batches;
+}
+
+export async function translate(options = {}) {
+    const { verbose = false } = options;
+    const log = verbose ? console.log : () => { };
+
+    // Config and auth checks
+    const config = await getProjectConfig();
+    if (!config) {
+        console.error(chalk.red('❌ No localhero.json found. Run `npx localhero init` first'));
+        process.exit(1);
+    }
+
+    try {
+        validateConfig(config);
+    } catch (error) {
+        console.error(chalk.red(`❌ ${error.message}`));
+        process.exit(1);
+    }
+
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) {
+        console.error(chalk.red('❌ No API key found. Run `npx localhero login` or set LOCALHERO_API_KEY'));
+        process.exit(1);
+    }
+
+    console.log(chalk.blue('ℹ️  Loading configuration from localhero.json'));
+
+    // Find and analyze files
+    const { translationFiles } = config;
+    const fileLocaleRegex = DEFAULT_LOCALE_REGEX;
+
+    let allFiles = [];
+    for (const translationPath of translationFiles.paths) {
+        const filesInPath = await findTranslationFiles(translationPath, fileLocaleRegex);
+        allFiles = allFiles.concat(filesInPath);
+    }
+
+    if (!allFiles.length) {
+        console.error(chalk.red('❌ No translation files found'));
+        process.exit(1);
+    }
+
+    const sourceFiles = allFiles.filter(f => f.locale === config.sourceLocale);
+    const targetFiles = allFiles.filter(f => config.outputLocales.includes(f.locale));
+
+    if (!sourceFiles.length) {
+        console.error(chalk.red(`❌ No source files found for locale ${config.sourceLocale}`));
+        process.exit(1);
+    }
+
+    log(chalk.blue(`✓ Found ${allFiles.length} translation files`));
+    log(chalk.blue(`ℹ️  Analyzing target translations...`));
+
+    // Analyze missing translations
+    const missingByLocale = {};
+    for (const sourceFile of sourceFiles) {
+        const sourceContent = JSON.parse(Buffer.from(sourceFile.content, 'base64').toString());
+
+        for (const targetLocale of config.outputLocales) {
+            const targetFile = targetFiles.find(f => f.locale === targetLocale);
+            const targetContent = targetFile ?
+                JSON.parse(Buffer.from(targetFile.content, 'base64').toString()) :
+                { keys: {} };
+
+            const missing = findMissingTranslations(sourceContent.keys, targetContent.keys);
+            const missingCount = Object.keys(missing).length;
+
+            if (missingCount > 0) {
+                if (!missingByLocale[targetLocale]) {
+                    missingByLocale[targetLocale] = {
+                        keys: {},
+                        path: sourceFile.path
+                    };
+                }
+                missingByLocale[targetLocale].keys = {
+                    ...missingByLocale[targetLocale].keys,
+                    ...missing
+                };
+                console.log(chalk.blue(`  ${targetLocale} (${path.basename(sourceFile.path)}): ${missingCount} missing keys`));
+            }
+        }
+    }
+
+    if (Object.keys(missingByLocale).length === 0) {
+        console.log(chalk.green('✓ All translations are up to date!'));
+        return;
+    }
+
+    // Process in batches
+    const batches = batchKeysWithMissing(sourceFiles, missingByLocale);
+    let totalKeysProcessed = 0;
+    let totalErrors = 0;
+    const processedKeys = new Set(); // Track unique keys per language
+    let hasShownUpdateMessage = false;
+
+    for (const [batchIndex, batch] of batches.entries()) {
+        log(chalk.blue(`\nProcessing batch ${batchIndex + 1}/${batches.length}...`));
+
+        try {
+            const { jobs } = await retryWithBackoff(() =>
+                createTranslationJob({
+                    sourceFiles: batch,
+                    targetLocales: config.outputLocales,
+                    projectId: config.projectId
+                })
+            );
+            // Monitor progress for all jobs
+            const jobStatuses = new Map();
+            let allCompleted = false;
+
+            while (!allCompleted) {
+                allCompleted = true;
+                let totalProgress = 0;
+
+                for (const job of jobs) {
+                    const status = await retryWithBackoff(() => checkJobStatus(job.id, true));
+                    jobStatuses.set(job.id, status);
+
+                    if (status.status === 'processing') {
+                        allCompleted = false;
+                    }
+                    totalProgress += status.progress.percentage;
+                }
+
+                const averageProgress = Math.round(totalProgress / jobs.length);
+                const bar = '='.repeat(averageProgress / 2) + ' '.repeat(50 - averageProgress / 2);
+
+                process.stdout.write(`\r⧗ Translating... [${bar}] ${averageProgress}%`);
+
+                await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+
+            // After all jobs are completed, process translations
+            for (const job of jobs) {
+                const status = jobStatuses.get(job.id);
+                if (status.status === 'completed' && status.translations) {
+                    if (!hasShownUpdateMessage) {
+                        console.log(chalk.blue('\nℹ️  Updating translation files...'));
+                        hasShownUpdateMessage = true;
+                    }
+
+                    const translations = status.translations.translations;
+                    const targetLocale = status.language.code;
+                    const uniqueKey = `${targetLocale}:${Object.keys(translations).sort().join(',')}`;
+
+                    // Skip if we've already processed these exact keys for this language
+                    if (processedKeys.has(uniqueKey)) {
+                        continue;
+                    }
+                    processedKeys.add(uniqueKey);
+
+                    const targetFile = targetFiles.find(f => f.locale === targetLocale)?.path ||
+                        path.join(config.translationPath, `${targetLocale}.yml`);
+
+                    try {
+                        const updatedKeys = await updateTranslationFile(
+                            targetFile,
+                            translations,
+                            targetLocale
+                        );
+
+                        totalKeysProcessed += updatedKeys.length;
+
+                        if (verbose) {
+                            console.log(chalk.blue(`  Updated ${targetFile}`));
+                            updatedKeys.forEach(key => console.log(chalk.gray(`  - Added: ${key}`)));
+                        } else {
+                            console.log(chalk.blue(`  Updated ${path.basename(targetFile)}`));
+                        }
+                    } catch (error) {
+                        console.error(chalk.yellow(`⚠️  Failed to update ${targetFile}: ${error.message}`));
+                        totalErrors++;
+                    }
+                }
+            }
+        } catch (error) {
+            totalErrors++;
+            console.error(chalk.red(`❌ Batch ${batchIndex + 1} failed: ${error.message}`));
+            console.log(error);
+
+        }
+    }
+
+    if (totalErrors > 0) {
+        console.error(chalk.red(`\n❌ Translation completed with ${totalErrors} failed batches`));
+        process.exit(1);
+    }
+
+    console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${config.outputLocales.length} languages`);
+} 

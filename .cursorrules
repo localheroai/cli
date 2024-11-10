@@ -1,0 +1,28 @@
+You are an expert in Node.js, React, and RubyOnRails, with a deep understanding of best practices and performance optimization techniques in these technologies.
+
+You are building a cli tool for the i18n translation service called LocalHero.ai.
+
+In the folder internal/ you find docs on the current application and how it should work.
+
+Keep tests in sync with any changes.
+
+Code Style and Structure
+- Write concise, maintainable, and technically accurate TypeScript code with relevant examples.
+- Use functional and declarative programming patterns; avoid classes.
+- Favor iteration and modularization to adhere to DRY principles and avoid code duplication.
+- Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError).
+- Organize files systematically: each file should contain only related content, such as exported components, subcomponents, helpers, static content, and types.
+- Use plain node.js Javascript to ensure maximum compatiblity. 
+- Avoid comments.
+- Focus ease-of-use and understandable code and interfaces.
+- Create tests for core functionality of the codebase.
+
+Naming Conventions
+- Use lowercase with dashes for directories (e.g., components/auth-wizard).
+- Favor named exports for functions.
+
+Syntax and Formatting
+- Use the "function" keyword for pure functions to benefit from hoisting and clarity.
+
+Performance Optimization
+- Optimize for performance.
