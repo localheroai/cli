@@ -15,7 +15,6 @@ export function createPromptService(deps = {}) {
         async getProjectSetup() {
             if (!inquirer) return {};
 
-            // Return empty defaults without prompting
             return {
                 projectName: '',
                 sourceLocale: '',

@@ -1,9 +1,9 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import chalk from 'chalk';
-import { createPromptService } from '../services/prompt-service.js';
-import { defaultProjectService } from '../services/project-service.js';
-import { defaultConfigService } from '../services/config-service.js';
+import { createPromptService } from '../utils/prompt-service.js';
+import { defaultProjectService } from '../utils/project-service.js';
+import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 
@@ -146,11 +146,11 @@ export async function init(deps = {}) {
         basePath = process.cwd(),
         promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
         projectService = defaultProjectService,
-        configService = defaultConfigService,
+        configUtils = configService,
         authUtils = { checkAuth }
     } = deps;
 
-    const existingConfig = await configService.getProjectConfig(basePath);
+    const existingConfig = await configUtils.getProjectConfig(basePath);
     if (existingConfig) {
         console.log(chalk.yellow('localhero.json already exists. Skipping initialization.'));
         return;
@@ -188,7 +188,7 @@ export async function init(deps = {}) {
         }
     };
 
-    await configService.saveProjectConfig(config, basePath);
+    await configUtils.saveProjectConfig(config, basePath);
     console.log(chalk.green('\n✓ Created localhero.json'));
     console.log('Configuration:');
     console.log(JSON.stringify(config, null, 2));

@@ -1,6 +1,4 @@
-import { getConfig } from './config.js';
-import fs from 'fs/promises';
-import path from 'path';
+import { configService } from './config.js';
 
 export async function getApiKey() {
     const envKey = process.env.LOCALHERO_API_KEY;
@@ -8,18 +6,7 @@ export async function getApiKey() {
         return envKey;
     }
 
-    try {
-        const keyPath = path.join(process.cwd(), '.localhero_key');
-        const fileContent = await fs.readFile(keyPath, 'utf8');
-        const keyData = JSON.parse(fileContent);
-        if (keyData?.api_key) {
-            return keyData.api_key;
-        }
-    } catch (error) {
-        // Silently fail and continue to config check
-    }
-
-    const config = await getConfig();
+    const config = await configService.getAuthConfig();
     return config?.api_key;
 }
 
