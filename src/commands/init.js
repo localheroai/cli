@@ -6,6 +6,7 @@ import { defaultProjectService } from '../utils/project-service.js';
 import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
+import { importService } from '../utils/import-service.js';
 
 const PROJECT_TYPES = {
     rails: {
@@ -147,7 +148,8 @@ export async function init(deps = {}) {
         promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
         projectService = defaultProjectService,
         configUtils = configService,
-        authUtils = { checkAuth }
+        authUtils = { checkAuth },
+        importUtils = importService
     } = deps;
 
     const existingConfig = await configUtils.getProjectConfig(basePath);
@@ -192,5 +194,71 @@ export async function init(deps = {}) {
     console.log(chalk.green('\n✓ Created localhero.json'));
     console.log('Configuration:');
     console.log(JSON.stringify(config, null, 2));
-    console.log('\nStart translating your project by running: npx localhero translate');
-} 
+    console.log(' ');
+
+    const shouldImport = await promptService.confirm({
+        message: 'Would you like to import existing translation files?',
+        default: true
+    });
+
+    if (shouldImport) {
+        console.log('\nSearching for translation files...');
+        console.log(`Looking in: ${config.translationFiles.paths.join(', ')}`);
+        if (config.translationFiles.ignore.length) {
+            console.log(`Ignoring: ${config.translationFiles.ignore.join(', ')}`);
+        }
+
+        const importResult = await importUtils.importTranslations(config, basePath);
+
+        if (importResult.status === 'no_files') {
+            console.log(chalk.yellow('\nNo translation files found.'));
+            console.log('Make sure your translation files:');
+            console.log('1. Are in the specified path(s)');
+            console.log('2. Have the correct file extensions (.json, .yml, or .yaml)');
+            console.log('3. Follow the naming convention: [language-code].[extension]');
+            console.log(`4. Include source language files (${config.sourceLocale}.[extension])`);
+        } else if (importResult.status === 'failed') {
+            console.log(chalk.red('\n✗ Failed to import translations'));
+            if (importResult.error) {
+                console.log(`Error: ${importResult.error}`);
+            }
+        } else if (importResult.status === 'completed') {
+            console.log(chalk.green('\n✓ Successfully imported translations'));
+
+            if (importResult.files) {
+                console.log('\nImported files:');
+                [...importResult.files.source, ...importResult.files.target]
+                    .sort((a, b) => a.path.localeCompare(b.path))
+                    .forEach(file => {
+                        const isSource = importResult.files.source.includes(file);
+                        console.log(`- ${file.path}${isSource ? ' [source]' : ''}`);
+                    });
+            }
+
+            if (importResult.sourceImport) {
+                console.log(`\nImported ${importResult.sourceImport.statistics.total_keys} source language keys`);
+
+                if (importResult.sourceImport.warnings?.length) {
+                    console.log(chalk.yellow('\nWarnings:'));
+                    importResult.sourceImport.warnings.forEach(warning => {
+                        console.log(`- ${warning.message} (${warning.language})`);
+                    });
+                }
+            }
+
+            console.log('\nTarget Languages:');
+            importResult.statistics.languages.forEach(lang => {
+                console.log(`${lang.code.toUpperCase()}: ${lang.translated}/${importResult.statistics.total_keys} translated`);
+            });
+
+            if (importResult.warnings?.length) {
+                console.log(chalk.yellow('\nWarnings:'));
+                importResult.warnings.forEach(warning => {
+                    console.log(`- ${warning.message} (${warning.language})`);
+                });
+            }
+        }
+    }
+
+    console.log('\n🚀 Done! Start translating with: npx localhero translate');
+}

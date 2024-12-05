@@ -61,10 +61,6 @@ async function retryWithBackoff(operation, attempt = 1) {
 
 function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SIZE) {
     const batches = [];
-    let currentBatch = [];
-    let currentKeyCount = 0;
-
-    // First, group all missing translations by source file
     const sourceFileEntries = new Map();
 
     for (const [locale, localeData] of Object.entries(missingByLocale)) {
@@ -73,7 +69,7 @@ function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SI
 
         if (!sourceFileEntries.has(sourceFile.path)) {
             sourceFileEntries.set(sourceFile.path, {
-                path: sourceFile.path,
+                path: path.relative(process.cwd(), sourceFile.path),
                 keys: {},
                 locales: new Set()
             });
@@ -84,28 +80,16 @@ function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SI
         entry.locales.add(locale);
     }
 
-    // Create batches from the grouped entries
     for (const entry of sourceFileEntries.values()) {
-        const keyCount = Object.keys(entry.keys).length;
-
-        if (currentKeyCount + keyCount > batchSize) {
-            if (currentBatch.length > 0) {
-                batches.push(currentBatch);
-            }
-            currentBatch = [];
-            currentKeyCount = 0;
+        const keys = entry.keys;
+        const keyEntries = Object.entries(keys);
+        for (let i = 0; i < keyEntries.length; i += batchSize) {
+            const batchKeys = Object.fromEntries(keyEntries.slice(i, i + batchSize));
+            batches.push([{
+                path: entry.path,
+                content: Buffer.from(JSON.stringify({ keys: batchKeys })).toString('base64')
+            }]);
         }
-
-        // Create single file entry with all keys for this source file
-        currentBatch.push({
-            path: entry.path,
-            content: Buffer.from(JSON.stringify({ keys: entry.keys })).toString('base64')
-        });
-        currentKeyCount += keyCount;
-    }
-
-    if (currentBatch.length > 0) {
-        batches.push(currentBatch);
     }
 
     return batches;
@@ -125,11 +109,10 @@ export async function translate(options = {}) {
 
         console.log(chalk.blue('ℹ️  Loading configuration from localhero.json'));
 
-        // Find and analyze files
         const { translationFiles } = config;
         const fileLocaleRegex = DEFAULT_LOCALE_REGEX;
-
         let allFiles = [];
+
         for (const translationPath of translationFiles.paths) {
             const filesInPath = await findTranslationFiles(translationPath, fileLocaleRegex);
             allFiles = allFiles.concat(filesInPath);
@@ -151,7 +134,6 @@ export async function translate(options = {}) {
         log(chalk.blue(`✓ Found ${allFiles.length} translation files`));
         log(chalk.blue(`ℹ️  Analyzing target translations...`));
 
-        // Analyze missing translations
         const missingByLocale = {};
         for (const sourceFile of sourceFiles) {
             const sourceContent = JSON.parse(Buffer.from(sourceFile.content, 'base64').toString());
@@ -186,11 +168,10 @@ export async function translate(options = {}) {
             return;
         }
 
-        // Process in batches
         const batches = batchKeysWithMissing(sourceFiles, missingByLocale);
         let totalKeysProcessed = 0;
         let totalErrors = 0;
-        const processedKeys = new Set(); // Track unique keys per language
+        const processedKeys = new Set();
         let hasShownUpdateMessage = false;
 
         for (const [batchIndex, batch] of batches.entries()) {
@@ -204,7 +185,6 @@ export async function translate(options = {}) {
                         projectId: config.projectId
                     })
                 );
-                // Monitor progress for all jobs
                 const jobStatuses = new Map();
                 let allCompleted = false;
 
@@ -230,7 +210,6 @@ export async function translate(options = {}) {
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
 
-                // After all jobs are completed, process translations
                 for (const job of jobs) {
                     const status = jobStatuses.get(job.id);
                     if (status.status === 'completed' && status.translations) {
@@ -243,7 +222,6 @@ export async function translate(options = {}) {
                         const targetLocale = status.language.code;
                         const uniqueKey = `${targetLocale}:${Object.keys(translations).sort().join(',')}`;
 
-                        // Skip if we've already processed these exact keys for this language
                         if (processedKeys.has(uniqueKey)) {
                             continue;
                         }

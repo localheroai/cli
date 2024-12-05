@@ -26,7 +26,7 @@ export async function login(deps = defaultDependencies) {
     }
 
     const apiKey = process.env.LOCALHERO_API_KEY || (
-        console.log(chalk.blue('\nℹ️  Please enter your API key from https://localhero.com/api-keys\n')),
+        console.log(chalk.blue('\nℹ️  Please enter your API key from https://localhero.ai/api-keys\n')),
         await promptService.getApiKey()
     );
 

@@ -41,6 +41,11 @@ export function createPromptService(deps = {}) {
         async input(options) {
             if (!inquirer) return '';
             return inquirer.input(options);
+        },
+
+        async confirm(options) {
+            if (!inquirer) return false;
+            return inquirer.confirm(options);
         }
     };
 } 

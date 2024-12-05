@@ -27,7 +27,7 @@ export async function apiRequest(endpoint, options = {}) {
     try {
         data = await response.json();
     } catch (error) {
-        throw new Error('Failed to parse API response');
+        throw new Error('Failed to parse API response', { cause: error });
     }
 
     if (!response.ok) {
