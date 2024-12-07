@@ -115,7 +115,6 @@ export async function updateTranslationFile(filePath, translations, languageCode
         }
 
         let existingContent = '';
-
         try {
             existingContent = await fs.readFile(filePath, 'utf8');
             existingStyles = getExistingQuoteStyles(existingContent);
@@ -123,6 +122,8 @@ export async function updateTranslationFile(filePath, translations, languageCode
             console.warn(`Creating new file: ${filePath}`);
             existingStyles = new Map();
         }
+
+        const hasTrailingSpace = /\s$/.test(existingContent);
 
         // Parse existing content
         const yamlContent = yaml.parse(existingContent) || {};
@@ -144,8 +145,9 @@ export async function updateTranslationFile(filePath, translations, languageCode
         }
 
         const content = stringifyYaml(yamlContent);
+        const finalContent = content.join('\n') + (hasTrailingSpace ? ' ' : '');
 
-        await fs.writeFile(filePath, content.join('\n'));
+        await fs.writeFile(filePath, finalContent);
         return Object.keys(translations);
 
     } catch (error) {
