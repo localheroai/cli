@@ -7,6 +7,7 @@ import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService } from '../utils/import-service.js';
+import { createGitHubActionFile } from '../utils/github.js';
 
 const PROJECT_TYPES = {
     rails: {
@@ -196,8 +197,28 @@ export async function init(deps = {}) {
     console.log(JSON.stringify(config, null, 2));
     console.log(' ');
 
+    const shouldSetupGitHubAction = await promptService.confirm({
+        message: 'Would you like to set up GitHub Actions for automatic translations?',
+        default: true
+    });
+
+    if (shouldSetupGitHubAction) {
+        try {
+            const workflowFile = await createGitHubActionFile(basePath, config.translationFiles.paths);
+            console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
+            console.log('\nNext steps:');
+            console.log('1. Add your API key to your repository\'s secrets:');
+            console.log('   - Go to Settings > Secrets > Actions > New repository secret');
+            console.log('   - Name: LOCALHERO_API_KEY');
+            console.log('   - Value: [Your API Key] (find this at https://localhero.ai/api-keys or in your local .localhero_key file)');
+            console.log('\n2. Commit and push the workflow file to enable automatic translations\n');
+        } catch (error) {
+            console.log(chalk.yellow('\nFailed to create GitHub Action workflow:'), error.message);
+        }
+    }
+
     const shouldImport = await promptService.confirm({
-        message: 'Would you like to import existing translation files?',
+        message: 'Would you like to import existing translation files? (recommended)',
         default: true
     });
 

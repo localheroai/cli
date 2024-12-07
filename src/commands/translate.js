@@ -5,6 +5,7 @@ import { createTranslationJob, checkJobStatus } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater.js';
 import path from 'path';
 import { checkAuth } from '../utils/auth.js';
+import { autoCommitChanges } from '../utils/github.js';
 
 const DEFAULT_LOCALE_REGEX = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$';
 const MAX_RETRY_ATTEMPTS = 3;
@@ -96,7 +97,7 @@ function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SI
 }
 
 export async function translate(options = {}) {
-    const { verbose = false } = options;
+    const { verbose = false, commit = false } = options;
     const log = verbose ? console.log : () => { };
 
     try {
@@ -168,6 +169,7 @@ export async function translate(options = {}) {
             return;
         }
 
+        const updatedFiles = new Set();
         const batches = batchKeysWithMissing(sourceFiles, missingByLocale);
         let totalKeysProcessed = 0;
         let totalErrors = 0;
@@ -237,6 +239,7 @@ export async function translate(options = {}) {
                                 targetLocale
                             );
 
+                            updatedFiles.add(targetFile);
                             totalKeysProcessed += updatedKeys.length;
 
                             if (verbose) {
@@ -265,6 +268,13 @@ export async function translate(options = {}) {
         }
 
         console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${config.outputLocales.length} languages`);
+
+        if (commit || process.env.GITHUB_ACTIONS === 'true') {
+            const translationPaths = Array.from(updatedFiles).join(' ');
+            if (translationPaths) {
+                autoCommitChanges(translationPaths);
+            }
+        }
     } catch (error) {
         console.error(chalk.red(`❌ ${error.message}`));
         process.exit(1);
