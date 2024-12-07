@@ -1,6 +1,6 @@
+import chalk from 'chalk';
 import { promises as fs } from 'fs';
 import path from 'path';
-import chalk from 'chalk';
 import { createPromptService } from '../utils/prompt-service.js';
 import { updateGitignore } from '../utils/git.js';
 import { defaultDependencies } from '../utils/defaults.js';
@@ -37,6 +37,11 @@ export async function login(deps = defaultDependencies) {
     const result = await verifyApiKey(apiKey);
 
     if (result.error) {
+        if (result.error.code === 'invalid_api_key') {
+            console.log(chalk.red('\n❌ ' + result.error.message));
+            console.log(chalk.blue('\nℹ️  Get a new API key at https://localhero.ai/api-keys'));
+            process.exit(1);
+        }
         throw new Error(result.error.message);
     }
 

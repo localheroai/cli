@@ -31,10 +31,18 @@ export async function apiRequest(endpoint, options = {}) {
     }
 
     if (!response.ok) {
+        if (response.status === 401 && data?.error?.code === 'invalid_api_key') {
+            const error = new Error('Your API key is invalid or has been revoked. Please run `npx localhero login` to update your API key.');
+            error.code = 'invalid_api_key';
+            error.data = data;
+            throw error;
+        }
         const errorMessage = Array.isArray(data?.errors)
             ? data.errors.map(err => typeof err === 'string' ? err : err.message).join(', ')
-            : 'API request failed';
-        throw new Error(errorMessage);
+            : data?.error?.message || 'API request failed';
+        const error = new Error(errorMessage);
+        error.data = data;
+        throw error;
     }
 
     return data;

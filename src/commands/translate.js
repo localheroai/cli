@@ -46,6 +46,11 @@ async function retryWithBackoff(operation, attempt = 1) {
     try {
         return await operation();
     } catch (error) {
+        if (error.code === 'invalid_api_key') {
+            console.error(chalk.red('\n❌ ' + error.message));
+            process.exit(1);
+        }
+
         if (attempt >= MAX_RETRY_ATTEMPTS) throw error;
 
         const backoffTime = Math.min(1000 * Math.pow(2, attempt), 30000);
