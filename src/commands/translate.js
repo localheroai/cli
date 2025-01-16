@@ -34,11 +34,19 @@ function validateConfig(config) {
 
 function findMissingTranslations(sourceKeys, targetKeys) {
     const missing = {};
-    for (const [key, value] of Object.entries(sourceKeys)) {
+
+    for (const [key, translationEntry] of Object.entries(sourceKeys)) {
         if (!targetKeys[key]) {
-            missing[key] = value;
+            // Ignore keys that are marked as WIP
+            if (typeof translationEntry.value === 'string' &&
+                (translationEntry.value.startsWith('[WIP]') || translationEntry.value.endsWith('[WIP]'))) {
+                console.info(chalk.gray("Ignoring key:", key));
+            } else {
+                missing[key] = translationEntry.value;
+            }
         }
     }
+
     return missing;
 }
 
@@ -91,10 +99,13 @@ function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = BATCH_SI
         const keyEntries = Object.entries(keys);
         for (let i = 0; i < keyEntries.length; i += batchSize) {
             const batchKeys = Object.fromEntries(keyEntries.slice(i, i + batchSize));
-            batches.push([{
-                path: entry.path,
-                content: Buffer.from(JSON.stringify({ keys: batchKeys })).toString('base64')
-            }]);
+            batches.push({
+                files: [{
+                    path: entry.path,
+                    content: Buffer.from(JSON.stringify({ keys: batchKeys })).toString('base64')
+                }],
+                locales: Array.from(entry.locales)
+            });
         }
     }
 
@@ -187,8 +198,8 @@ export async function translate(options = {}) {
             try {
                 const { jobs } = await retryWithBackoff(() =>
                     createTranslationJob({
-                        sourceFiles: batch,
-                        targetLocales: config.outputLocales,
+                        sourceFiles: batch.files,
+                        targetLocales: batch.locales,
                         projectId: config.projectId
                     })
                 );
@@ -272,7 +283,8 @@ export async function translate(options = {}) {
             process.exit(1);
         }
 
-        console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${config.outputLocales.length} languages`);
+        const updatedLocales = new Set(Object.keys(missingByLocale));
+        console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
 
         if (commit || process.env.GITHUB_ACTIONS === 'true') {
             const translationPaths = Array.from(updatedFiles).join(' ');
