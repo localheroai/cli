@@ -286,6 +286,9 @@ export async function translate(options = {}) {
         const updatedLocales = new Set(Object.keys(missingByLocale));
         console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
 
+        await configService.updateLastSyncedAt();
+        updatedFiles.add(configService.configFilePath());
+
         if (commit || process.env.GITHUB_ACTIONS === 'true') {
             const translationPaths = Array.from(updatedFiles).join(' ');
             if (translationPaths) {

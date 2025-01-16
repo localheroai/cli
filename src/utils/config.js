@@ -3,7 +3,6 @@ import path from 'path';
 
 const AUTH_CONFIG_FILE = '.localhero_key';
 const PROJECT_CONFIG_FILE = 'localhero.json';
-
 const DEFAULT_PROJECT_CONFIG = {
     schemaVersion: '1.0',
     projectId: '',
@@ -12,10 +11,15 @@ const DEFAULT_PROJECT_CONFIG = {
     translationFiles: {
         paths: [],
         ignore: []
-    }
+    },
+    lastSyncedAt: null
 };
 
 export const configService = {
+    configFilePath() {
+        return path.join(process.cwd(), PROJECT_CONFIG_FILE);
+    },
+
     async getAuthConfig(basePath = process.cwd()) {
         try {
             const configPath = path.join(basePath, AUTH_CONFIG_FILE);
@@ -35,7 +39,7 @@ export const configService = {
 
     async getProjectConfig(basePath = process.cwd()) {
         try {
-            const configPath = path.join(basePath, PROJECT_CONFIG_FILE);
+            const configPath = this.configFilePath();
             const content = await fs.readFile(configPath, 'utf8');
             const config = JSON.parse(content);
 
@@ -53,7 +57,7 @@ export const configService = {
     },
 
     async saveProjectConfig(config, basePath = process.cwd()) {
-        const configPath = path.join(basePath, PROJECT_CONFIG_FILE);
+        const configPath = this.configFilePath();
         const configWithSchema = {
             ...DEFAULT_PROJECT_CONFIG,
             ...config,
@@ -88,9 +92,16 @@ export const configService = {
     async getValidProjectConfig(basePath = process.cwd()) {
         const config = await this.getProjectConfig(basePath);
         if (!config) {
-            throw new Error('No localhero.json found. Run `npx localhero init` first');
+            throw new Error('No project config found. Run `npx localhero init` first');
         }
         await this.validateProjectConfig(config);
+        return config;
+    },
+
+    async updateLastSyncedAt(basePath = process.cwd()) {
+        const config = await this.getValidProjectConfig(basePath);
+        config.lastSyncedAt = new Date().toISOString();
+        await this.saveProjectConfig(config, basePath);
         return config;
     }
 }; 
