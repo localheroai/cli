@@ -1,5 +1,6 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest } from './client.js';
+
 export async function createTranslationJob({ sourceFiles, targetLocales, projectId }) {
     const apiKey = await getApiKey();
     const response = await apiRequest(`/api/v1/projects/${projectId}/translation_jobs`, {
@@ -34,4 +35,19 @@ export async function checkJobStatus(jobId, includeTranslations = false) {
 export async function getTranslations(jobId) {
     const apiKey = await getApiKey();
     return apiRequest(`/api/v1/translation_jobs/${jobId}/translations`, { apiKey });
+}
+
+export async function getUpdates(projectId, { since, page = 1 }) {
+    const apiKey = await getApiKey();
+
+    if (!since) {
+        throw new Error('Missing required parameter: since (ISO 8601 timestamp)');
+    }
+
+    const queryParams = new URLSearchParams({
+        since: since,
+        page: page.toString()
+    });
+
+    return apiRequest(`/api/v1/projects/${projectId}/updates?${queryParams}`, { apiKey });
 } 

@@ -3,6 +3,7 @@ import { configService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater.js';
+import { syncService } from '../utils/sync-service.js';
 import path from 'path';
 import { checkAuth } from '../utils/auth.js';
 import { autoCommitChanges } from '../utils/github.js';
@@ -122,6 +123,12 @@ export async function translate(options = {}) {
 
         if (!isAuthenticated) {
             throw new Error('No API key found. Run `npx localhero login` or set LOCALHERO_API_KEY');
+        }
+
+        // First, check and apply any updates we don't have locally
+        const { hasUpdates, updates } = await syncService.checkForUpdates({ verbose });
+        if (hasUpdates) {
+            await syncService.applyUpdates(updates, { verbose });
         }
 
         console.log(chalk.blue('ℹ️  Loading configuration from localhero.json'));

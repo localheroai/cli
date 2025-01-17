@@ -7,6 +7,7 @@ import { login } from './commands/login.js';
 import { init } from './commands/init.js';
 import { defaultDependencies } from './utils/defaults.js';
 import { translate } from './commands/translate.js';
+import { sync } from './commands/sync.js';
 
 const program = new Command();
 
@@ -67,5 +68,11 @@ program
     .option('-v, --verbose', 'Show detailed progress information')
     .option('-c, --commit', 'Automatically commit changes (useful for CI/CD)')
     .action(wrapCommandAction((options) => translate(options)));
+
+program
+    .command('sync')
+    .description('Sync updates from LocalHero.ai to your local files')
+    .option('-v, --verbose', 'Show detailed progress information')
+    .action(wrapCommandAction((options) => sync(options)));
 
 program.parse();
