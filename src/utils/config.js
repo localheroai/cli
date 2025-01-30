@@ -71,7 +71,7 @@ export const configService = {
         const missing = required.filter(key => !config[key]);
 
         if (missing.length) {
-            throw new Error(`Missing required config: ${missing.join(', ')}. Run 'npx localhero init' to set up your project.`);
+            throw new Error(`Missing required config: ${missing.join(', ')}. Run 'npx @localheroai/cli init' to set up your project.`);
         }
 
         if (!Array.isArray(config.outputLocales) || config.outputLocales.length === 0) {
@@ -92,7 +92,7 @@ export const configService = {
     async getValidProjectConfig(basePath = process.cwd()) {
         const config = await this.getProjectConfig(basePath);
         if (!config) {
-            throw new Error('No project config found. Run `npx localhero init` first');
+            throw new Error('No project config found. Run `npx @localheroai/cli init` first');
         }
         await this.validateProjectConfig(config);
         return config;

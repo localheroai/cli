@@ -17,7 +17,7 @@ function validateConfig(config) {
     const missing = required.filter(key => !config[key]);
 
     if (missing.length) {
-        throw new Error(`Missing required config: ${missing.join(', ')}. Run 'npx localhero init' to set up your project.`);
+        throw new Error(`Missing required config: ${missing.join(', ')}. Run 'npx @localheroai/cli init' to set up your project.`);
     }
 
     if (!Array.isArray(config.outputLocales) || config.outputLocales.length === 0) {
@@ -122,7 +122,7 @@ export async function translate(options = {}) {
         const isAuthenticated = await checkAuth();
 
         if (!isAuthenticated) {
-            throw new Error('No API key found. Run `npx localhero login` or set LOCALHERO_API_KEY');
+            throw new Error('No API key found. Run `npx @localheroai/cli login` or set LOCALHERO_API_KEY');
         }
 
         // First, check and apply any updates we don't have locally
@@ -211,27 +211,33 @@ export async function translate(options = {}) {
                     })
                 );
                 const jobStatuses = new Map();
-                let allCompleted = false;
 
-                while (!allCompleted) {
-                    allCompleted = true;
+                while (true) {
                     let totalProgress = 0;
+                    const statuses = await Promise.all(jobs.map(job =>
+                        retryWithBackoff(() => checkJobStatus(job.id, true))
+                    ));
 
-                    for (const job of jobs) {
-                        const status = await retryWithBackoff(() => checkJobStatus(job.id, true));
-                        jobStatuses.set(job.id, status);
-
-                        if (status.status === 'processing') {
-                            allCompleted = false;
-                        }
-                        totalProgress += status.progress.percentage;
+                    // Check for failed jobs first
+                    const failedJobs = statuses.filter(status => status.status === 'failed');
+                    if (failedJobs.length > 0) {
+                        const errors = failedJobs.map(status =>
+                            `Job ${status.id}: ${status.error || 'Unknown error'}`
+                        ).join('\n');
+                        throw new Error(`Translation job(s) failed:\n${errors}`);
                     }
 
+                    statuses.forEach(status => {
+                        totalProgress += status.progress.percentage;
+                        jobStatuses.set(status.id, status);
+                    });
+
+                    const allJobsCompleted = statuses.every(status => status.status === 'completed');
                     const averageProgress = Math.round(totalProgress / jobs.length);
                     const bar = '='.repeat(averageProgress / 2) + ' '.repeat(50 - averageProgress / 2);
-
                     process.stdout.write(`\r⧗ Translating... [${bar}] ${averageProgress}%`);
 
+                    if (allJobsCompleted) break;
                     await new Promise(resolve => setTimeout(resolve, 2000));
                 }
 

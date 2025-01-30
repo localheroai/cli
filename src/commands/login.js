@@ -66,9 +66,9 @@ export async function login(deps = defaultDependencies) {
     if (!projectConfig) {
         console.log(chalk.yellow('\n⚠️  Almost there! You need to set up your project configuration.'));
         console.log(chalk.blue('Run this next:'));
-        console.log(chalk.white('\n  npx localhero init\n'));
+        console.log(chalk.white('\n  npx @localheroai/cli init\n'));
     } else {
         console.log('\nYou\'re ready to start translating!');
-        console.log('Try running: npx localhero translate');
+        console.log('Try running: npx @localheroai/cli translate');
     }
 } 

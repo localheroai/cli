@@ -169,7 +169,7 @@ export async function init(deps = {}) {
         if (shouldLogin) {
             await login();
         } else {
-            console.log('\nYou can run login later with: npx localhero login');
+            console.log('\nYou can run login later with: npx @localheroai/cli login');
             return;
         }
     }
@@ -281,5 +281,5 @@ export async function init(deps = {}) {
         }
     }
 
-    console.log('\n🚀 Done! Start translating with: npx localhero translate');
+    console.log('\n🚀 Done! Start translating with: npx @localheroai/cli translate');
 }
