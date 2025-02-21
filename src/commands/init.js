@@ -2,7 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import chalk from 'chalk';
 import { createPromptService } from '../utils/prompt-service.js';
-import { defaultProjectService } from '../utils/project-service.js';
+import { createProject, listProjects } from '../api/projects.js';
 import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
@@ -50,15 +50,6 @@ async function detectProjectType() {
     };
 }
 
-async function checkExistingConfig() {
-    try {
-        await fs.access('localhero.json');
-        return true;
-    } catch {
-        return false;
-    }
-}
-
 async function selectProject(projectService, promptService) {
     const projects = await projectService.listProjects();
 
@@ -74,7 +65,6 @@ async function selectProject(projectService, promptService) {
             value: p.id
         }))
     ];
-
     const projectChoice = await promptService.select({
         message: 'Would you like to use an existing project or create a new one?',
         choices
@@ -86,7 +76,7 @@ async function selectProject(projectService, promptService) {
     };
 }
 
-async function promptForConfig(projectDefaults, projectService, promptService) {
+async function promptForConfig(projectDefaults, projectService, promptService, console = global.console) {
     const { choice: projectChoice, project: existingProject } = await selectProject(projectService, promptService);
     let projectId = projectChoice;
     let newProject = false;
@@ -99,20 +89,25 @@ async function promptForConfig(projectDefaults, projectService, promptService) {
                 default: path.basename(process.cwd()),
             }),
             sourceLocale: await promptService.input({
-                message: 'Source language code:',
-                default: 'en'
+                message: 'Source language - the language that we will translate from (e.g., "en" for en.yml, "en-US" for en-US.json):',
+                default: 'en',
             }),
             outputLocales: (await promptService.input({
-                message: 'Target languages (comma-separated):',
+                message: `Target languages (comma-separated):\n${chalk.gray('Must match your file names exactly. Examples: ')}${chalk.gray('en.yml → use "en", fr-CA.json → use "fr-CA"')}`,
             })).split(',').map(lang => lang.trim()).filter(Boolean)
         };
 
-        newProject = await projectService.createProject({
-            name: config.projectName,
-            sourceLocale: config.sourceLocale,
-            targetLocales: config.outputLocales
-        });
-        projectId = newProject.id;
+        try {
+            newProject = await projectService.createProject({
+                name: config.projectName,
+                sourceLocale: config.sourceLocale,
+                targetLocales: config.outputLocales
+            });
+            projectId = newProject.id;
+        } catch (error) {
+            console.log(chalk.red(`\n✗ Failed to create project: ${error.message}`));
+            return null;
+        }
     } else {
         config = {
             projectName: existingProject.name,
@@ -125,20 +120,16 @@ async function promptForConfig(projectDefaults, projectService, promptService) {
         message: 'Translation files path:',
         default: projectDefaults.defaults.translationPath,
     });
-
     const ignorePaths = await promptService.input({
         message: 'Paths to ignore (comma-separated, leave empty for none):',
     });
-
-    if (newProject) {
-        console.log(chalk.green(`\n✓ Project created, view it at: ${newProject.url}`));
-    }
 
     return {
         ...config,
         projectId,
         translationPath,
-        ignorePaths: ignorePaths.split(',').map(p => p.trim()).filter(Boolean)
+        ignorePaths: ignorePaths.split(',').map(p => p.trim()).filter(Boolean),
+        newProject
     };
 }
 
@@ -147,38 +138,42 @@ export async function init(deps = {}) {
         console = global.console,
         basePath = process.cwd(),
         promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
-        projectService = defaultProjectService,
         configUtils = configService,
         authUtils = { checkAuth },
-        importUtils = importService
+        importUtils = importService,
+        projectApi = { createProject, listProjects },
+        login: loginFn = login
     } = deps;
 
     const existingConfig = await configUtils.getProjectConfig(basePath);
     if (existingConfig) {
-        console.log(chalk.yellow('localhero.json already exists. Skipping initialization.'));
+        console.log(chalk.yellow('Existing configuration found in localhero.json. Skipping initialization.'));
         return;
     }
 
     const isAuthenticated = await authUtils.checkAuth();
     if (!isAuthenticated) {
-        console.log(chalk.yellow('\nNo API key found. You need to authenticate first.'));
-        console.log('Please run the login command to continue.\n');
+        console.log('LocalHero.ai - Automate your i18n translations\n');
+        console.log(chalk.yellow('No API key found. Let\'s get you authenticated.'));
 
-        const { shouldLogin } = await promptService.confirmLogin();
-
-        if (shouldLogin) {
-            await login();
-        } else {
-            console.log('\nYou can run login later with: npx @localheroai/cli login');
-            return;
-        }
+        await loginFn({
+            console,
+            basePath,
+            promptService,
+            configUtils,
+            verifyApiKey: authUtils.verifyApiKey
+        });
     }
 
     console.log(chalk.blue('\nWelcome to LocalHero.ai!'));
     console.log('Let\'s set up configuration for your project.\n');
 
     const projectDefaults = await detectProjectType();
-    const answers = await promptForConfig(projectDefaults, projectService, promptService);
+    const answers = await promptForConfig(projectDefaults, projectApi, promptService, console);
+
+    if (!answers) {
+        return;
+    }
 
     const config = {
         schemaVersion: '1.0',
@@ -193,6 +188,11 @@ export async function init(deps = {}) {
 
     await configUtils.saveProjectConfig(config, basePath);
     console.log(chalk.green('\n✓ Created localhero.json'));
+
+    if (answers.newProject) {
+        console.log(chalk.green(`✓ Project created, view it at: https://localhero.ai/projects/${answers.projectId}`));
+    }
+
     console.log('Configuration:');
     console.log(JSON.stringify(config, null, 2));
     console.log(' ');
@@ -225,9 +225,6 @@ export async function init(deps = {}) {
     if (shouldImport) {
         console.log('\nSearching for translation files...');
         console.log(`Looking in: ${config.translationFiles.paths.join(', ')}`);
-        if (config.translationFiles.ignore.length) {
-            console.log(`Ignoring: ${config.translationFiles.ignore.join(', ')}`);
-        }
 
         const importResult = await importUtils.importTranslations(config, basePath);
 
@@ -241,8 +238,9 @@ export async function init(deps = {}) {
         } else if (importResult.status === 'failed') {
             console.log(chalk.red('\n✗ Failed to import translations'));
             if (importResult.error) {
-                console.log(`Error: ${importResult.error}`);
+                console.log(chalk.red(`Error: ${importResult.error}`));
             }
+            return;
         } else if (importResult.status === 'completed') {
             console.log(chalk.green('\n✓ Successfully imported translations'));
 

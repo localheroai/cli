@@ -45,7 +45,7 @@ export async function getUpdates(projectId, { since, page = 1 }) {
     }
 
     const queryParams = new URLSearchParams({
-        since: since,
+        since,
         page: page.toString()
     });
 

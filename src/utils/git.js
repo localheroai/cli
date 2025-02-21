@@ -3,14 +3,32 @@ import path from 'path';
 
 export async function updateGitignore(basePath) {
     const gitignorePath = path.join(basePath, '.gitignore');
+    let content = '';
+
     try {
-        const content = await fs.readFile(gitignorePath, 'utf8').catch(() => '');
-        if (!content.includes('.localhero_key')) {
-            await fs.appendFile(gitignorePath, '\n.localhero_key\n');
-            return true;
-        }
-        return false;
+        content = await fs.readFile(gitignorePath, 'utf8');
     } catch (error) {
+        if (error.code !== 'ENOENT') {
+            return false;
+        }
+    }
+
+    if (content.includes('.localhero_key')) {
+        return false;
+    }
+
+    try {
+        await fs.appendFile(gitignorePath, '\n.localhero_key\n');
+        return true;
+    } catch (error) {
+        if (error.code === 'ENOENT') {
+            try {
+                await fs.writeFile(gitignorePath, '.localhero_key\n');
+                return true;
+            } catch {
+                return false;
+            }
+        }
         return false;
     }
 } 

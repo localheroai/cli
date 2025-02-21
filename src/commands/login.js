@@ -1,15 +1,12 @@
 import chalk from 'chalk';
-import { promises as fs } from 'fs';
-import path from 'path';
 import { createPromptService } from '../utils/prompt-service.js';
 import { updateGitignore } from '../utils/git.js';
-import { defaultDependencies } from '../utils/defaults.js';
 import { verifyApiKey as defaultVerifyApiKey } from '../api/auth.js';
 import { configService } from '../utils/config.js';
 
 const API_KEY_PATTERN = /^tk_[a-zA-Z0-9]{48}$/;
 
-export async function login(deps = defaultDependencies) {
+export async function login(deps = {}) {
     const {
         console = global.console,
         basePath = process.cwd(),
@@ -26,9 +23,15 @@ export async function login(deps = defaultDependencies) {
     }
 
     const apiKey = process.env.LOCALHERO_API_KEY || (
-        console.log(chalk.blue('\nℹ️  Please enter your API key from https://localhero.ai/api-keys\n')),
+        console.log('\n→ Get your API key from: https://localhero.ai/api-keys'),
+        console.log('→ New to LocalHero? Sign up at: https://localhero.ai/signup'),
+        console.log(chalk.gray('The API key will be saved to .localhero_key, and automatically added to your .gitignore file.\n')),
         await promptService.getApiKey()
     );
+
+    if (!apiKey) {
+        throw new Error('User cancelled');
+    }
 
     if (!API_KEY_PATTERN.test(apiKey)) {
         throw new Error('Invalid API key format');

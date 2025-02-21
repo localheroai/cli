@@ -2,7 +2,7 @@ import { configService } from './config.js';
 
 export async function getApiKey() {
     const envKey = process.env.LOCALHERO_API_KEY;
-    if (envKey) {
+    if (typeof envKey === 'string' && envKey.trim() !== '') {
         return envKey;
     }
 
@@ -17,7 +17,7 @@ export async function checkAuth() {
             /^tk_[a-f0-9]+$/.test(apiKey);
 
         return isValidFormat;
-    } catch (error) {
+    } catch {
         return false;
     }
 } 

@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import { glob } from 'glob';
 import { readFile } from 'fs/promises';
 import path from 'path';
@@ -14,43 +15,22 @@ function parseFile(content, format) {
     }
 }
 
-function extractKeysWithContext(obj, parentKeys = [], result = {}) {
-    for (const [key, value] of Object.entries(obj)) {
-        const currentPath = [...parentKeys, key];
-        const fullKey = currentPath.join('.');
-
-        if (typeof value === 'object' && value !== null) {
-            extractKeysWithContext(value, currentPath, result);
-        } else {
-            const siblings = {};
-            const parentObj = parentKeys.length ?
-                parentKeys.reduce((acc, key) => acc[key], obj) :
-                obj;
-
-            Object.entries(parentObj)
-                .filter(([k, v]) => k !== key && typeof v !== 'object')
-                .forEach(([k, v]) => {
-                    siblings[`${parentKeys.join('.')}.${k}`] = v;
-                });
-
-            result[fullKey] = {
-                value: value,
-                context: {
-                    parent_keys: parentKeys,
-                    sibling_keys: siblings
-                }
-            };
-        }
-    }
-    return result;
-}
-
 function extractLocaleFromPath(filePath, localeRegex) {
-    const match = path.basename(filePath).match(new RegExp(localeRegex));
+    const filename = path.basename(filePath);
+    const match = filename.match(new RegExp(localeRegex));
+
     if (!match || !match[1]) {
         throw new Error(`Could not extract locale from filename: ${filePath}`);
     }
-    return match[1].toLowerCase();
+
+    const locale = match[1].toLowerCase();
+
+    // Basic validation of locale format (2 letter code)
+    if (!/^[a-z]{2}$/.test(locale)) {
+        throw new Error(`Invalid locale format in filename: ${filePath}. Expected 2-letter language code.`);
+    }
+
+    return locale;
 }
 
 function flattenTranslations(obj, parentKey = '') {
@@ -70,36 +50,32 @@ function flattenTranslations(obj, parentKey = '') {
 }
 
 export async function findTranslationFiles(translationPath, localeRegex) {
+    const safeRegex = localeRegex.startsWith('^') ? localeRegex : `^${localeRegex}`;
     const pattern = path.join(translationPath, '**/*.{yml,yaml,json}');
     const files = await glob(pattern, { absolute: true });
 
     return Promise.all(files.map(async (filePath) => {
         try {
-            const locale = extractLocaleFromPath(filePath, localeRegex);
+            const locale = extractLocaleFromPath(filePath, safeRegex);
             const content = await readFile(filePath, 'utf8');
             const format = path.extname(filePath).slice(1);
             const parsedContent = parseFile(content, format);
 
-            // Extract translations, handling both nested and flat structures
             let translations;
             if (parsedContent[locale]) {
-                // Nested under locale key (common in Rails/YAML)
                 translations = flattenTranslations(parsedContent[locale]);
             } else {
-                // Flat structure (common in JSON)
                 translations = flattenTranslations(parsedContent);
             }
 
-            // Extract keys with context
             const keys = {};
             for (const [key, value] of Object.entries(translations)) {
                 const parts = key.split('.');
                 const parentKeys = parts.slice(0, -1);
-
-                // Get sibling translations
                 const siblings = {};
+
                 Object.entries(translations)
-                    .filter(([k, v]) => {
+                    .filter(([k, _v]) => {
                         const kParts = k.split('.');
                         return k !== key &&
                             kParts.length === parts.length &&

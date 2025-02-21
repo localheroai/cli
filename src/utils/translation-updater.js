@@ -4,13 +4,9 @@ import yaml from 'yaml';
 
 function getExistingQuoteStyles(content) {
     const styles = new Map();
-
-    // Pre-split lines and get non-empty, non-comment lines
     const lines = content.match(/[^\n]+/g) || [];
-    let currentPath = new Array(10); // Pre-allocate array with reasonable size
+    const currentPath = new Array(10);
     let pathLength = 0;
-
-    // Regex patterns - compile once
     const indentRegex = /^\s*/;
     const keyValueRegex = /^([^:]+):\s*(.*)$/;
     const doubleQuoteRegex = /^"(.*)"$/;
@@ -20,27 +16,21 @@ function getExistingQuoteStyles(content) {
         const line = lines[i];
         if (!line || line.trim().startsWith('#')) continue;
 
-        // Calculate indent level
         const indent = line.match(indentRegex)[0].length;
         const level = indent >> 1; // Divide by 2 using bit shift
 
-        // Adjust current path
         pathLength = level;
 
-        // Extract key and value
         const match = line.trim().match(keyValueRegex);
+
         if (match) {
             const key = match[1].trim();
             const value = match[2];
 
             currentPath[level] = key;
 
-            // Only process if there's a value
             if (value) {
-                // Build path string only when needed
                 const fullPath = currentPath.slice(0, pathLength + 1).join('.');
-
-                // Check quote style
                 const valueTrimed = value.trim();
                 const hasDoubleQuotes = doubleQuoteRegex.test(valueTrimed);
                 const hasSingleQuotes = !hasDoubleQuotes && singleQuoteRegex.test(valueTrimed);
@@ -59,8 +49,7 @@ function getExistingQuoteStyles(content) {
     return styles;
 }
 
-// Cache for repeated string operations
-const SPECIAL_CHARS_REGEX = /[:@#,\[\]{}?|>&*!\n]/;
+const SPECIAL_CHARS_REGEX = /[:@#,[\]{}?|>&*!\n]/;
 const INTERPOLATION = '%{';
 const INDENT_CACHE = new Map();
 
@@ -73,7 +62,7 @@ function getIndent(level) {
     return indent;
 }
 
-function stringifyYaml(obj, indent = 0, parentPath = '', result = []) {
+function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
     const indentStr = getIndent(indent);
 
     for (const [key, value] of Object.entries(obj)) {
@@ -81,12 +70,12 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = []) {
 
         if (value && typeof value === 'object') {
             result.push(`${indentStr}${key}:`);
-            stringifyYaml(value, indent + 2, currentPath, result);
+            stringifyYaml(value, indent + 2, currentPath, result, styles);
         } else {
             let formattedValue = value;
 
             if (typeof value === 'string') {
-                const existingStyle = existingStyles.get(currentPath);
+                const existingStyle = styles.get(currentPath);
 
                 if (existingStyle?.quoted) {
                     formattedValue = `${existingStyle.quoteType}${value}${existingStyle.quoteType}`;
@@ -104,10 +93,7 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = []) {
     return result;
 }
 
-// Store styles globally to avoid passing as parameter
-let existingStyles;
-
-export async function updateTranslationFile(filePath, translations, languageCode) {
+export async function updateTranslationFile(filePath, translations, languageCode = 'en') {
     try {
         if (path.extname(filePath).slice(1) === 'json') {
             // Handle JSON (existing code)
@@ -115,21 +101,25 @@ export async function updateTranslationFile(filePath, translations, languageCode
         }
 
         let existingContent = '';
+        let styles;
         try {
             existingContent = await fs.readFile(filePath, 'utf8');
-            existingStyles = getExistingQuoteStyles(existingContent);
-        } catch (error) {
+            styles = getExistingQuoteStyles(existingContent);
+        } catch {
             console.warn(`Creating new file: ${filePath}`);
-            existingStyles = new Map();
+            styles = new Map();
         }
 
         const hasTrailingSpace = /\s$/.test(existingContent);
-
-        // Parse existing content
         const yamlContent = yaml.parse(existingContent) || {};
+        const sourceLanguage = Object.keys(yamlContent)[0];
+
+        if (sourceLanguage && sourceLanguage !== languageCode && yamlContent[sourceLanguage]) {
+            return Object.keys(translations);
+        }
+
         yamlContent[languageCode] = yamlContent[languageCode] || {};
 
-        // Update translations efficiently
         for (const [keyPath, newValue] of Object.entries(translations)) {
             const keys = keyPath.split('.');
             let current = yamlContent[languageCode];
@@ -144,8 +134,11 @@ export async function updateTranslationFile(filePath, translations, languageCode
             current[keys[lastIndex]] = newValue;
         }
 
-        const content = stringifyYaml(yamlContent);
-        const finalContent = content.join('\n') + (hasTrailingSpace ? ' ' : '');
+        const dir = path.dirname(filePath);
+        await fs.mkdir(dir, { recursive: true });
+
+        const content = stringifyYaml(yamlContent, 0, '', [], styles);
+        const finalContent = content.join('\n') + (hasTrailingSpace ? '\n' : '');
 
         await fs.writeFile(filePath, finalContent);
         return Object.keys(translations);

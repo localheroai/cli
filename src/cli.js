@@ -5,21 +5,10 @@ import chalk from 'chalk';
 import { readFileSync } from 'fs';
 import { login } from './commands/login.js';
 import { init } from './commands/init.js';
-import { defaultDependencies } from './utils/defaults.js';
 import { translate } from './commands/translate.js';
 import { sync } from './commands/sync.js';
 
 const program = new Command();
-
-function displayBanner() {
-    console.log(chalk.blue(`
-  ===============================================
-    
-                   LocalHero.ai CLI 
-                   
-  ===============================================
-    `));
-}
 
 function getVersion() {
     const packageJson = JSON.parse(
@@ -29,7 +18,18 @@ function getVersion() {
 }
 
 function handleApiError(error) {
-    console.error(chalk.red(`❌ ${error.message}`));
+    console.error(chalk.red(`❌ ${error.cliErrorMessage || error.message}`));
+
+    if (program.opts().debug) {
+        console.error(chalk.dim(error.stack || error));
+
+        if (error.cause) {
+            console.error(chalk.dim(error.cause.stack || error.cause));
+        }
+    } else {
+        console.error(chalk.dim('\nRun with --debug for more information'));
+    }
+
     process.exit(1);
 }
 
@@ -41,26 +41,26 @@ function wrapCommandAction(action) {
 
 program
     .name('localhero')
-    .description('CLI tool for automatic I18n translations with LocalHero.ai')
+    .description('CLI tool for automatic I18n translations with LocalHero.ai, more info at https://localhero.ai.')
     .version(getVersion())
-    .addHelpText('beforeAll', displayBanner)
+    .option('--debug', 'Show debug information when errors occur')
     .action(() => {
-        console.log(`Version: ${getVersion()}`);
-        console.log('\nLocalHero.ai is a powerful i18n translation service');
-        console.log('that helps you manage your application translations.');
+        console.log('LocalHero.ai is automatic I18n translations service that easily integrates with your dev workflow.');
+        console.log(`\nVersion: ${getVersion()}`);
         console.log('\n🔗 Visit https://localhero.ai for more information');
+        console.log('👏 Set up your project with `npx @localheroai/cli init`');
         console.log('💡 Use --help to see available commands');
     });
 
 program
     .command('login')
     .description('Authenticate with LocalHero.ai using an API key')
-    .action(wrapCommandAction(() => login(defaultDependencies)));
+    .action(wrapCommandAction(() => login()));
 
 program
     .command('init')
     .description('Initialize a new LocalHero.ai project')
-    .action(wrapCommandAction(() => init(defaultDependencies)));
+    .action(wrapCommandAction(() => init()));
 
 program
     .command('translate')

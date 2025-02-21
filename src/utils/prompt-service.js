@@ -1,5 +1,3 @@
-import path from 'path';
-
 export function createPromptService(deps = {}) {
     const { inquirer = null } = deps;
 
@@ -22,15 +20,6 @@ export function createPromptService(deps = {}) {
                 translationPath: '',
                 ignorePaths: []
             };
-        },
-
-        async confirmLogin() {
-            if (!inquirer) return { shouldLogin: false };
-            const result = await inquirer.confirm({
-                message: 'Would you like to login now?',
-                default: true
-            });
-            return { shouldLogin: result };
         },
 
         async select(options) {

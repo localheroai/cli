@@ -33,11 +33,11 @@ export const configService = {
     async saveAuthConfig(config, basePath = process.cwd()) {
         const configPath = path.join(basePath, AUTH_CONFIG_FILE);
         await fs.writeFile(configPath, JSON.stringify(config, null, 2), {
-            mode: 0o600 // User-only readable
+            mode: 0o600
         });
     },
 
-    async getProjectConfig(basePath = process.cwd()) {
+    async getProjectConfig() {
         try {
             const configPath = this.configFilePath();
             const content = await fs.readFile(configPath, 'utf8');
@@ -56,7 +56,7 @@ export const configService = {
         }
     },
 
-    async saveProjectConfig(config, basePath = process.cwd()) {
+    async saveProjectConfig(config) {
         const configPath = this.configFilePath();
         const configWithSchema = {
             ...DEFAULT_PROJECT_CONFIG,

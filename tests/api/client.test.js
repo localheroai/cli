@@ -9,7 +9,7 @@ describe('API Client', () => {
         process.env.LOCALHERO_API_KEY = 'test-api-key';
     });
 
-    test('makes API requests', async () => {
+    it('makes API requests', async () => {
         const mockResponse = { data: 'test' };
         global.fetch.mockResolvedValueOnce({
             ok: true,
@@ -30,7 +30,7 @@ describe('API Client', () => {
         expect(result).toEqual(mockResponse);
     });
 
-    test('throws on failed API request', async () => {
+    it('throws on failed API request', async () => {
         const errorMessage = 'API request failed';
         global.fetch.mockResolvedValueOnce({
             ok: false,
