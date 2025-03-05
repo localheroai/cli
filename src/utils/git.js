@@ -31,4 +31,17 @@ export async function updateGitignore(basePath) {
         }
         return false;
     }
+}
+
+export async function getCurrentBranch() {
+    try {
+        const { execFile } = await import('child_process');
+        const { promisify } = await import('util');
+        const execFileAsync = promisify(execFile);
+
+        const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+        return stdout.trim();
+    } catch {
+        return null;
+    }
 } 

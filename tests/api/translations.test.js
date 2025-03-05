@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 
 describe('translations API', () => {
     let mockGetApiKey;
+    let mockGetCurrentBranch;
     let getUpdates;
     let createTranslationJob;
     let checkJobStatus;
@@ -12,8 +13,12 @@ describe('translations API', () => {
         global.fetch = jest.fn();
 
         mockGetApiKey = jest.fn().mockResolvedValue('tk_123456789012345678901234567890123456789012345678');
+        mockGetCurrentBranch = jest.fn().mockResolvedValue(null);
         await jest.unstable_mockModule('../../src/utils/auth.js', () => ({
             getApiKey: mockGetApiKey
+        }));
+        await jest.unstable_mockModule('../../src/utils/git.js', () => ({
+            getCurrentBranch: mockGetCurrentBranch
         }));
 
         const translationsModule = await import('../../src/api/translations.js');
@@ -25,6 +30,7 @@ describe('translations API', () => {
 
     describe('createTranslationJob', () => {
         it('creates translation job successfully', async () => {
+            mockGetCurrentBranch.mockResolvedValueOnce('feature/test-branch');
             const mockResponse = {
                 jobs: [
                     {
@@ -61,7 +67,8 @@ describe('translations API', () => {
                     },
                     body: JSON.stringify({
                         target_languages: targetLocales,
-                        files: sourceFiles
+                        files: sourceFiles,
+                        branch: 'feature/test-branch'
                     })
                 }
             );

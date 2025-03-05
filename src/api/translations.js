@@ -1,8 +1,11 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest } from './client.js';
+import { getCurrentBranch } from '../utils/git.js';
 
 export async function createTranslationJob({ sourceFiles, targetLocales, projectId }) {
     const apiKey = await getApiKey();
+    const branch = await getCurrentBranch();
+
     const response = await apiRequest(`/api/v1/projects/${projectId}/translation_jobs`, {
         method: 'POST',
         body: JSON.stringify({
@@ -11,7 +14,8 @@ export async function createTranslationJob({ sourceFiles, targetLocales, project
                 path: file.path,
                 content: file.content,
                 format: file.format
-            }))
+            })),
+            ...(branch && { branch })
         }),
         apiKey
     });
