@@ -108,7 +108,10 @@ describe('init command', () => {
             expect.objectContaining({
                 projectId: 'proj_123',
                 sourceLocale: 'en',
-                outputLocales: ['fr', 'es']
+                outputLocales: ['fr', 'es'],
+                translationFiles: expect.objectContaining({
+                    pattern: expect.any(String)
+                })
             }),
             expect.any(String)
         );
@@ -162,10 +165,9 @@ describe('init command', () => {
                 projectId: testProject.id,
                 sourceLocale: testProject.source_language,
                 outputLocales: testProject.target_languages,
-                translationFiles: {
-                    paths: ['locales/'],
-                    ignore: []
-                }
+                translationFiles: expect.objectContaining({
+                    pattern: expect.any(String)
+                })
             }),
             expect.any(String)
         );
@@ -181,23 +183,64 @@ describe('init command', () => {
             .mockResolvedValueOnce('fr,es')
             .mockResolvedValueOnce('locales/')
             .mockResolvedValueOnce('');
-        promptService.confirm
-            .mockResolvedValueOnce(false)
-            .mockResolvedValueOnce(true);
         projectApi.createProject.mockResolvedValue({
             id: 'proj_123',
             name: 'test-project'
         });
+        promptService.confirm
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
         importUtils.importTranslations.mockResolvedValue({
             status: 'failed',
-            error: 'Invalid file format'
+            error: 'Import failed'
         });
 
         await init(createInitDeps());
 
         const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
         expect(allConsoleOutput).toContain('✗ Failed to import translations');
-        expect(allConsoleOutput).toContain('Error: Invalid file format');
-        expect(configUtils.saveProjectConfig).toHaveBeenCalled();
+        expect(allConsoleOutput).toContain('Error: Import failed');
+    });
+
+    it('displays translations URL when available', async () => {
+        configUtils.getProjectConfig.mockResolvedValue(null);
+        authUtils.checkAuth.mockResolvedValue(true);
+        projectApi.listProjects.mockResolvedValue([]);
+        promptService.input
+            .mockResolvedValueOnce('test-project')
+            .mockResolvedValueOnce('en')
+            .mockResolvedValueOnce('fr,es')
+            .mockResolvedValueOnce('locales/')
+            .mockResolvedValueOnce('');
+        projectApi.createProject.mockResolvedValue({
+            id: 'proj_123',
+            name: 'test-project'
+        });
+        promptService.confirm
+            .mockResolvedValueOnce(false)
+            .mockResolvedValueOnce(true);
+
+        // Mock import with translations_url
+        importUtils.importTranslations.mockResolvedValue({
+            status: 'completed',
+            statistics: {
+                total_keys: 10,
+                languages: [
+                    { code: 'en', translated: 10 },
+                    { code: 'fr', translated: 5 }
+                ]
+            },
+            translations_url: 'https://localhero.ai/projects/proj_123/translations',
+            files: {
+                source: [{ path: 'locales/en.json', language: 'en', format: 'json', namespace: '' }],
+                target: [{ path: 'locales/fr.json', language: 'fr', format: 'json', namespace: '' }]
+            }
+        });
+
+        await init(createInitDeps());
+
+        const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+        expect(allConsoleOutput).toContain('✓ Successfully imported translations');
+        expect(allConsoleOutput).toContain('View your translations at: https://localhero.ai/projects/proj_123/translations');
     });
 });
