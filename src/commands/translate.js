@@ -115,7 +115,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                             try {
                                 locale = extractLocaleFromPath(file, DEFAULT_LOCALE_REGEX);
                             } catch {
-                                log(chalk.yellow(`Could not determine locale for ${file}, skipping`));
+                                if (verbose) {
+                                    console.log(chalk.yellow(`Could not determine locale for ${file}, skipping`));
+                                }
                                 continue;
                             }
                         }
@@ -263,7 +265,9 @@ export async function translate(options = {}, deps = defaultDeps) {
 
                         if (targetFile.format === 'json') {
                             if (targetContent[targetLocale]) {
-                                log(chalk.gray(`Target file has language wrapper: ${targetLocale}`));
+                                if (verbose) {
+                                    console.log(chalk.gray(`Target file has language wrapper: ${targetLocale}`));
+                                }
                                 targetKeys = flattenTranslations(targetContent[targetLocale]);
                             } else {
                                 targetKeys = flattenTranslations(targetContent);
@@ -402,6 +406,7 @@ export async function translate(options = {}, deps = defaultDeps) {
         let totalKeysProcessed = 0;
         let totalErrors = 0;
         let translationsUrl;
+        let jobIds = [];
 
         for (const [batchIndex, batch] of batches.entries()) {
             if (verbose) {
@@ -437,6 +442,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                     let retries = 0;
                     const MAX_WAIT_MINUTES = 10;
                     const startTime = Date.now();
+
+                    jobIds.push(job.id);
 
                     if (verbose) {
                         console.log(chalk.blue(`Waiting for job ${job.id} to complete...`));
@@ -534,7 +541,6 @@ export async function translate(options = {}, deps = defaultDeps) {
             process.exit(1);
         }
 
-
         await configUtils.updateLastSyncedAt();
 
         if (commit) {
@@ -552,7 +558,9 @@ export async function translate(options = {}, deps = defaultDeps) {
         console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
 
         if (translationsUrl) {
-            console.log(chalk.blue(`\nView your translations at: ${translationsUrl}`));
+            // Until we have a deciated view for a translation run, we'll use the jobs result view
+            const jobIdsParam = jobIds.length > 0 ? `/job_results?job_ids=${jobIds.join(',')}` : '';
+            console.log(chalk.blue(`\nView your translations at: ${translationsUrl}${jobIdsParam}`));
         }
     } catch (error) {
         console.error(chalk.red(`❌ Error: ${error.message}`));
