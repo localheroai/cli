@@ -38,8 +38,6 @@ export async function translate(options = {}, deps = defaultDeps) {
         translationUtils
     } = deps;
 
-    const log = verbose ? console.log : () => { };
-
     try {
         const isAuthenticated = await authUtils.checkAuth();
         if (!isAuthenticated) {
@@ -47,7 +45,7 @@ export async function translate(options = {}, deps = defaultDeps) {
             process.exit(1);
         }
 
-        console.log(chalk.blue('ℹ️  Loading configuration from localhero.json'));
+        console.log(chalk.blue('Loading configuration from localhero.json'));
 
         const rawConfig = await configUtils.getProjectConfig();
 
@@ -82,11 +80,15 @@ export async function translate(options = {}, deps = defaultDeps) {
             }, null, 2)}`));
         }
 
-        log(chalk.blue('Finding translation files...'));
+        if (verbose) {
+            console.log(chalk.blue('Finding translation files...'));
+        }
 
         const allFiles = [];
         for (const basePath of config.translationFiles.paths) {
-            log(chalk.blue(`Searching in path: ${basePath}`));
+            if (verbose) {
+                console.log(chalk.blue(`Searching in path: ${basePath}`));
+            }
             const pattern = config.translationFiles.pattern || '**/*.{json,yml,yaml}';
             const globPattern = path.join(basePath, pattern);
 
@@ -95,7 +97,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                     ignore: (config.translationFiles.ignore || []).map(i => path.join(basePath, i))
                 });
 
-                log(chalk.blue(`Found ${files.length} files in ${basePath}`));
+                if (verbose) {
+                    console.log(chalk.blue(`Found ${files.length} files in ${basePath}`));
+                }
 
                 for (const file of files) {
                     try {
@@ -123,9 +127,13 @@ export async function translate(options = {}, deps = defaultDeps) {
                             content: Buffer.from(content).toString('base64')
                         });
 
-                        log(chalk.blue(`Found file: ${file} (locale: ${locale})`));
+                        if (verbose) {
+                            console.log(chalk.blue(`Found file: ${file} (locale: ${locale})`));
+                        }
                     } catch (error) {
-                        log(chalk.yellow(`Error processing file ${file}: ${error.message}`));
+                        if (verbose) {
+                            console.log(chalk.yellow(`Error processing file ${file}: ${error.message}`));
+                        }
                     }
                 }
             } catch (globError) {
@@ -149,7 +157,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                 file.locale === config.sourceLocale;
 
             if (isSourceFile) {
-                log(chalk.blue(`Source file: ${file.path}`));
+                if (verbose) {
+                    console.log(chalk.blue(`Source file: ${file.path}`));
+                }
             }
 
             return isSourceFile;
@@ -172,15 +182,16 @@ export async function translate(options = {}, deps = defaultDeps) {
                     file.path.includes(`${locale}.`) ||
                     file.locale === locale) {
                     file.locale = locale;
-                    log(chalk.blue(`Target file for ${locale}: ${file.path}`));
+                    if (verbose) {
+                        console.log(chalk.blue(`Target file for ${locale}: ${file.path}`));
+                    }
                     return true;
                 }
             }
             return false;
         });
 
-        console.log(chalk.blue(`✓ Found ${targetFiles.length} target files for locales: ${config.outputLocales.join(', ')}`));
-        console.log(chalk.blue('Analyzing missing translations...'));
+        console.log(chalk.blue(`✓ Found ${targetFiles.length} target files for locales: ${config.outputLocales.join(', ')}, checking for missing translations...`));
 
         const missingByLocale = {};
 
@@ -195,13 +206,14 @@ export async function translate(options = {}, deps = defaultDeps) {
                 continue;
             }
 
-            log(chalk.gray(`Analyzing source file: ${sourceFile.path}`));
+            if (verbose) {
+                console.log(chalk.gray(`Analyzing source file: ${sourceFile.path}`));
+            }
 
             let sourceKeys = {};
             try {
                 if (sourceFile.format === 'json') {
                     if (sourceContent[config.sourceLocale]) {
-                        log(chalk.gray(`Source file has language wrapper: ${config.sourceLocale}`));
                         sourceKeys = flattenTranslations(sourceContent[config.sourceLocale]);
                     } else {
                         sourceKeys = flattenTranslations(sourceContent);
@@ -214,9 +226,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                     }
                 }
 
-                log(chalk.gray(`Source file contains ${Object.keys(sourceKeys).length} keys`));
                 if (verbose) {
-                    log(chalk.gray(`Source keys: ${JSON.stringify(Object.keys(sourceKeys).slice(0, 5))}...`));
+                    console.log(chalk.gray(`Source file contains ${Object.keys(sourceKeys).length} keys`));
+                    console.log(chalk.gray(`Source keys: ${JSON.stringify(Object.keys(sourceKeys).slice(0, 5))}...`));
                 }
             } catch (error) {
                 console.error(chalk.red(`Error parsing source file ${sourceFile.path}: ${error.message}`));
@@ -245,7 +257,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                             continue;
                         }
 
-                        log(chalk.gray(`Analyzing target file: ${targetFile.path}`));
+                        if (verbose) {
+                            console.log(chalk.gray(`Analyzing target file: ${targetFile.path}`));
+                        }
 
                         if (targetFile.format === 'json') {
                             if (targetContent[targetLocale]) {
@@ -262,9 +276,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                             }
                         }
 
-                        log(chalk.gray(`Target file contains ${Object.keys(targetKeys).length} keys`));
                         if (verbose) {
-                            log(chalk.gray(`Target keys: ${JSON.stringify(Object.keys(targetKeys).slice(0, 5))}...`));
+                            console.log(chalk.gray(`Target file contains ${Object.keys(targetKeys).length} keys`));
+                            console.log(chalk.gray(`Target keys: ${JSON.stringify(Object.keys(targetKeys).slice(0, 5))}...`));
                         }
 
                         targetPath = targetFile.path;
@@ -295,7 +309,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                         }
                     }
 
-                    log(chalk.yellow(`No target file found for locale: ${targetLocale}, will create: ${targetPath}`));
+                    if (verbose) {
+                        console.log(chalk.yellow(`No target file found for locale: ${targetLocale}, will create: ${targetPath}`));
+                    }
                 }
 
                 const { missingKeys, skippedKeys } = translationUtils.findMissingTranslations(sourceKeys, targetKeys);
@@ -332,29 +348,39 @@ export async function translate(options = {}, deps = defaultDeps) {
                         }
                     }
 
-                    console.log(chalk.blue(`${targetLocale}: ${missingCount} missing keys in ${path.basename(sourceFile.path)}`));
                     if (verbose) {
+                        console.log(chalk.blue(`${targetLocale}: ${missingCount} missing keys in ${path.basename(sourceFile.path)}`));
                         console.log(chalk.gray(`Missing keys: ${JSON.stringify(Object.keys(missingKeys).slice(0, 5))}...`));
                     }
                 } else {
-                    log(chalk.green(`${targetLocale}: No missing keys in ${path.basename(sourceFile.path)}`));
+                    if (verbose) {
+                        console.log(chalk.green(`${targetLocale}: No missing keys in ${path.basename(sourceFile.path)}`));
+                    }
                 }
             }
         }
 
-        if (Object.keys(missingByLocale).length === 0) {
+        const { hasUpdates, updates } = await syncService.checkForUpdates({ verbose });
+
+        if (Object.keys(missingByLocale).length === 0 && !hasUpdates) {
             console.log(chalk.green('✓ All translations are up to date!'));
             return;
         }
 
-        console.log("Missing by locale:", missingByLocale);
-
-        console.log(chalk.cyan('\nMissing translations summary:'));
-        for (const [locale, data] of Object.entries(missingByLocale)) {
-            console.log(chalk.cyan(`${locale}: ${data.keyCount} missing keys`));
+        if (hasUpdates) {
+            console.log(chalk.blue('\nSyncing updates from the API...'));
+            await syncService.applyUpdates(updates, { verbose });
         }
 
-        console.log(chalk.blue('\nTranslating missing keys...'));
+        if (Object.keys(missingByLocale).length > 0) {
+            if (verbose) {
+                console.log(chalk.cyan('\nMissing translations summary:'));
+                for (const [locale, data] of Object.entries(missingByLocale)) {
+                    console.log(chalk.cyan(`${locale}: ${data.keyCount} missing keys`));
+                }
+            }
+            console.log(chalk.blue('\nTranslating missing keys...'));
+        }
 
         const sourceFilesForTranslation = sourceFiles.map(file => ({
             path: file.path,
@@ -378,7 +404,9 @@ export async function translate(options = {}, deps = defaultDeps) {
         let translationsUrl;
 
         for (const [batchIndex, batch] of batches.entries()) {
-            log(chalk.blue(`\nProcessing batch ${batchIndex + 1}/${batches.length}...`));
+            if (verbose) {
+                console.log(chalk.blue(`\nProcessing batch ${batchIndex + 1}/${batches.length}...`));
+            }
 
             if (!config.projectId) {
                 console.error(chalk.red('❌ Project ID is not defined in the configuration'));
@@ -410,7 +438,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                     const MAX_WAIT_MINUTES = 10;
                     const startTime = Date.now();
 
-                    console.log(chalk.blue(`Waiting for job ${job.id} to complete...`));
+                    if (verbose) {
+                        console.log(chalk.blue(`Waiting for job ${job.id} to complete...`));
+                    }
 
                     do {
                         status = await translationUtils.checkJobStatus(job.id, true);
@@ -432,7 +462,9 @@ export async function translate(options = {}, deps = defaultDeps) {
                         }
                     } while (status.status === 'pending' || status.status === 'processing');
 
-                    console.log(chalk.green(`✓ Job ${job.id} completed!`));
+                    if (verbose) {
+                        console.log(chalk.green(`✓ Job ${job.id} completed!`));
+                    }
 
                     if (!status.translations) {
                         console.error(chalk.red(`❌ No translations returned for job ${job.id}`));
@@ -440,26 +472,24 @@ export async function translate(options = {}, deps = defaultDeps) {
                         continue;
                     }
 
-                    console.log(chalk.blue('Debug - Translations structure:'), JSON.stringify(status, null, 2));
+                    if (verbose) {
+                        console.log(chalk.blue('Debug - Translations structure:'), JSON.stringify(status, null, 2));
+                    }
 
                     let translationsToProcess = {};
 
                     if (status.translations && typeof status.translations === 'object') {
                         const keys = Object.keys(status.translations);
 
-                        if (keys.includes('translations')) {
-                            console.log(chalk.blue('Detected nested translations structure'));
-
+                        if (keys.includes('data')) {
                             const locale = status.language?.code ||
                                 status.target_language?.code ||
                                 status.target_locale ||
                                 Object.keys(missingByLocale)[0];
 
                             if (locale && missingByLocale[locale]) {
-                                translationsToProcess[locale] = status.translations.translations || {};
+                                translationsToProcess[locale] = status.translations.data || {};
                             }
-                        } else {
-                            translationsToProcess = status.translations;
                         }
                     }
 
@@ -504,17 +534,13 @@ export async function translate(options = {}, deps = defaultDeps) {
             process.exit(1);
         }
 
-        const updatedLocales = new Set(Object.keys(missingByLocale));
-        console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
 
-        if (translationsUrl) {
-            console.log(chalk.blue(`\nView your translations at: ${translationsUrl}`));
-        }
+        await configUtils.updateLastSyncedAt();
 
         if (commit) {
             console.log(chalk.blue('\nCommitting changes to git...'));
             try {
-                await autoCommitChanges('Update translations');
+                await autoCommitChanges('Latest translations from LocalHero.ai');
                 console.log(chalk.green('✓ Changes committed to git'));
             } catch (error) {
                 console.error(chalk.red(`❌ Error committing changes: ${error.message}`));
@@ -522,7 +548,12 @@ export async function translate(options = {}, deps = defaultDeps) {
             }
         }
 
-        await configUtils.updateLastSyncedAt();
+        const updatedLocales = new Set(Object.keys(missingByLocale));
+        console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
+
+        if (translationsUrl) {
+            console.log(chalk.blue(`\nView your translations at: ${translationsUrl}`));
+        }
     } catch (error) {
         console.error(chalk.red(`❌ Error: ${error.message}`));
         console.error(error.stack);

@@ -444,6 +444,7 @@ export async function init(deps = {}) {
             return;
         } else if (importResult.status === 'completed') {
             console.log(chalk.green('\n✓ Successfully imported translations'));
+            await configUtils.updateLastSyncedAt();
 
             if (importResult.files) {
                 console.log('\nImported files:');
