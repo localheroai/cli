@@ -151,6 +151,159 @@ export async function updateTranslationFile(filePath, translations, languageCode
     }
 }
 
+export async function deleteKeysFromTranslationFile(filePath, keysToDelete, languageCode = 'en') {
+    try {
+        const fileExt = path.extname(filePath).slice(1).toLowerCase();
+
+        // Check if file exists
+        try {
+            await fs.access(filePath);
+        } catch {
+            return [];
+        }
+
+        if (fileExt === 'json') {
+            return await deleteKeysFromJsonFile(filePath, keysToDelete, languageCode);
+        } else {
+            return await deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
+        }
+    } catch (error) {
+        throw new Error(`Failed to delete keys from file ${filePath}: ${error.message}`);
+    }
+}
+
+async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
+    try {
+        const content = await fs.readFile(filePath, 'utf8');
+        let jsonContent = JSON.parse(content);
+        let hasLanguageWrapper = false;
+        let rootContent = jsonContent;
+
+        // Check if the JSON has a language wrapper (e.g., { "en": { ... } })
+        if (jsonContent[languageCode] && typeof jsonContent[languageCode] === 'object') {
+            hasLanguageWrapper = true;
+            rootContent = jsonContent[languageCode];
+        }
+
+        const deletedKeys = [];
+
+        for (const keyPath of keysToDelete) {
+            const keys = keyPath.split('.');
+            const lastIndex = keys.length - 1;
+
+            // Navigate to the parent object
+            let current = rootContent;
+            let parent = null;
+            let keyInParent = '';
+            let found = true;
+
+            for (let i = 0; i < lastIndex; i++) {
+                const key = keys[i];
+                if (!current[key] || typeof current[key] !== 'object') {
+                    found = false;
+                    break;
+                }
+                parent = current;
+                keyInParent = key;
+                current = current[key];
+            }
+
+            if (found) {
+                const lastKey = keys[lastIndex];
+
+                // If we're at the last level, delete the key
+                if (current[lastKey] !== undefined) {
+                    delete current[lastKey];
+                    deletedKeys.push(keyPath);
+
+                    // If parent object is now empty, remove it too
+                    if (parent && Object.keys(current).length === 0) {
+                        delete parent[keyInParent];
+                    }
+                }
+            }
+        }
+
+        // Update the content if we have a language wrapper
+        if (hasLanguageWrapper) {
+            jsonContent[languageCode] = rootContent;
+        } else {
+            jsonContent = rootContent;
+        }
+
+        // Write the updated content back to the file
+        await fs.writeFile(filePath, JSON.stringify(jsonContent, null, 2));
+
+        return deletedKeys;
+    } catch (error) {
+        throw new Error(`Failed to delete keys from JSON file ${filePath}: ${error.message}`);
+    }
+}
+
+async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
+    try {
+        const content = await fs.readFile(filePath, 'utf8');
+        const styles = getExistingQuoteStyles(content);
+        const hasTrailingSpace = /\s$/.test(content);
+
+        let yamlContent = yaml.parse(content) || {};
+
+        // Check if YAML has language code as root
+        if (!yamlContent[languageCode]) {
+            return [];
+        }
+
+        const deletedKeys = [];
+
+        for (const keyPath of keysToDelete) {
+            const keys = keyPath.split('.');
+            const lastIndex = keys.length - 1;
+
+            // Navigate to the parent object
+            let current = yamlContent[languageCode];
+            let parent = null;
+            let keyInParent = '';
+            let found = true;
+
+            for (let i = 0; i < lastIndex; i++) {
+                const key = keys[i];
+                if (!current[key] || typeof current[key] !== 'object') {
+                    found = false;
+                    break;
+                }
+                parent = current;
+                keyInParent = key;
+                current = current[key];
+            }
+
+            if (found) {
+                const lastKey = keys[lastIndex];
+
+                // If we're at the last level, delete the key
+                if (current[lastKey] !== undefined) {
+                    delete current[lastKey];
+                    deletedKeys.push(keyPath);
+
+                    // If parent object is now empty, remove it too
+                    if (parent && Object.keys(current).length === 0) {
+                        delete parent[keyInParent];
+                    }
+                }
+            }
+        }
+
+        // Write the updated content back to the file
+        const yamlLines = stringifyYaml(yamlContent, 0, '', [], styles);
+        const finalContent = yamlLines.join('\n') + (hasTrailingSpace ? '\n' : '');
+
+        await fs.writeFile(filePath, finalContent);
+
+        return deletedKeys;
+    } catch (error) {
+        throw new Error(`Failed to delete keys from YAML file ${filePath}: ${error.message}`);
+    }
+}
+
 async function updateJsonFile(filePath, translations, languageCode) {
     try {
         let existingContent = {};

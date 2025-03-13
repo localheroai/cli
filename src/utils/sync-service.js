@@ -1,7 +1,8 @@
 import chalk from 'chalk';
 import { configService } from './config.js';
 import { getUpdates } from '../api/translations.js';
-import { updateTranslationFile } from './translation-updater.js';
+import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater.js';
+import { findTranslationFiles } from './files.js';
 
 const MAX_PAGES = 10;
 
@@ -20,6 +21,7 @@ export const syncService = {
         }
 
         let allFiles = [];
+        let deletedKeys = [];
         let currentPage = 1;
         let hasMorePages = true;
 
@@ -28,6 +30,10 @@ export const syncService = {
 
             if (response.updates?.files?.length) {
                 allFiles = allFiles.concat(response.updates.files);
+            }
+
+            if (response.updates?.deleted_keys?.length) {
+                deletedKeys = deletedKeys.concat(response.updates.deleted_keys);
             }
 
             if (response.pagination) {
@@ -47,7 +53,7 @@ export const syncService = {
             }
         }
 
-        if (!allFiles.length) {
+        if (!allFiles.length && !deletedKeys.length) {
             if (verbose) {
                 console.log(chalk.green('✓ All translations are up to date'));
             }
@@ -58,7 +64,8 @@ export const syncService = {
             hasUpdates: true,
             updates: {
                 updates: {
-                    files: allFiles
+                    files: allFiles,
+                    deleted_keys: deletedKeys
                 }
             }
         };
@@ -66,8 +73,10 @@ export const syncService = {
 
     async applyUpdates(updates, { verbose = false } = {}) {
         let totalUpdates = 0;
+        let totalDeleted = 0;
 
-        for (const file of updates.updates.files) {
+        // Process updated translations
+        for (const file of updates.updates.files || []) {
             for (const lang of file.languages) {
                 if (verbose) {
                     console.log(chalk.blue(`Updating ${lang.code} translations in ${file.path}`));
@@ -91,12 +100,55 @@ export const syncService = {
             }
         }
 
-        await configService.updateLastSyncedAt();
+        // Process deleted keys
+        const deletedKeys = updates.updates.deleted_keys || [];
+        if (deletedKeys.length > 0) {
+            if (verbose) {
+                console.log(chalk.blue(`\nProcessing ${deletedKeys.length} deleted keys`));
+            }
 
-        if (verbose) {
-            console.log(chalk.green(`✓ Updated ${totalUpdates} translations`));
+            // Get the project config to find translation files
+            const config = await configService.getValidProjectConfig();
+
+            // Find all translation files
+            const translationFiles = await findTranslationFiles(config);
+
+            if (verbose) {
+                console.log(chalk.blue(`Found ${translationFiles.length} translation files to check for deleted keys`));
+            }
+
+            // Extract the key names to delete
+            const keysToDelete = deletedKeys.map(key => key.name);
+
+            // Delete keys from each translation file
+            for (const file of translationFiles) {
+                try {
+                    if (verbose) {
+                        console.log(chalk.blue(`Checking for deleted keys in ${file.path} (${file.locale})`));
+                    }
+
+                    const deletedFromFile = await deleteKeysFromTranslationFile(file.path, keysToDelete, file.locale);
+
+                    if (deletedFromFile.length > 0) {
+                        totalDeleted += deletedFromFile.length;
+
+                        if (verbose) {
+                            console.log(chalk.green(`✓ Deleted ${deletedFromFile.length} keys from ${file.path}`));
+                            for (const key of deletedFromFile) {
+                                console.log(chalk.gray(` - ${key}`));
+                            }
+                        }
+                    } else if (verbose) {
+                        console.log(chalk.gray(`  No keys to delete in ${file.path}`));
+                    }
+                } catch (error) {
+                    console.error(chalk.yellow(`⚠️  Failed to delete keys from ${file.path}: ${error.message}`));
+                }
+            }
         }
 
-        return { totalUpdates };
+        await configService.updateLastSyncedAt();
+
+        return { totalUpdates, totalDeleted };
     }
 }; 

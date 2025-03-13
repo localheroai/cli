@@ -2,9 +2,9 @@ import { jest } from '@jest/globals';
 import { sync } from '../../src/commands/sync.js';
 
 global.fetch = jest.fn();
+global.console = { log: jest.fn(), error: jest.fn() };
 
 describe('sync command', () => {
-    const mockConsole = { log: jest.fn(), error: jest.fn() };
     const mockSyncService = {
         checkForUpdates: jest.fn(),
         applyUpdates: jest.fn()
@@ -12,7 +12,6 @@ describe('sync command', () => {
 
     function createSyncDeps(overrides = {}) {
         return {
-            console: mockConsole,
             syncService: mockSyncService,
             ...overrides
         };
@@ -20,6 +19,10 @@ describe('sync command', () => {
 
     beforeEach(() => {
         global.fetch.mockReset();
+        global.console.log.mockReset();
+        global.console.error.mockReset();
+        mockSyncService.checkForUpdates.mockReset();
+        mockSyncService.applyUpdates.mockReset();
     });
 
     it('handles case when no updates are available', async () => {
@@ -37,6 +40,7 @@ describe('sync command', () => {
 
         expect(mockSyncService.checkForUpdates).toHaveBeenCalledWith({ verbose: false });
         expect(mockSyncService.applyUpdates).not.toHaveBeenCalled();
+        expect(global.console.log).toHaveBeenCalledWith(expect.stringContaining('All translations are up to date'));
     });
 
     it('syncs updates when available', async () => {
@@ -54,10 +58,45 @@ describe('sync command', () => {
             updates: mockUpdates
         });
 
-        await sync({}, createSyncDeps());
+        mockSyncService.applyUpdates.mockResolvedValue({
+            totalUpdates: 1,
+            totalDeleted: 0
+        });
+
+        const result = await sync({}, createSyncDeps());
 
         expect(mockSyncService.checkForUpdates).toHaveBeenCalledWith({ verbose: false });
         expect(mockSyncService.applyUpdates).toHaveBeenCalledWith(mockUpdates, { verbose: false });
+        expect(result).toEqual({ totalUpdates: 1, totalDeleted: 0 });
+        expect(global.console.log).toHaveBeenCalledWith(expect.stringContaining('Updated 1 translations'));
+    });
+
+    it('handles deleted keys', async () => {
+        const mockUpdates = {
+            updates: {
+                files: [],
+                deleted_keys: [
+                    { name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }
+                ]
+            }
+        };
+
+        mockSyncService.checkForUpdates.mockResolvedValue({
+            hasUpdates: true,
+            updates: mockUpdates
+        });
+
+        mockSyncService.applyUpdates.mockResolvedValue({
+            totalUpdates: 0,
+            totalDeleted: 1
+        });
+
+        const result = await sync({}, createSyncDeps());
+
+        expect(mockSyncService.checkForUpdates).toHaveBeenCalledWith({ verbose: false });
+        expect(mockSyncService.applyUpdates).toHaveBeenCalledWith(mockUpdates, { verbose: false });
+        expect(result).toEqual({ totalUpdates: 0, totalDeleted: 1 });
+        expect(global.console.log).toHaveBeenCalledWith(expect.stringContaining('Deleted 1 keys'));
     });
 
     it('supports verbose flag', async () => {
@@ -75,13 +114,18 @@ describe('sync command', () => {
             updates: mockUpdates
         });
 
+        mockSyncService.applyUpdates.mockResolvedValue({
+            totalUpdates: 1,
+            totalDeleted: 0
+        });
+
         await sync({ verbose: true }, createSyncDeps());
 
         expect(mockSyncService.checkForUpdates).toHaveBeenCalledWith({ verbose: true });
         expect(mockSyncService.applyUpdates).toHaveBeenCalledWith(mockUpdates, { verbose: true });
     });
 
-    it('handles errors during update check', async () => {
+    it('propagates errors during update check', async () => {
         global.fetch.mockResolvedValue({
             ok: false,
             status: 500,
@@ -95,7 +139,7 @@ describe('sync command', () => {
             .toThrow('Network error');
     });
 
-    it('handles invalid API key errors', async () => {
+    it('propagates invalid API key errors', async () => {
         global.fetch.mockResolvedValue({
             ok: false,
             status: 401,
@@ -114,7 +158,7 @@ describe('sync command', () => {
             .toThrow('Your API key is invalid or has been revoked');
     });
 
-    it('handles errors during updates', async () => {
+    it('propagates errors during updates', async () => {
         global.fetch.mockResolvedValue({
             ok: true,
             json: () => Promise.resolve({

@@ -205,7 +205,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                 sourceContent = parseFile(sourceContentRaw, sourceFile.format);
             } catch (error) {
                 console.error(chalk.red(`❌ Error parsing ${sourceFile.path}: ${error.message}`));
-                continue;
+                console.error(chalk.red('Translation process aborted due to parsing errors. Please fix the file and try again.'));
+                process.exit(1);
             }
 
             if (verbose) {
@@ -234,7 +235,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                 }
             } catch (error) {
                 console.error(chalk.red(`Error parsing source file ${sourceFile.path}: ${error.message}`));
-                continue;
+                console.error(chalk.red('Translation process aborted due to parsing errors. Please fix the file and try again.'));
+                process.exit(1);
             }
 
             for (const targetLocale of config.outputLocales) {
@@ -256,7 +258,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                             targetContent = parseFile(targetContentRaw, targetFile.format);
                         } catch (error) {
                             console.error(chalk.red(`❌ Error parsing ${targetFile.path}: ${error.message}`));
-                            continue;
+                            console.error(chalk.red('Translation process aborted due to parsing errors. Please fix the file and try again.'));
+                            process.exit(1);
                         }
 
                         if (verbose) {
@@ -288,7 +291,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                         targetPath = targetFile.path;
                     } catch (error) {
                         console.error(chalk.red(`Error parsing target file ${targetFile.path}: ${error.message}`));
-                        continue;
+                        console.error(chalk.red('Translation process aborted due to parsing errors. Please fix the file and try again.'));
+                        process.exit(1);
                     }
                 } else {
                     const sourceExt = path.extname(sourceFile.path);
@@ -371,9 +375,51 @@ export async function translate(options = {}, deps = defaultDeps) {
             return;
         }
 
+        let totalErrors = 0;
+        let translationsUrl;
+        let jobIds = [];
+        let totalKeysDeleted = 0;
+        const uniqueKeysTranslated = new Set();
+        let uniqueDeletedKeys = new Set();
+        let affectedLanguages = new Set();
+
+        // Helper function to get unique deleted keys and affected languages
+        async function getDeletedKeysInfo() {
+            const uniqueKeys = new Set(updates.updates.deleted_keys?.map(key => key.name) || []);
+            const languages = new Set();
+
+            if (updates.updates.deleted_keys?.length > 0) {
+                // Get the project config to find translation files
+                const config = await configUtils.getValidProjectConfig();
+
+                // Find all translation files
+                const translationFiles = await findTranslationFiles(config);
+
+                // Count unique languages where keys were deleted
+                for (const file of translationFiles) {
+                    if (file.locale) {
+                        languages.add(file.locale);
+                    }
+                }
+            }
+
+            return { uniqueKeys, languages };
+        }
+
         if (hasUpdates) {
             console.log(chalk.blue('\nSyncing updates from the API...'));
-            await syncService.applyUpdates(updates, { verbose });
+            const syncResult = await syncService.applyUpdates(updates, { verbose });
+
+            totalKeysDeleted = syncResult.totalDeleted || 0;
+
+            if (totalKeysDeleted > 0) {
+                // Get unique deleted keys and affected languages
+                const deletedInfo = await getDeletedKeysInfo();
+                uniqueDeletedKeys = deletedInfo.uniqueKeys;
+                affectedLanguages = deletedInfo.languages;
+
+                console.log(chalk.green(`✓ Deleted ${uniqueDeletedKeys.size} ${uniqueDeletedKeys.size === 1 ? 'key' : 'keys'} from ${affectedLanguages.size} ${affectedLanguages.size === 1 ? 'language' : 'languages'}`));
+            }
         }
 
         if (Object.keys(missingByLocale).length > 0) {
@@ -402,11 +448,6 @@ export async function translate(options = {}, deps = defaultDeps) {
                 }
             }
         }
-
-        let totalKeysProcessed = 0;
-        let totalErrors = 0;
-        let translationsUrl;
-        let jobIds = [];
 
         for (const [batchIndex, batch] of batches.entries()) {
             if (verbose) {
@@ -516,7 +557,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                         try {
                             await translationUtils.updateTranslationFile(targetPath, translations, locale);
 
-                            totalKeysProcessed += Object.keys(translations).length;
+                            // Add keys to the uniqueKeysTranslated set
+                            Object.keys(translations).forEach(key => uniqueKeysTranslated.add(key));
                             console.log(chalk.green(`✓ Updated translations for ${locale}`));
 
                             if (status.translations_url && !translationsUrl) {
@@ -555,7 +597,13 @@ export async function translate(options = {}, deps = defaultDeps) {
         }
 
         const updatedLocales = new Set(Object.keys(missingByLocale));
-        console.log(chalk.green('\n✓ Translations complete!') + ` Updated ${totalKeysProcessed} keys in ${updatedLocales.size} languages`);
+        let summaryMessage = ` Updated ${uniqueKeysTranslated.size} keys in ${updatedLocales.size} languages`;
+
+        if (totalKeysDeleted > 0) {
+            summaryMessage += `, deleted ${uniqueDeletedKeys.size} ${uniqueDeletedKeys.size === 1 ? 'key' : 'keys'} from ${affectedLanguages.size} ${affectedLanguages.size === 1 ? 'language' : 'languages'}`;
+        }
+
+        console.log(chalk.green('\n✓ Translations complete!') + summaryMessage);
 
         if (translationsUrl) {
             // Until we have a deciated view for a translation run, we'll use the jobs result view

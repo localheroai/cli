@@ -29,7 +29,8 @@ describe('init command', () => {
             getProjectConfig: jest.fn(),
             saveProjectConfig: jest.fn().mockResolvedValue(true),
             getAuthConfig: jest.fn().mockResolvedValue(null),
-            saveAuthConfig: jest.fn().mockResolvedValue(true)
+            saveAuthConfig: jest.fn().mockResolvedValue(true),
+            updateLastSyncedAt: jest.fn().mockResolvedValue(undefined)
         };
         authUtils = {
             checkAuth: jest.fn(),

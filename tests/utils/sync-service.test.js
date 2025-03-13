@@ -5,6 +5,7 @@ describe('syncService', () => {
     let mockTranslationsApi;
     let mockTranslationUpdater;
     let mockConsole;
+    let mockFilesUtils;
     let syncService;
 
     beforeEach(async () => {
@@ -21,7 +22,12 @@ describe('syncService', () => {
         };
 
         mockTranslationUpdater = {
-            updateTranslationFile: jest.fn()
+            updateTranslationFile: jest.fn(),
+            deleteKeysFromTranslationFile: jest.fn()
+        };
+
+        mockFilesUtils = {
+            findTranslationFiles: jest.fn()
         };
 
         mockConsole = {
@@ -37,6 +43,10 @@ describe('syncService', () => {
         await jest.unstable_mockModule('../../src/api/translations.js', () => mockTranslationsApi);
 
         await jest.unstable_mockModule('../../src/utils/translation-updater.js', () => mockTranslationUpdater);
+
+        await jest.unstable_mockModule('../../src/utils/files.js', () => ({
+            findTranslationFiles: mockFilesUtils.findTranslationFiles
+        }));
 
         const syncServiceModule = await import('../../src/utils/sync-service.js');
         syncService = syncServiceModule.syncService;
@@ -121,6 +131,26 @@ describe('syncService', () => {
             await syncService.checkForUpdates({ verbose: true });
 
             expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(10);
+        });
+
+        it('includes deleted keys in the updates', async () => {
+            mockConfigService.getValidProjectConfig.mockResolvedValue(testConfig);
+
+            mockTranslationsApi.getUpdates.mockResolvedValue({
+                updates: {
+                    files: [{ path: 'file1.json' }],
+                    deleted_keys: [
+                        { name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }
+                    ]
+                }
+            });
+
+            const result = await syncService.checkForUpdates();
+
+            expect(result.hasUpdates).toBe(true);
+            expect(result.updates.updates.files).toHaveLength(1);
+            expect(result.updates.updates.deleted_keys).toHaveLength(1);
+            expect(result.updates.updates.deleted_keys[0].name).toBe('deprecated.feature');
         });
     });
 
@@ -226,6 +256,67 @@ describe('syncService', () => {
                 call[0].includes('long_text')
             );
             expect(logCall[0]).toContain('…');
+        });
+
+        it('applies deleted keys', async () => {
+            const updatesWithDeleted = {
+                updates: {
+                    files: [],
+                    deleted_keys: [
+                        { name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }
+                    ]
+                }
+            };
+
+            mockFilesUtils.findTranslationFiles.mockResolvedValue([
+                { path: 'locales/en.json', locale: 'en' },
+                { path: 'locales/fr.json', locale: 'fr' }
+            ]);
+
+            mockTranslationUpdater.deleteKeysFromTranslationFile.mockResolvedValue(['deprecated.feature']);
+            mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+            const result = await syncService.applyUpdates(updatesWithDeleted, { verbose: true });
+
+            expect(mockFilesUtils.findTranslationFiles).toHaveBeenCalled();
+            expect(mockTranslationUpdater.deleteKeysFromTranslationFile).toHaveBeenCalledTimes(2);
+            expect(mockTranslationUpdater.deleteKeysFromTranslationFile).toHaveBeenCalledWith(
+                'locales/en.json',
+                ['deprecated.feature'],
+                'en'
+            );
+            expect(mockTranslationUpdater.deleteKeysFromTranslationFile).toHaveBeenCalledWith(
+                'locales/fr.json',
+                ['deprecated.feature'],
+                'fr'
+            );
+            expect(result.totalDeleted).toBe(2);
+        });
+
+        it('handles errors when deleting keys', async () => {
+            const updatesWithDeleted = {
+                updates: {
+                    files: [],
+                    deleted_keys: [
+                        { name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }
+                    ]
+                }
+            };
+
+            mockFilesUtils.findTranslationFiles.mockResolvedValue([
+                { path: 'locales/en.json', locale: 'en' }
+            ]);
+
+            mockTranslationUpdater.deleteKeysFromTranslationFile.mockRejectedValue(
+                new Error('Failed to delete key')
+            );
+
+            mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+            const result = await syncService.applyUpdates(updatesWithDeleted);
+
+            expect(mockConsole.error).toHaveBeenCalled();
+            expect(result.totalDeleted).toBe(0);
         });
     });
 }); 
