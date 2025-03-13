@@ -28,8 +28,8 @@ export const syncService = {
         while (hasMorePages && currentPage <= MAX_PAGES) {
             const response = await getUpdates(config.projectId, { since, page: currentPage });
 
-            if (response.updates?.files?.length) {
-                allFiles = allFiles.concat(response.updates.files);
+            if (response.updates?.updated_keys?.length) {
+                allFiles = allFiles.concat(response.updates.updated_keys);
             }
 
             if (response.updates?.deleted_keys?.length) {
@@ -151,4 +151,4 @@ export const syncService = {
 
         return { totalUpdates, totalDeleted };
     }
-}; 
+};

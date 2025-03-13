@@ -79,7 +79,7 @@ describe('syncService', () => {
             mockTranslationsApi.getUpdates
                 .mockResolvedValueOnce({
                     updates: {
-                        files: [{ path: 'file1.json' }]
+                        updated_keys: [{ path: 'file1.json' }]
                     },
                     pagination: {
                         current_page: 1,
@@ -88,7 +88,7 @@ describe('syncService', () => {
                 })
                 .mockResolvedValueOnce({
                     updates: {
-                        files: [{ path: 'file2.json' }]
+                        updated_keys: [{ path: 'file2.json' }]
                     },
                     pagination: {
                         current_page: 2,
@@ -118,7 +118,7 @@ describe('syncService', () => {
 
             const mockResponse = {
                 updates: {
-                    files: [{ path: 'file.json' }]
+                    updated_keys: [{ path: 'file.json' }]
                 },
                 pagination: {
                     current_page: 1,
@@ -138,7 +138,7 @@ describe('syncService', () => {
 
             mockTranslationsApi.getUpdates.mockResolvedValue({
                 updates: {
-                    files: [{ path: 'file1.json' }],
+                    updated_keys: [{ path: 'file1.json' }],
                     deleted_keys: [
                         { name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }
                     ]
