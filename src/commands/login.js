@@ -13,7 +13,8 @@ export async function login(deps = {}) {
         promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
         verifyApiKey = defaultVerifyApiKey,
         gitUtils = { updateGitignore },
-        configUtils = configService
+        configUtils = configService,
+        isCalledFromInit = false
     } = deps;
 
     const existingConfig = await configUtils.getAuthConfig(basePath);
@@ -66,11 +67,11 @@ export async function login(deps = {}) {
 
     const projectConfig = await configUtils.getProjectConfig(basePath);
 
-    if (!projectConfig) {
+    if (!projectConfig && !isCalledFromInit) {
         console.log(chalk.yellow('\n⚠️  Almost there! You need to set up your project configuration.'));
         console.log(chalk.blue('Run this next:'));
         console.log(chalk.white('\n  npx @localheroai/cli init\n'));
-    } else {
+    } else if (!isCalledFromInit) {
         console.log('\nYou\'re ready to start translating!');
         console.log('Try running: npx @localheroai/cli translate');
     }

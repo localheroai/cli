@@ -353,7 +353,8 @@ export async function init(deps = {}) {
             basePath,
             promptService,
             configUtils,
-            verifyApiKey: authUtils.verifyApiKey
+            verifyApiKey: authUtils.verifyApiKey,
+            isCalledFromInit: true
         });
     }
 
