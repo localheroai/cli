@@ -37,8 +37,6 @@ describe('translation-utils', () => {
             };
 
             const result = findMissingTranslations(sourceKeys, targetKeys);
-
-            // The WIP key should be skipped, so no missing keys
             expect(result.missingKeys).toEqual({});
             expect(result.skippedKeys).toEqual({
                 wip_feature: {
@@ -59,8 +57,6 @@ describe('translation-utils', () => {
             };
 
             const result = findMissingTranslations(sourceKeys, targetKeys);
-
-            // The WIP key should be skipped, so no missing keys
             expect(result.missingKeys).toEqual({});
             expect(result.skippedKeys).toEqual({
                 feature: {
@@ -81,8 +77,6 @@ describe('translation-utils', () => {
             };
 
             const result = findMissingTranslations(sourceKeys, targetKeys);
-
-            // The skip key should be skipped, so no missing keys
             expect(result.missingKeys).toEqual({});
             expect(result.skippedKeys).toEqual({
                 skip_me: {
@@ -128,15 +122,12 @@ describe('translation-utils', () => {
 
     describe('batchKeysWithMissing', () => {
         it('should create batches from missing keys', () => {
-            // Mock source files
             const sourceFiles = [
                 {
                     path: 'locales/en.json',
                     format: 'json'
                 }
             ];
-
-            // Mock missing keys by locale
             const missingByLocale = {
                 fr: {
                     path: 'locales/en.json',
@@ -153,43 +144,30 @@ describe('translation-utils', () => {
                     }
                 }
             };
-
-            // Call the function
             const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale, 10);
-
-            // Verify the result
             expect(errors).toEqual([]);
             expect(batches).toHaveLength(1);
-
-            // Verify the batch structure
             const batch = batches[0];
             expect(batch.files).toHaveLength(1);
             expect(batch.files[0].path).toBe('locales/en.json');
             expect(batch.files[0].format).toBe('json');
-
-            // Verify the batch content
             const content = JSON.parse(Buffer.from(batch.files[0].content, 'base64').toString());
             expect(content.keys).toBeDefined();
-            expect(Object.keys(content.keys)).toHaveLength(3); // hello, world, goodbye
+            expect(Object.keys(content.keys)).toHaveLength(3);
             expect(content.keys.hello).toBeDefined();
             expect(content.keys.world).toBeDefined();
             expect(content.keys.goodbye).toBeDefined();
-
-            // Verify the locales
             expect(batch.locales).toContain('fr');
             expect(batch.locales).toContain('es');
         });
 
         it('should handle missing source files', () => {
-            // Mock source files
             const sourceFiles = [
                 {
                     path: 'locales/en.json',
                     format: 'json'
                 }
             ];
-
-            // Mock missing keys by locale with a non-existent source file
             const missingByLocale = {
                 fr: {
                     path: 'locales/en.json',
@@ -204,17 +182,11 @@ describe('translation-utils', () => {
                     }
                 }
             };
-
-            // Call the function
             const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale, 10);
-
-            // Verify the result
             expect(errors).toHaveLength(1);
             expect(errors[0].type).toBe('missing_source_file');
             expect(errors[0].locale).toBe('es');
             expect(errors[0].path).toBe('locales/non-existent.json');
-
-            // Verify that we still have batches for the valid source file
             expect(batches).toHaveLength(1);
             expect(batches[0].files[0].path).toBe('locales/en.json');
             expect(batches[0].locales).toContain('fr');
@@ -222,36 +194,25 @@ describe('translation-utils', () => {
         });
 
         it('should respect the batch size', () => {
-            // Mock source files
             const sourceFiles = [
                 {
                     path: 'locales/en.json',
                     format: 'json'
                 }
             ];
-
-            // Create a large number of keys
             const keys = {};
             for (let i = 0; i < 15; i++) {
                 keys[`key${i}`] = `Value ${i}`;
             }
-
-            // Mock missing keys by locale
             const missingByLocale = {
                 fr: {
                     path: 'locales/en.json',
                     keys
                 }
             };
-
-            // Call the function with a batch size of 5
             const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale, 5);
-
-            // Verify the result
             expect(errors).toEqual([]);
             expect(batches).toHaveLength(3); // 15 keys / 5 per batch = 3 batches
-
-            // Verify each batch has the correct number of keys
             const batch1Content = JSON.parse(Buffer.from(batches[0].files[0].content, 'base64').toString());
             const batch2Content = JSON.parse(Buffer.from(batches[1].files[0].content, 'base64').toString());
             const batch3Content = JSON.parse(Buffer.from(batches[2].files[0].content, 'base64').toString());

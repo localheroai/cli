@@ -9,7 +9,7 @@ LocalHero.ai is an AI-powered I18n translation service that seamlessly integrate
 - 🤖 AI-powered translations that preserve your brand voice
 - 🔌 Seamless integration with Rails, React and other frameworks coming soon
 - 🚀 Automated workflow with GitHub Actions support
-- 📦 Works with YAML translation files, JSON support coming soon
+- 📦 Works with YAML and JSON translation files
 
 ## Getting Started 🏁
 

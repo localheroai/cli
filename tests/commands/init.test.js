@@ -73,7 +73,6 @@ describe('init command', () => {
         configUtils.getProjectConfig.mockResolvedValue(null);
         authUtils.checkAuth.mockResolvedValue(false);
 
-        // Simulate user cancellation
         const mockLogin = jest.fn().mockImplementation(async () => {
             throw new Error('User cancelled');
         });
@@ -221,7 +220,6 @@ describe('init command', () => {
             .mockResolvedValueOnce(false)
             .mockResolvedValueOnce(true);
 
-        // Mock import with translations_url
         importUtils.importTranslations.mockResolvedValue({
             status: 'completed',
             statistics: {

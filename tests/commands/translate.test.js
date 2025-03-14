@@ -1,34 +1,13 @@
 import { jest } from '@jest/globals';
 import { translate } from '../../src/commands/translate.js';
 
-/**
- * TODO: Test Suite Update Plan
- * 
- * The translate command has been significantly refactored to better handle JSON files,
- * nested structures, and language wrappers. The test suite needs to be updated to match
- * these changes.
- * 
- * Current issues with the tests:
- * - The findTranslationFiles function is not being mocked correctly
- * - The tests are not setting up the file system state correctly
- * - The tests are not properly testing the flattening/unflattening of nested structures
- * 
- * Fix plan:
- * 1. Create a proper mock for the glob and fs functions that findTranslationFiles uses
- * 2. Create a more integration-style test approach
- * 3. Test each component of the translation process separately
- * 4. Add specific tests for JSON handling and nested structures
- * 
- * All tests have been temporarily skipped until these issues can be addressed.
- */
-
 describe('translate command', () => {
     let mockConsole;
     let configUtils;
     let authUtils;
     let fileUtils;
     let translationUtils;
-    let syncUtils;
+    let syncService;
 
     function createTranslateDeps(overrides = {}) {
         return {
@@ -37,7 +16,7 @@ describe('translate command', () => {
             authUtils,
             fileUtils,
             translationUtils,
-            syncUtils,
+            syncService,
             ...overrides
         };
     }
@@ -53,13 +32,12 @@ describe('translate command', () => {
             getProjectConfig: jest.fn().mockResolvedValue({
                 projectId: 'test-project',
                 sourceLocale: 'en',
-                outputLocales: ['fr', 'es'],
+                outputLocales: ['fr'],
                 translationFiles: {
                     paths: ['locales/']
                 }
             }),
-            updateLastSyncedAt: jest.fn().mockResolvedValue(true),
-            configFilePath: jest.fn().mockReturnValue('localhero.json')
+            updateLastSyncedAt: jest.fn().mockResolvedValue(true)
         };
 
         authUtils = {
@@ -74,11 +52,28 @@ describe('translate command', () => {
             createTranslationJob: jest.fn(),
             checkJobStatus: jest.fn(),
             updateTranslationFile: jest.fn().mockResolvedValue(true),
-            findMissingTranslations: jest.fn()
+            findMissingTranslations: jest.fn().mockReturnValue({
+                missingKeys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+                skippedKeys: {}
+            }),
+            batchKeysWithMissing: jest.fn().mockReturnValue({
+                batches: [{
+                    files: [{
+                        path: 'locales/en.json',
+                        format: 'json',
+                        content: Buffer.from(JSON.stringify({
+                            keys: { farewell: { value: 'Goodbye' } }
+                        })).toString('base64')
+                    }],
+                    locales: ['fr']
+                }],
+                errors: []
+            })
         };
 
-        syncUtils = {
-            checkForUpdates: jest.fn().mockResolvedValue([])
+        syncService = {
+            checkForUpdates: jest.fn().mockResolvedValue({ hasUpdates: false }),
+            applyUpdates: jest.fn().mockResolvedValue({ totalUpdates: 0, totalDeleted: 0 })
         };
     });
 
@@ -87,12 +82,99 @@ describe('translate command', () => {
     });
 
     it('successfully translates missing keys', async () => {
-        // This test is a placeholder for now
-        // We'll implement it properly after fixing the core functionality tests
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [{
+                path: 'locales/en.json',
+                format: 'json',
+                content: Buffer.from(JSON.stringify({
+                    en: { farewell: 'Goodbye' }
+                })).toString('base64')
+            }],
+            targetFilesByLocale: {
+                fr: [{
+                    path: 'locales/fr.json',
+                    format: 'json',
+                    content: Buffer.from(JSON.stringify({
+                        fr: {}
+                    })).toString('base64'),
+                    locale: 'fr'
+                }]
+            },
+            allFiles: [
+                { path: 'locales/en.json', locale: 'en' },
+                { path: 'locales/fr.json', locale: 'fr' }
+            ]
+        });
+
+        translationUtils.createTranslationJob.mockResolvedValue({
+            jobs: [{ id: 'job-123' }]
+        });
+
+        translationUtils.checkJobStatus.mockResolvedValue({
+            status: 'completed',
+            translations: {
+                data: { farewell: 'Au revoir' }
+            },
+            language: { code: 'fr' },
+            translations_url: 'https://localhero.ai/projects/test-project/translations'
+        });
+
+        await translate({ verbose: true }, createTranslateDeps());
+
+        expect(syncService.checkForUpdates).toHaveBeenCalledWith({ verbose: true });
+        expect(syncService.applyUpdates).not.toHaveBeenCalled();
+
+        // Verify console output indicates success
+        const consoleOutput = mockConsole.log.mock.calls
+            .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+            .join('\n');
+
+        expect(consoleOutput).toContain('Found 2 translation files');
+        expect(consoleOutput).toContain('Found 1 source files for locale en');
+        expect(consoleOutput).toContain('Translations complete');
+        expect(consoleOutput).toContain('Updated 1 keys in 1 languages');
+        expect(consoleOutput).toContain('https://localhero.ai/projects/test-project/translations');
+
+        // Verify no errors were logged
+        expect(mockConsole.error).not.toHaveBeenCalled();
+    });
+
+    it('applies updates before translating if available', async () => {
+        syncService.checkForUpdates.mockResolvedValue({
+            hasUpdates: true,
+            updates: { someKey: 'someValue' }
+        });
+
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [{
+                path: 'locales/en.json',
+                format: 'json',
+                content: Buffer.from(JSON.stringify({
+                    en: { farewell: 'Goodbye' }
+                })).toString('base64')
+            }],
+            targetFilesByLocale: { fr: [] },
+            allFiles: [
+                { path: 'locales/en.json', locale: 'en' }
+            ]
+        });
+
+        await translate({ verbose: true }, createTranslateDeps());
+
+        expect(syncService.checkForUpdates).toHaveBeenCalledWith({ verbose: true });
+        expect(syncService.applyUpdates).toHaveBeenCalledWith(
+            { someKey: 'someValue' },
+            { verbose: true }
+        );
     });
 
     it('handles authentication failure', async () => {
         authUtils.checkAuth.mockResolvedValue(false);
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [],
+            targetFilesByLocale: {},
+            allFiles: []
+        });
 
         await translate({}, createTranslateDeps());
 
@@ -102,9 +184,28 @@ describe('translate command', () => {
         expect(process.exit).toHaveBeenCalledWith(1);
     });
 
+    it('handles missing configuration', async () => {
+        configUtils.getProjectConfig.mockResolvedValue(null);
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [],
+            targetFilesByLocale: {},
+            allFiles: []
+        });
+
+        await translate({}, createTranslateDeps());
+
+        expect(mockConsole.error).toHaveBeenCalledWith(
+            expect.stringContaining('No configuration found')
+        );
+        expect(process.exit).toHaveBeenCalledWith(1);
+    });
+
     it('handles missing translation files', async () => {
-        // Mock glob to return empty array
-        fileUtils.findTranslationFiles.mockResolvedValue([]);
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [],
+            targetFilesByLocale: {},
+            allFiles: []
+        });
 
         await translate({}, createTranslateDeps());
 
@@ -114,150 +215,72 @@ describe('translate command', () => {
         expect(process.exit).toHaveBeenCalledWith(1);
     });
 
-    it('handles translation job status failure', async () => {
-        // Mock the job status check to fail
-        const errorMessage = 'Translation job failed: API error';
-        translationUtils.checkJobStatus.mockRejectedValue(new Error(errorMessage));
-
-        // Create a minimal test that directly tests the error handling
-        const testDeps = createTranslateDeps();
-
-        // Simulate a translation job failure
-        try {
-            await testDeps.translationUtils.checkJobStatus('job-123', true);
-            // If we get here, the test should fail
-            expect(true).toBe(false); // This will fail the test if we reach this line
-        } catch (error) {
-            // Verify that the error message is correct
-            expect(error.message).toBe(errorMessage);
-        }
-    });
-
-    // The test for handling WIP translations and language wrappers have been removed
-    // as they require more complex mocking and will be addressed in a future PR
-    // when the translate command is refactored for better testability.
-
-    // The test for handling deeply nested JSON keys has been moved to json-handling.test.js
-    // where it's more appropriate to test this functionality.
-
-    // Focus on testing specific aspects of the translate command
-    // rather than trying to test the entire flow
-
-    // Test 1: Authentication check
-    it('checks authentication before proceeding', async () => {
-        // Mock authentication to fail
-        authUtils.checkAuth.mockResolvedValue(false);
-
-        // Call the translate function
-        await translate({}, createTranslateDeps());
-
-        // Verify that authentication was checked
-        expect(authUtils.checkAuth).toHaveBeenCalled();
-
-        // Verify error message was displayed
-        const allConsoleOutput = mockConsole.error.mock.calls.map(call => call[0]).join('\n');
-        expect(allConsoleOutput).toContain('API key is invalid');
-        expect(allConsoleOutput).toContain('npx @localheroai/cli login');
-
-        // Verify that the process would have exited
-        expect(process.exit).toHaveBeenCalledWith(1);
-    });
-
-    // Test 2: Configuration loading
-    it('loads configuration from localhero.json', async () => {
-        // Mock config to ensure it's loaded
-        const mockConfig = {
-            projectId: 'test_project',
-            sourceLocale: 'en',
-            outputLocales: ['fr', 'de'],
-            translationFiles: {
-                paths: ['test/locales/'],
-                pattern: '**/*.json'
-            }
-        };
-
-        configUtils.getProjectConfig.mockResolvedValue(mockConfig);
-
-        // Mock findTranslationFiles to return no files
-        // This will prevent the function from progressing beyond config loading
-        fileUtils.findTranslationFiles.mockResolvedValue({
-            sourceFiles: [],
-            targetFilesByLocale: {},
-            allFiles: []
-        });
-
-        // Call the translate function
-        await translate({ verbose: true }, createTranslateDeps());
-
-        // Verify that config was loaded
-        expect(configUtils.getProjectConfig).toHaveBeenCalled();
-
-        // Verify that config values were used in the log
-        const allConsoleOutput = mockConsole.log.mock.calls.map(call =>
-            typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0])
-        ).join('\n');
-
-        expect(allConsoleOutput).toContain('test_project');
-        expect(allConsoleOutput).toContain('test/locales/');
-    });
-
-    // Test 3: Handling of missing configuration
-    it('handles missing configuration gracefully', async () => {
-        // Mock a missing config
-        configUtils.getProjectConfig.mockResolvedValue(null);
-
-        // Call the translate function
-        await translate({}, createTranslateDeps());
-
-        // Verify error message
-        const allConsoleOutput = mockConsole.error.mock.calls.map(call => call[0]).join('\n');
-        expect(allConsoleOutput).toContain('No configuration found');
-        expect(allConsoleOutput).toContain('run `npx @localheroai/cli init` first');
-
-        // Verify process exit
-        expect(process.exit).toHaveBeenCalledWith(1);
-    });
-
-    // Test 4: Handling of missing translation files
-    it('handles missing translation files', async () => {
-        // Mock empty file results
-        fileUtils.findTranslationFiles.mockResolvedValue({
-            sourceFiles: [],
-            targetFilesByLocale: {},
-            allFiles: []
-        });
-
-        // Call the translate function
-        await translate({}, createTranslateDeps());
-
-        // Verify error message
-        const allConsoleOutput = mockConsole.error.mock.calls.map(call => call[0]).join('\n');
-        expect(allConsoleOutput).toContain('No translation files found');
-        expect(process.exit).toHaveBeenCalledWith(1);
-    });
-
-    // Test 5: Handling of missing source files
     it('handles missing source files', async () => {
-        // Mock file results with no source files
         fileUtils.findTranslationFiles.mockResolvedValue({
             sourceFiles: [],
-            targetFilesByLocale: { es: [{ path: 'locales/es.json', locale: 'es' }] },
-            allFiles: [{ path: 'locales/es.json', locale: 'es' }]
+            targetFilesByLocale: { fr: [] },
+            allFiles: [{ path: 'locales/fr.json', locale: 'fr' }]
         });
 
-        // Call the translate function
         await translate({}, createTranslateDeps());
 
-        // Verify error message
-        const allConsoleOutput = mockConsole.error.mock.calls.map(call => call[0]).join('\n');
-        expect(allConsoleOutput).toContain('No source files found for locale en');
+        expect(mockConsole.error).toHaveBeenCalledWith(
+            expect.stringContaining('No source files found for locale en')
+        );
         expect(process.exit).toHaveBeenCalledWith(1);
     });
-
-    // Additional tests can be added for specific JSON handling features
-    // These would require more complex mocking of the file system and translation process
 
     it('handles errors during translation job creation', async () => {
-        // ... existing code ...
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [{
+                path: 'locales/en.json',
+                format: 'json',
+                content: Buffer.from(JSON.stringify({
+                    en: { farewell: 'Goodbye' }
+                })).toString('base64')
+            }],
+            targetFilesByLocale: { fr: [] },
+            allFiles: [
+                { path: 'locales/en.json', locale: 'en' }
+            ]
+        });
+
+        translationUtils.createTranslationJob.mockRejectedValue(new Error('API Error'));
+
+        await translate({}, createTranslateDeps());
+
+        expect(mockConsole.error).toHaveBeenCalledWith(
+            expect.stringContaining('Error creating translation job: API Error')
+        );
+        expect(process.exit).toHaveBeenCalledWith(1);
+    });
+
+    it('handles job status check errors', async () => {
+        fileUtils.findTranslationFiles.mockResolvedValue({
+            sourceFiles: [{
+                path: 'locales/en.json',
+                format: 'json',
+                content: Buffer.from(JSON.stringify({
+                    en: { farewell: 'Goodbye' }
+                })).toString('base64')
+            }],
+            targetFilesByLocale: { fr: [] },
+            allFiles: [
+                { path: 'locales/en.json', locale: 'en' }
+            ]
+        });
+
+        translationUtils.createTranslationJob.mockResolvedValue({
+            jobs: [{ id: 'job-123' }]
+        });
+
+        translationUtils.checkJobStatus.mockRejectedValue(new Error('Status check failed'));
+
+        await translate({}, createTranslateDeps());
+
+        expect(mockConsole.error).toHaveBeenCalledWith(
+            expect.stringContaining('Error creating translation job: Status check failed')
+        );
+        expect(process.exit).toHaveBeenCalledWith(1);
     });
 }); 

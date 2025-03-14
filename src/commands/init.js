@@ -68,73 +68,96 @@ const PROJECT_TYPES = {
     }
 };
 
-async function detectProjectType() {
-    // First, check for project type based on indicators
-    for (const [type, config] of Object.entries(PROJECT_TYPES)) {
-        try {
-            for (const indicator of config.indicators) {
-                await fs.access(indicator);
+async function directoryExists(path) {
+    try {
+        await fs.access(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
 
-                // For React projects, check for common translation directories
-                if (type === 'react') {
-                    const commonReactPaths = [
-                        'src/locales',
-                        'public/locales',
-                        'src/i18n',
-                        'src/translations',
-                        'src/lang',
-                        'assets/i18n',
-                        'locales'
-                    ];
-
-                    for (const translationPath of commonReactPaths) {
-                        try {
-                            await fs.access(translationPath);
-                            return {
-                                type,
-                                defaults: {
-                                    ...config.defaults,
-                                    translationPath: `${translationPath}/`
-                                }
-                            };
-                        } catch {
-                            // Path doesn't exist, continue checking
-                        }
-                    }
-                }
-
-                // For Next.js projects, check for common translation directories
-                if (type === 'nextjs') {
-                    const commonNextPaths = [
-                        'public/locales',
-                        'src/locales',
-                        'locales'
-                    ];
-
-                    for (const translationPath of commonNextPaths) {
-                        try {
-                            await fs.access(translationPath);
-                            return {
-                                type,
-                                defaults: {
-                                    ...config.defaults,
-                                    translationPath: `${translationPath}/`
-                                }
-                            };
-                        } catch {
-                            // Path doesn't exist, continue checking
-                        }
-                    }
-                }
-
-                return { type, defaults: config.defaults };
-            }
-        } catch {
-            continue;
+async function findFirstExistingPath(paths) {
+    for (const path of paths) {
+        if (await directoryExists(path)) {
+            return path;
         }
     }
+    return null;
+}
 
-    // If no project type detected, look for common translation directories
+async function getDirectoryContents(dir) {
+    try {
+        const files = await fs.readdir(dir);
+        return {
+            files,
+            jsonFiles: files.filter(f => f.endsWith('.json')),
+            yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+        };
+    } catch (error) {
+        console.debug(`Could not read directory ${dir}: ${error.message}`);
+        return null;
+    }
+}
+
+async function detectFramework(indicators) {
+    for (const indicator of indicators) {
+        if (await directoryExists(indicator)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+async function detectProjectType() {
+    for (const [type, config] of Object.entries(PROJECT_TYPES)) {
+        if (!config.indicators.length) continue;
+
+        const isFramework = await detectFramework(config.indicators);
+        if (!isFramework) continue;
+        if (type === 'react') {
+            const commonReactPaths = [
+                'src/locales',
+                'public/locales',
+                'src/i18n',
+                'src/translations',
+                'src/lang',
+                'assets/i18n',
+                'locales'
+            ];
+
+            const translationPath = await findFirstExistingPath(commonReactPaths);
+            if (translationPath) {
+                return {
+                    type,
+                    defaults: {
+                        ...config.defaults,
+                        translationPath: `${translationPath}/`
+                    }
+                };
+            }
+        }
+
+        if (type === 'nextjs') {
+            const commonNextPaths = [
+                'public/locales',
+                'src/locales',
+                'locales'
+            ];
+
+            const translationPath = await findFirstExistingPath(commonNextPaths);
+            if (translationPath) {
+                return {
+                    type,
+                    defaults: {
+                        ...config.defaults,
+                        translationPath: `${translationPath}/`
+                    }
+                };
+            }
+        }
+        return { type, defaults: config.defaults };
+    }
     const commonTranslationDirs = [
         'locales',
         'src/locales',
@@ -149,41 +172,28 @@ async function detectProjectType() {
     ];
 
     for (const dir of commonTranslationDirs) {
-        try {
-            await fs.access(dir);
+        if (!(await directoryExists(dir))) continue;
 
-            // Check if this directory contains JSON files
-            try {
-                const files = await fs.readdir(dir);
-                const hasJsonFiles = files.some(file => file.endsWith('.json'));
+        const contents = await getDirectoryContents(dir);
+        if (!contents) continue;
 
-                if (hasJsonFiles) {
-                    return {
-                        type: 'detected',
-                        defaults: {
-                            translationPath: `${dir}/`,
-                            filePattern: '**/*.json'
-                        }
-                    };
-                }
-            } catch {
-                // Continue if we can't read the directory
-            }
-
-            // Directory exists but no JSON files found, use generic pattern
+        if (contents.jsonFiles.length > 0) {
             return {
                 type: 'detected',
                 defaults: {
                     translationPath: `${dir}/`,
-                    filePattern: '**/*.{json,yml,yaml}'
+                    filePattern: '**/*.json'
                 }
             };
-        } catch {
-            // Directory doesn't exist, continue checking
         }
+        return {
+            type: 'detected',
+            defaults: {
+                translationPath: `${dir}/`,
+                filePattern: '**/*.{json,yml,yaml}'
+            }
+        };
     }
-
-    // If no translation directories found, use generic defaults
     return {
         type: 'generic',
         defaults: PROJECT_TYPES.generic.defaults
@@ -258,7 +268,6 @@ async function promptForConfig(projectDefaults, projectService, promptService, c
         };
     }
 
-    // Check for common translation directories
     const commonDirs = [
         'locales',
         'src/locales',
@@ -270,11 +279,8 @@ async function promptForConfig(projectDefaults, projectService, promptService, c
 
     const existingDirs = [];
     for (const dir of commonDirs) {
-        try {
-            await fs.access(dir);
+        if (await directoryExists(dir)) {
             existingDirs.push(dir);
-        } catch {
-            // Directory doesn't exist
         }
     }
 
@@ -291,23 +297,17 @@ async function promptForConfig(projectDefaults, projectService, promptService, c
         hint: dirHint
     });
 
-    // Automatically determine the file pattern based on the files found
     let filePattern = projectDefaults.defaults.filePattern;
+    const contents = await getDirectoryContents(translationPath);
 
-    try {
-        const files = await fs.readdir(translationPath);
-        const jsonFiles = files.filter(f => f.endsWith('.json'));
-        const yamlFiles = files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'));
-
-        if (jsonFiles.length > 0 && yamlFiles.length === 0) {
+    if (contents) {
+        if (contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0) {
             filePattern = '**/*.json';
-        } else if (jsonFiles.length === 0 && yamlFiles.length > 0) {
+        } else if (contents.jsonFiles.length === 0 && contents.yamlFiles.length > 0) {
             filePattern = '**/*.{yml,yaml}';
-        } else if (jsonFiles.length > 0 && yamlFiles.length > 0) {
+        } else if (contents.jsonFiles.length > 0 && contents.yamlFiles.length > 0) {
             filePattern = '**/*.{json,yml,yaml}';
         }
-    } catch {
-        // If we can't read the directory, use the default pattern
     }
 
     const ignorePaths = await promptService.input({

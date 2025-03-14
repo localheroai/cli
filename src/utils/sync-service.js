@@ -74,8 +74,6 @@ export const syncService = {
     async applyUpdates(updates, { verbose = false } = {}) {
         let totalUpdates = 0;
         let totalDeleted = 0;
-
-        // Process updated translations
         for (const file of updates.updates.files || []) {
             for (const lang of file.languages) {
                 if (verbose) {
@@ -99,28 +97,23 @@ export const syncService = {
                 }
             }
         }
-
-        // Process deleted keys
         const deletedKeys = updates.updates.deleted_keys || [];
         if (deletedKeys.length > 0) {
             if (verbose) {
                 console.log(chalk.blue(`\nProcessing ${deletedKeys.length} deleted keys`));
             }
-
-            // Get the project config to find translation files
             const config = await configService.getValidProjectConfig();
-
-            // Find all translation files
-            const translationFiles = await findTranslationFiles(config);
+            const translationFiles = await findTranslationFiles(config, {
+                parseContent: false,
+                includeContent: false,
+                extractKeys: false,
+                verbose
+            });
 
             if (verbose) {
                 console.log(chalk.blue(`Found ${translationFiles.length} translation files to check for deleted keys`));
             }
-
-            // Extract the key names to delete
             const keysToDelete = deletedKeys.map(key => key.name);
-
-            // Delete keys from each translation file
             for (const file of translationFiles) {
                 try {
                     if (verbose) {

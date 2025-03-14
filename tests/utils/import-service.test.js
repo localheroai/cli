@@ -31,6 +31,87 @@ describe('importService', () => {
         await jest.unstable_mockModule('fs/promises', () => mockFs.promises);
         await jest.unstable_mockModule('../../src/api/imports.js', () => mockImportsApi);
 
+        // Mock the findTranslationFiles function from files.js
+        await jest.unstable_mockModule('../../src/utils/files.js', () => ({
+            findTranslationFiles: jest.fn().mockImplementation((config, options) => {
+                const { basePath = process.cwd() } = options || {};
+
+                // If paths is empty, return an empty array
+                if (!config.translationFiles?.paths || config.translationFiles.paths.length === 0) {
+                    return [];
+                }
+
+                // Otherwise, use mockGlob to simulate file discovery
+                const pattern = path.join(basePath, config.translationFiles.paths[0], '**/*.{json,yml,yaml}');
+                const ignore = (config.translationFiles.ignore || []).map(i => path.join(basePath, i));
+
+                // Call mockGlob so the tests can verify the correct arguments
+                const globParams = {
+                    ignore,
+                    nodir: true
+                };
+
+                return mockGlob(pattern, globParams).then((files) => {
+                    const processedFiles = files.map(file => {
+                        const ext = path.extname(file).slice(1).toLowerCase();
+                        const basename = path.basename(file, path.extname(file));
+                        const locale = basename.split('.')[0] === config.sourceLocale ?
+                            config.sourceLocale : basename;
+
+                        return {
+                            path: file,
+                            locale,
+                            format: ext === 'yml' ? 'yaml' : ext,
+                            namespace: ''
+                        };
+                    });
+
+                    if (options?.returnFullResult) {
+                        const sourceFiles = processedFiles.filter(file => file.locale === config.sourceLocale);
+                        const targetFilesByLocale = {};
+
+                        for (const locale of (config.outputLocales || [])) {
+                            targetFilesByLocale[locale] = processedFiles.filter(file => file.locale === locale);
+                        }
+
+                        return {
+                            allFiles: processedFiles,
+                            sourceFiles,
+                            targetFilesByLocale
+                        };
+                    }
+
+                    return processedFiles;
+                });
+            }),
+
+            // Add the flattenTranslations function that import-service.js needs
+            flattenTranslations: jest.fn().mockImplementation((obj) => {
+                const result = {};
+                const flatten = (obj, prefix = '') => {
+                    for (const key in obj) {
+                        const newKey = prefix ? `${prefix}.${key}` : key;
+                        if (typeof obj[key] === 'object' && obj[key] !== null && !Array.isArray(obj[key])) {
+                            flatten(obj[key], newKey);
+                        } else {
+                            result[newKey] = obj[key];
+                        }
+                    }
+                };
+                flatten(obj);
+                return result;
+            }),
+
+            // Add other exports that might be needed
+            parseFile: jest.fn().mockImplementation((content, format) => {
+                try {
+                    return JSON.parse(content);
+                } catch (e) {
+                    return { error: 'Failed to parse' };
+                }
+            })
+        }));
+
         const importServiceModule = await import('../../src/utils/import-service.js');
         importService = importServiceModule.importService;
     });
@@ -100,21 +181,15 @@ describe('importService', () => {
             ];
 
             mockGlob.mockResolvedValue(files);
-
-            // Mock file content reading
             mockFs.promises.readFile.mockImplementation((filePath) => {
                 if (filePath.endsWith('en.json')) {
-                    return Promise.resolve('{"hello": "Hello"}');
+                    return Promise.resolve('{"hello":"Hello"}');
                 }
                 if (filePath.endsWith('fr.json')) {
-                    return Promise.resolve('{"hello": "Bonjour"}');
+                    return Promise.resolve('{"hello":"Bonjour"}');
                 }
                 return Promise.reject(new Error(`Unexpected file: ${filePath}`));
             });
-
-            // Update the expected base64 content to match the flattened JSON
-            const enContent = Buffer.from(JSON.stringify({ hello: "Hello" })).toString('base64');
-            const frContent = Buffer.from(JSON.stringify({ hello: "Bonjour" })).toString('base64');
 
             mockImportsApi.createImport.mockResolvedValue({
                 status: 'completed',
@@ -128,8 +203,6 @@ describe('importService', () => {
                 source: [{ path: 'locales/en.json', language: 'en', format: 'json', namespace: '' }],
                 target: [{ path: 'locales/fr.json', language: 'fr', format: 'json', namespace: '' }]
             });
-
-            // Use toEqual for more flexible matching
             expect(mockImportsApi.createImport.mock.calls[0][0]).toEqual({
                 projectId: 'test-project',
                 translations: [
@@ -137,13 +210,13 @@ describe('importService', () => {
                         language: 'en',
                         format: 'json',
                         filename: 'locales/en.json',
-                        content: enContent
+                        content: Buffer.from('{"hello":"Hello"}').toString('base64')
                     },
                     {
                         language: 'fr',
                         format: 'json',
                         filename: 'locales/fr.json',
-                        content: frContent
+                        content: Buffer.from('{"hello":"Bonjour"}').toString('base64')
                     }
                 ]
             });
@@ -177,10 +250,8 @@ describe('importService', () => {
             ];
 
             mockGlob.mockResolvedValue(files);
-
-            // Update the expected base64 content to match the flattened JSON
-            const fileContent = Buffer.from(JSON.stringify({ test: "content" })).toString('base64');
-            mockFs.promises.readFile.mockResolvedValue('{"test": "content"}');
+            const testContent = '{"test":"content"}';
+            mockFs.promises.readFile.mockResolvedValue(testContent);
 
             mockImportsApi.createImport.mockResolvedValue({
                 status: 'processing',
@@ -203,8 +274,6 @@ describe('importService', () => {
 
             expect(mockImportsApi.checkImportStatus).toHaveBeenCalledTimes(2);
             expect(result.status).toBe('completed');
-
-            // Use toEqual for more flexible matching
             expect(mockImportsApi.createImport.mock.calls[0][0]).toEqual({
                 projectId: 'test-project',
                 translations: [
@@ -212,7 +281,7 @@ describe('importService', () => {
                         language: 'en',
                         format: 'json',
                         filename: 'locales/en.json',
-                        content: fileContent
+                        content: Buffer.from('{"test":"content"}').toString('base64')
                     }
                 ]
             });

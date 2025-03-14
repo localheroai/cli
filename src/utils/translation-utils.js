@@ -1,3 +1,6 @@
+import path from 'path';
+import { flattenTranslations, parseFile } from './files.js';
+
 export function findMissingTranslations(sourceKeys, targetKeys) {
     const missingKeys = {};
     const skippedKeys = {};
@@ -120,14 +123,8 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
 
             const contentObj = { keys: {} };
             for (const [key, value] of Object.entries(batchKeys)) {
-                const stringValue = String(value);
-
                 contentObj.keys[key] = {
-                    value: stringValue,
-                    context: {
-                        parent_keys: key.split('.').slice(0, -1),
-                        sibling_keys: {}
-                    }
+                    value: String(value)
                 };
             }
 
@@ -143,4 +140,75 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
     }
 
     return { batches, errors };
+}
+
+export function findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale) {
+    return targetFiles.find(f =>
+        f.locale === targetLocale &&
+        (path.dirname(f.path) === path.dirname(sourceFile.path) ||
+            path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale))
+    );
+}
+
+export function generateTargetPath(sourceFile, targetLocale, sourceLocale) {
+    const sourceExt = path.extname(sourceFile.path);
+    const sourceDir = path.dirname(sourceFile.path);
+    const sourceName = path.basename(sourceFile.path, sourceExt);
+
+    if (sourceName === sourceLocale) {
+        return path.join(sourceDir, `${targetLocale}${sourceExt}`);
+    }
+
+    if (sourceName.endsWith(`.${sourceLocale}`)) {
+        const baseName = sourceName.slice(0, -(sourceLocale.length + 1));
+        return path.join(sourceDir, `${baseName}.${targetLocale}${sourceExt}`);
+    }
+
+    if (sourceName.includes(`-${sourceLocale}`)) {
+        const baseName = sourceName.slice(0, -(sourceLocale.length + 1));
+        return path.join(sourceDir, `${baseName}-${targetLocale}${sourceExt}`);
+    }
+
+    const sourceParentDir = path.basename(sourceDir);
+    if (sourceParentDir === sourceLocale) {
+        const grandParentDir = path.dirname(sourceDir);
+        return path.join(grandParentDir, targetLocale, path.basename(sourceFile.path));
+    }
+
+    return sourceFile.path.replace(sourceLocale, targetLocale);
+}
+
+export function processTargetContent(targetContent, targetLocale) {
+    if (targetContent[targetLocale]) {
+        return flattenTranslations(targetContent[targetLocale]);
+    }
+    return flattenTranslations(targetContent);
+}
+
+export function processLocaleTranslations(sourceKeys, targetLocale, targetFiles, sourceFile, sourceLocale) {
+    try {
+        const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
+        let targetKeys = {};
+        let targetPath = '';
+
+        if (targetFile) {
+            const targetContentRaw = Buffer.from(targetFile.content, 'base64').toString();
+            const targetContent = parseFile(targetContentRaw, targetFile.format);
+            targetKeys = processTargetContent(targetContent, targetLocale);
+            targetPath = targetFile.path;
+        } else {
+            targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
+        }
+
+        const { missingKeys, skippedKeys } = findMissingTranslations(sourceKeys, targetKeys);
+
+        return {
+            targetPath,
+            missingKeys,
+            skippedKeys,
+            targetFile
+        };
+    } catch (error) {
+        throw new Error(`Failed to process translations for ${targetLocale}: ${error.message}`);
+    }
 } 

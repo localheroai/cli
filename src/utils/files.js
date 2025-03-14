@@ -16,35 +16,25 @@ export function parseFile(content, format) {
 }
 
 export function extractLocaleFromPath(filePath, localeRegex) {
-    if (filePath === 'path/to/en.yml' || filePath === 'path/to/en.json') {
-        return 'en';
-    }
-
-    if (filePath === 'path/to/no-locale-here.json') {
-        throw new Error(`Could not extract locale from path: ${filePath}`);
-    }
-
     const filename = path.basename(filePath);
-    const regexMatch = filename.match(new RegExp(localeRegex));
+    const dirName = path.basename(path.dirname(filePath));
 
-    if (regexMatch && regexMatch[1]) {
-        const locale = regexMatch[1].toLowerCase();
-        if (isValidLocale(locale)) {
-            return locale;
+    // Try the regex pattern first
+    try {
+        const regexMatch = filename.match(new RegExp(localeRegex));
+        if (regexMatch && regexMatch[1]) {
+            const locale = regexMatch[1].toLowerCase();
+            if (isValidLocale(locale)) {
+                return locale;
+            }
         }
+    } catch (error) {
+        // If regex is invalid, continue with directory check
     }
 
-    const dirName = path.basename(path.dirname(filePath));
+    // Try directory name as fallback
     if (isValidLocale(dirName)) {
         return dirName;
-    }
-
-    const filenameParts = filename.split('.');
-    if (filenameParts.length > 2) {
-        const potentialLocale = filenameParts[filenameParts.length - 2].toLowerCase();
-        if (isValidLocale(potentialLocale)) {
-            return potentialLocale;
-        }
     }
 
     throw new Error(`Could not extract locale from path: ${filePath}`);
@@ -123,31 +113,19 @@ function unflattenTranslations(flatObj) {
 
 function preserveJsonStructure(originalObj, newTranslations, format) {
     if (format === 'flat') {
-        // For flat format, merge with original object to preserve all keys
         return { ...originalObj, ...newTranslations };
     }
 
     if (format === 'nested') {
-        // For nested format, we need to preserve the original nested structure
-        // Create a merged object that includes all original keys
         const merged = { ...originalObj };
-
-        // Unflatten the new translations
         const unflattenedNew = unflattenTranslations(newTranslations);
-
-        // Recursively merge the unflattened translations with the original object
         return deepMerge(merged, unflattenedNew);
     }
-
-    // For mixed format, we need to preserve the original structure as much as possible
     const result = { ...originalObj };
 
     for (const [key, value] of Object.entries(newTranslations)) {
         if (key.includes('.')) {
-            // This is a flattened key, we need to unflatten it
             const keys = key.split('.');
-
-            // Check if the original object already has this key in flat format
             if (originalObj[key] !== undefined) {
                 result[key] = value;
                 continue;
@@ -158,8 +136,6 @@ function preserveJsonStructure(originalObj, newTranslations, format) {
             for (let i = 0; i < keys.length - 1; i++) {
                 const k = keys[i];
                 current[k] = current[k] || {};
-
-                // If we encounter a non-object value in the path, we need to replace it
                 if (typeof current[k] !== 'object' || Array.isArray(current[k])) {
                     current[k] = {};
                 }
@@ -169,7 +145,6 @@ function preserveJsonStructure(originalObj, newTranslations, format) {
 
             current[keys[keys.length - 1]] = value;
         } else {
-            // This is a top-level key, just set it directly
             result[key] = value;
         }
     }
@@ -186,13 +161,11 @@ function deepMerge(target, source) {
     const result = { ...target };
 
     for (const [key, value] of Object.entries(source)) {
-        // If both values are objects, merge them recursively
         if (value && typeof value === 'object' &&
             result[key] && typeof result[key] === 'object' &&
             !Array.isArray(value) && !Array.isArray(result[key])) {
             result[key] = deepMerge(result[key], value);
         } else {
-            // Otherwise just use the source value
             result[key] = value;
         }
     }
@@ -200,108 +173,192 @@ function deepMerge(target, source) {
     return result;
 }
 
-export async function findTranslationFiles(config) {
+function extractNamespace(filePath) {
+    const fileName = path.basename(filePath, path.extname(filePath));
+    const dirName = path.basename(path.dirname(filePath));
+
+    // Pattern 1: /path/to/en/common.json -> namespace = common
+    if (/^[a-z]{2}(-[A-Z]{2})?$/.test(dirName)) {
+        return fileName;
+    }
+
+    // Pattern 2: /path/to/messages.en.json -> namespace = messages
+    const dotMatch = fileName.match(/^(.+)\.([a-z]{2}(?:-[A-Z]{2})?)$/);
+    if (dotMatch) {
+        return dotMatch[1];
+    }
+
+    // Pattern 3: /path/to/common-en.json -> namespace = common
+    const dashMatch = fileName.match(/^(.+)-([a-z]{2}(?:-[A-Z]{2})?)$/);
+    if (dashMatch) {
+        return dashMatch[1];
+    }
+
+    return '';
+}
+
+async function processFile(filePath, format, locale, options) {
+    const {
+        parseContent = true,
+        includeContent = true,
+        extractKeys = true,
+        includeNamespace = false
+    } = options;
+
+    const result = {
+        path: filePath,
+        format,
+        locale
+    };
+
+    if (!parseContent) {
+        return result;
+    }
+
+    const content = await readFile(filePath, 'utf8');
+    const parsedContent = parseFile(content, format);
+
+    if (includeContent) {
+        result.content = Buffer.from(content).toString('base64');
+    }
+
+    if (extractKeys) {
+        const hasLanguageWrapper = parsedContent[locale] !== undefined;
+        result.hasLanguageWrapper = hasLanguageWrapper;
+        const translationData = hasLanguageWrapper ? parsedContent[locale] : parsedContent;
+        result.translations = translationData;
+        result.keys = flattenTranslations(translationData);
+    }
+
+    if (includeNamespace) {
+        result.namespace = '';  // Default empty namespace
+    }
+
+    return result;
+}
+
+/**
+ * Find translation files in the specified paths
+ * @param {Object} config - Project configuration
+ * @param {Object} [options={}] - Options for file processing
+ * @param {boolean} [options.parseContent=true] - Whether to parse and process file content
+ * @param {boolean} [options.includeContent=true] - Whether to include raw file content in the result
+ * @param {boolean} [options.extractKeys=true] - Whether to extract and process translation keys
+ * @param {string} [options.basePath=process.cwd()] - Base path for file resolution
+ * @param {string} [options.sourceLocale] - Source locale for filtering
+ * @param {string[]} [options.targetLocales] - Target locales for filtering
+ * @param {boolean} [options.includeNamespace=false] - Whether to include namespace info
+ * @param {boolean} [options.verbose=false] - Whether to log verbose information
+ * @param {boolean} [options.returnFullResult=false] - Whether to return the full result object or just the allFiles array
+ * @returns {Object} - Object containing all files, source files, and target files by locale
+ */
+export async function findTranslationFiles(config, options = {}) {
+    const {
+        parseContent = true,
+        includeContent = true,
+        extractKeys = true,
+        basePath = process.cwd(),
+        sourceLocale = config.sourceLocale,
+        targetLocales = config.outputLocales || [],
+        includeNamespace = false,
+        verbose = false,
+        returnFullResult = false
+    } = options;
+
     const { translationFiles } = config;
-    const { paths, pattern = '**/*.{json,yml,yaml}', ignore = [], localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$' } = translationFiles;
+    const {
+        paths = [],
+        pattern = '**/*.{json,yml,yaml}',
+        ignore = [],
+        localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
+    } = translationFiles || {};
 
-    const allFiles = [];
+    const processedFiles = [];
 
-    for (const basePath of paths) {
-        const globPattern = path.join(basePath, pattern);
-        const files = await glob(globPattern, {
-            ignore: ignore.map(i => path.join(basePath, i)),
-            absolute: false // Use relative paths
-        });
+    for (const translationPath of paths) {
+        const fullPath = path.join(basePath, translationPath);
+        const globPattern = path.join(fullPath, pattern);
 
-        for (const filePath of files) {
+        if (verbose) {
+            console.log(chalk.blue(`Searching for translation files in ${globPattern}`));
+        }
+
+        let files;
+        try {
+            files = await glob(globPattern, {
+                ignore: ignore.map(i => path.join(basePath, i)),
+                absolute: false
+            });
+
+            if (verbose) {
+                console.log(chalk.blue(`Found ${files.length} files in ${translationPath}`));
+            }
+        } catch (error) {
+            if (verbose) {
+                console.error(chalk.red(`Error searching for files in ${translationPath}: ${error.message}`));
+            }
+            files = [];
+        }
+
+        for (const file of files) {
             try {
-                const content = await readFile(filePath, 'utf8');
-                const format = path.extname(filePath).slice(1).toLowerCase();
+                const filePath = file;
+                const format = path.extname(file).slice(1);
+                const locale = extractLocaleFromPath(file, localeRegex);
 
-                // Determine locale from path or filename
-                let locale;
+                const result = {
+                    path: filePath,
+                    format,
+                    locale
+                };
 
-                // Check if file is in a directory named after a locale
-                const dirName = path.basename(path.dirname(filePath));
-                if (isValidLocale(dirName)) {
-                    locale = dirName;
-                } else {
-                    // Try to extract locale from filename using patterns
-                    try {
-                        locale = extractLocaleFromPath(filePath, localeRegex);
-                    } catch {
-                        console.warn(chalk.yellow(`⚠️  Could not determine locale for ${filePath}, skipping`));
-                        continue;
+                if (parseContent) {
+                    const content = await readFile(filePath, 'utf8');
+                    const parsedContent = parseFile(content, format);
+
+                    if (includeContent) {
+                        result.content = Buffer.from(content).toString('base64');
+                    }
+
+                    if (extractKeys) {
+                        const hasLanguageWrapper = parsedContent[locale] !== undefined;
+                        result.hasLanguageWrapper = hasLanguageWrapper;
+                        const translationData = hasLanguageWrapper ? parsedContent[locale] : parsedContent;
+                        result.translations = translationData;
+                        result.keys = flattenTranslations(translationData);
                     }
                 }
 
-                // Parse file content
-                let parsedContent;
-                try {
-                    parsedContent = parseFile(content, format);
-                } catch (error) {
-                    console.warn(chalk.yellow(`⚠️  Failed to parse ${filePath}: ${error.message}`));
-                    continue;
+                if (includeNamespace) {
+                    result.namespace = extractNamespace(filePath);
                 }
 
-                // Check if the file has a language wrapper (e.g., { "en": { ... } })
-                let translations;
-                const hasLanguageWrapper = parsedContent[locale] && typeof parsedContent[locale] === 'object';
-
-                if (hasLanguageWrapper) {
-                    translations = flattenTranslations(parsedContent[locale]);
-                } else {
-                    translations = flattenTranslations(parsedContent);
-                }
-
-                // Skip empty files
-                if (Object.keys(translations).length === 0) {
-                    console.warn(chalk.yellow(`⚠️  No translations found in ${filePath}, skipping`));
-                    continue;
-                }
-
-                // Create keys object with context
-                const keys = {};
-                for (const [key, value] of Object.entries(translations)) {
-                    const parts = key.split('.');
-                    const parentKeys = parts.slice(0, -1);
-                    const siblings = {};
-
-                    Object.entries(translations)
-                        .filter(([k, _v]) => {
-                            const kParts = k.split('.');
-                            return k !== key &&
-                                kParts.length === parts.length &&
-                                kParts.slice(0, -1).join('.') === parentKeys.join('.');
-                        })
-                        .forEach(([k, v]) => {
-                            siblings[k] = v;
-                        });
-
-                    keys[key] = {
-                        value,
-                        context: {
-                            parent_keys: parentKeys,
-                            sibling_keys: siblings
-                        }
-                    };
-                }
-
-                allFiles.push({
-                    path: filePath,
-                    locale,
-                    format,
-                    content: Buffer.from(content).toString('base64'),
-                    keys,
-                    hasLanguageWrapper
-                });
+                processedFiles.push(result);
             } catch (error) {
-                console.warn(chalk.yellow(`⚠️  Error processing ${filePath}: ${error.message}`));
+                if (verbose) {
+                    console.warn(chalk.yellow(`Warning: ${error.message}`));
+                }
             }
         }
     }
 
-    return allFiles;
+    if (!returnFullResult) {
+        return processedFiles;
+    }
+
+    const allFiles = processedFiles;
+    const sourceFiles = allFiles.filter(file => file.locale === sourceLocale);
+    const targetFilesByLocale = {};
+
+    for (const locale of targetLocales) {
+        targetFilesByLocale[locale] = allFiles.filter(file => file.locale === locale);
+    }
+
+    return {
+        allFiles,
+        sourceFiles,
+        targetFilesByLocale
+    };
 }
 
 export {

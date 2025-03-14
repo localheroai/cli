@@ -10,21 +10,13 @@ describe('JSON handling', () => {
 
     beforeEach(async () => {
         jest.resetModules();
-
-        // Set NODE_ENV to test
         process.env.NODE_ENV = 'test';
-
-        // Mock fs/promises module
         mockFs = {
             readFile: jest.fn(),
             writeFile: jest.fn(),
             mkdir: jest.fn()
         };
-
-        // Mock the modules
         await jest.unstable_mockModule('fs/promises', () => mockFs);
-
-        // Import the modules after mocking
         const filesModule = await import('../../src/utils/files.js');
         const updaterModule = await import('../../src/utils/translation-updater.js');
 
@@ -33,13 +25,10 @@ describe('JSON handling', () => {
         unflattenTranslations = filesModule.unflattenTranslations;
         preserveJsonStructure = filesModule.preserveJsonStructure;
         updateTranslationFile = updaterModule.updateTranslationFile;
-
-        // Suppress console warnings
         jest.spyOn(console, 'warn').mockImplementation(() => { });
     });
 
     afterEach(() => {
-        // Reset NODE_ENV
         delete process.env.NODE_ENV;
         jest.clearAllMocks();
     });
@@ -250,23 +239,23 @@ describe('JSON handling', () => {
 
     describe('updateTranslationFile', () => {
         it('handles JSON files', async () => {
-            // This is a simplified test that just verifies the function doesn't throw
-            // We're not testing the actual file operations since they're mocked
-            const filePath = '/path/to/translations.json';
+            const filePath = 'translations.json';
             const translations = {
                 'navbar.home': 'Home',
                 'navbar.about': 'About'
             };
-
-            // Mock the file read to return a valid JSON
             mockFs.readFile.mockResolvedValue(JSON.stringify({
                 navbar: {
                     home: 'Old Home'
                 }
             }));
+            mockFs.writeFile.mockResolvedValue(undefined);
 
-            await expect(updateTranslationFile(filePath, translations, 'en'))
-                .resolves.not.toThrow();
+            const result = await updateTranslationFile(filePath, translations, 'en');
+            expect(result).toEqual({
+                updatedKeys: ['navbar.home', 'navbar.about'],
+                created: false
+            });
         });
     });
 }); 

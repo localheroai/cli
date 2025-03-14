@@ -11,7 +11,6 @@ describe('syncService', () => {
     beforeEach(async () => {
         jest.resetModules();
 
-        // Create fresh mocks
         mockConfigService = {
             getValidProjectConfig: jest.fn(),
             updateLastSyncedAt: jest.fn()

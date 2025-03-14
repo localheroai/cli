@@ -88,9 +88,11 @@ en:
             const filePath = path.join(tempDir, 'nonexistent', 'en.yml');
             const updates = { 'key': 'value' };
 
-            await expect(updateTranslationFile(filePath, updates))
-                .resolves
-                .toEqual(['key']);
+            const result = await updateTranslationFile(filePath, updates);
+            expect(result).toEqual({
+                updatedKeys: ['key'],
+                created: true
+            });
         });
     });
 

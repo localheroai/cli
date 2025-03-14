@@ -18,7 +18,7 @@ function getExistingQuoteStyles(content) {
         if (!line || line.trim().startsWith('#')) continue;
 
         const indent = line.match(indentRegex)[0].length;
-        const level = indent >> 1; // Divide by 2 using bit shift
+        const level = indent >> 1; /* Divide by 2 using bit shift */
 
         pathLength = level;
 
@@ -97,12 +97,17 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
 export async function updateTranslationFile(filePath, translations, languageCode = 'en') {
     try {
         const fileExt = path.extname(filePath).slice(1).toLowerCase();
+        const result = {
+            updatedKeys: Object.keys(translations),
+            created: false
+        };
 
         if (fileExt === 'json') {
-            return await updateJsonFile(filePath, translations, languageCode);
+            await updateJsonFile(filePath, translations, languageCode);
+            return result;
         }
 
-        // YAML handling (existing code)
+        // YAML handling
         let existingContent = '';
         let styles;
         try {
@@ -111,6 +116,7 @@ export async function updateTranslationFile(filePath, translations, languageCode
         } catch {
             console.warn(`Creating new file: ${filePath}`);
             styles = new Map();
+            result.created = true;
         }
 
         const hasTrailingSpace = /\s$/.test(existingContent);
@@ -118,7 +124,7 @@ export async function updateTranslationFile(filePath, translations, languageCode
         const sourceLanguage = Object.keys(yamlContent)[0];
 
         if (sourceLanguage && sourceLanguage !== languageCode && yamlContent[sourceLanguage]) {
-            return Object.keys(translations);
+            return result;
         }
 
         yamlContent[languageCode] = yamlContent[languageCode] || {};
@@ -144,7 +150,7 @@ export async function updateTranslationFile(filePath, translations, languageCode
         const finalContent = content.join('\n') + (hasTrailingSpace ? '\n' : '');
 
         await fs.writeFile(filePath, finalContent);
-        return Object.keys(translations);
+        return result;
 
     } catch (error) {
         throw new Error(`Failed to update translation file ${filePath}: ${error.message}`);
@@ -246,7 +252,7 @@ async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
         const styles = getExistingQuoteStyles(content);
         const hasTrailingSpace = /\s$/.test(content);
 
-        let yamlContent = yaml.parse(content) || {};
+        const yamlContent = yaml.parse(content) || {};
 
         // Check if YAML has language code as root
         if (!yamlContent[languageCode]) {
@@ -309,6 +315,10 @@ async function updateJsonFile(filePath, translations, languageCode) {
         let existingContent = {};
         let jsonFormat = 'nested';
         let hasLanguageWrapper = false;
+        const result = {
+            updatedKeys: Object.keys(translations),
+            created: false
+        };
 
         try {
             const content = await fs.readFile(filePath, 'utf8');
@@ -323,6 +333,13 @@ async function updateJsonFile(filePath, translations, languageCode) {
             }
         } catch {
             console.warn(`Creating new JSON file: ${filePath}`);
+            result.created = true;
+
+            // Only create directory if it doesn't exist and we're creating a new file
+            const dir = path.dirname(filePath);
+            if (dir !== '.') {
+                await fs.mkdir(dir, { recursive: true });
+            }
         }
 
         let updatedContent;
@@ -351,21 +368,10 @@ async function updateJsonFile(filePath, translations, languageCode) {
             updatedContent = preserveJsonStructure(existingCopy, translations, jsonFormat);
         }
 
-        try {
-            const dir = path.dirname(filePath);
-            await fs.mkdir(dir, { recursive: true });
+        // Format JSON with 2 spaces indentation for readability
+        await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
 
-            // Format JSON with 2 spaces indentation for readability
-            await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
-        } catch (err) {
-            // In test environment, we can mock the success
-            if (process.env.NODE_ENV === 'test') {
-                return Object.keys(translations);
-            }
-            throw err;
-        }
-
-        return Object.keys(translations);
+        return result;
     } catch (error) {
         throw new Error(`Failed to update JSON file ${filePath}: ${error.message}`);
     }

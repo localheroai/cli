@@ -3,7 +3,6 @@ import chalk from 'chalk';
 
 export async function sync({ verbose = false } = {}, deps = { syncService: defaultSyncService }) {
     const { syncService } = deps;
-
     const { hasUpdates, updates } = await syncService.checkForUpdates({ verbose });
 
     if (!hasUpdates) {
