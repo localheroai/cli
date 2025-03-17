@@ -16,25 +16,22 @@ export function parseFile(content, format) {
 }
 
 export function extractLocaleFromPath(filePath, localeRegex, knownLocales = []) {
-  // If we have known locales, check for them first in the path components
   if (knownLocales && knownLocales.length > 0) {
     const pathParts = filePath.toLowerCase().split(path.sep);
-    // Look for any known locale in the path
     const foundLocale = knownLocales.find(locale =>
       locale && pathParts.includes(locale.toLowerCase())
     );
+
     if (foundLocale) {
       return foundLocale.toLowerCase();
     }
   }
 
-  // Fallback to directory name check
   const dirName = path.basename(path.dirname(filePath));
   if (dirName && isValidLocale(dirName)) {
     return dirName.toLowerCase();
   }
 
-  // Last resort: try the regex pattern if provided
   if (localeRegex) {
     const filename = path.basename(filePath);
     const regexPattern = new RegExp(localeRegex);
@@ -162,11 +159,6 @@ function preserveJsonStructure(originalObj, newTranslations, format) {
   return result;
 }
 
-/**
- * Deep merge two objects, preserving all keys from both objects
- * If both objects have the same key and it's an object in both, merge recursively
- * Otherwise, take the value from the second object
- */
 function deepMerge(target, source) {
   const result = { ...target };
 
@@ -338,6 +330,5 @@ export async function findTranslationFiles(config, options = {}) {
 export {
   unflattenTranslations,
   detectJsonFormat,
-  preserveJsonStructure,
-  deepMerge
+  preserveJsonStructure
 };

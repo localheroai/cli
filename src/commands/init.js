@@ -11,69 +11,148 @@ import { createGitHubActionFile } from '../utils/github.js';
 
 const PROJECT_TYPES = {
   rails: {
-    indicators: ['config/application.rb', 'Gemfile'],
+    directIndicators: ['config/application.rb', 'Gemfile'],
     defaults: {
       translationPath: 'config/locales/',
       filePattern: '**/*.{yml,yaml}'
-    }
-  },
-  react: {
-    indicators: ['package.json', 'src/App.js', 'src/App.jsx', 'src/index.js', 'src/index.jsx'],
-    defaults: {
-      translationPath: 'src/locales/',
-      filePattern: '**/*.{json,yml}'
-    }
+    },
+    commonPaths: [
+      'config/locales'
+    ]
   },
   nextjs: {
-    indicators: ['next.config.js', 'next.config.mjs'],
+    directIndicators: ['next.config.js', 'next.config.mjs'],
+    packageCheck: {
+      requires: ['next'],
+      oneOf: ['next-i18next', 'next-translate']
+    },
     defaults: {
       translationPath: 'public/locales/',
       filePattern: '**/*.json'
-    }
+    },
+    commonPaths: [
+      'public/locales',
+      'src/locales',
+      'locales'
+    ]
+  },
+  vueI18n: {
+    directIndicators: ['vue.config.js'],
+    packageCheck: {
+      oneOf: ['vue-i18n', '@nuxtjs/i18n']
+    },
+    defaults: {
+      translationPath: 'src/locales/',
+      filePattern: '**/*.json'
+    },
+    commonPaths: [
+      'src/locales',
+      'src/i18n',
+      'locales',
+      'i18n'
+    ]
   },
   i18next: {
-    indicators: ['i18next.config.js', 'i18n.js', 'i18n/index.js'],
+    directIndicators: ['i18next.config.js', 'i18n.js', 'i18n/index.js'],
+    packageCheck: {
+      requires: ['i18next']
+    },
     defaults: {
       translationPath: 'public/locales/',
       filePattern: '**/*.json'
-    }
+    },
+    commonPaths: [
+      'public/locales',
+      'src/locales',
+      'locales',
+      'src/i18n',
+      'i18n'
+    ]
   },
   reactIntl: {
-    indicators: ['src/i18n', 'src/translations', 'src/lang'],
+    directIndicators: ['.babelrc'],
+    packageCheck: {
+      requires: ['react-intl']
+    },
     defaults: {
       translationPath: 'src/translations/',
       filePattern: '**/*.json'
-    }
+    },
+    commonPaths: [
+      'src/i18n',
+      'src/translations',
+      'src/lang',
+      'src/locales',
+      'translations',
+      'locales'
+    ]
   },
   gatsbyReact: {
-    indicators: ['gatsby-config.js'],
+    directIndicators: ['gatsby-config.js'],
+    packageCheck: {
+      requires: ['gatsby'],
+      oneOf: ['gatsby-plugin-intl', 'gatsby-plugin-i18n']
+    },
     defaults: {
       translationPath: 'src/data/i18n/',
       filePattern: '**/*.json'
-    }
+    },
+    commonPaths: [
+      'src/data/i18n',
+      'src/i18n',
+      'src/locales',
+      'locales'
+    ]
   },
-  vueI18n: {
-    indicators: ['vue.config.js', 'src/i18n'],
+  react: {
+    directIndicators: ['src/App.js', 'src/App.jsx', 'src/index.js', 'src/index.jsx'],
+    packageCheck: {
+      requires: ['react']
+    },
     defaults: {
       translationPath: 'src/locales/',
-      filePattern: '**/*.json'
-    }
+      filePattern: '**/*.{json,yml}'
+    },
+    commonPaths: [
+      'src/locales',
+      'public/locales',
+      'src/i18n',
+      'src/translations',
+      'src/lang',
+      'assets/i18n',
+      'locales'
+    ]
   },
   generic: {
-    indicators: [],
+    directIndicators: [],
     defaults: {
       translationPath: 'locales/',
       filePattern: '**/*.{json,yml,yaml}'
-    }
+    },
+    commonPaths: [
+      'locales',
+      'src/locales',
+      'public/locales',
+      'src/i18n',
+      'src/translations',
+      'src/lang',
+      'assets/i18n',
+      'i18n',
+      'translations',
+      'lang'
+    ]
   }
 };
 
 async function directoryExists(path) {
   try {
-    await fs.access(path);
-    return true;
-  } catch {
-    return false;
+    const stats = await fs.stat(path);
+    return stats.isDirectory();
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -94,58 +173,60 @@ async function getDirectoryContents(dir) {
       jsonFiles: files.filter(f => f.endsWith('.json')),
       yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
     };
-  } catch (error) {
-    console.debug(`Could not read directory ${dir}: ${error.message}`);
+  } catch {
     return null;
   }
 }
 
-async function detectFramework(indicators) {
-  for (const indicator of indicators) {
-    if (await directoryExists(indicator)) {
+async function checkPackageJson() {
+  try {
+    const content = await fs.readFile('package.json', 'utf8');
+    const pkg = JSON.parse(content);
+    return { ...pkg.dependencies, ...pkg.devDependencies };
+  } catch {
+    return null;
+  }
+}
+
+async function detectFramework(config) {
+  for (const indicator of config.directIndicators || []) {
+    try {
+      const stats = await fs.stat(indicator);
+      if (stats.isFile()) return true;
+    } catch {
+      continue;
+    }
+  }
+
+  if (config.packageCheck) {
+    const deps = await checkPackageJson();
+    if (deps) {
+      const { requires = [], oneOf = [] } = config.packageCheck;
+
+      if (requires.length && !requires.every(pkg => deps[pkg])) {
+        return false;
+      }
+
+      if (oneOf.length && !oneOf.some(pkg => deps[pkg])) {
+        return false;
+      }
+
       return true;
     }
   }
+
   return false;
 }
 
 async function detectProjectType() {
   for (const [type, config] of Object.entries(PROJECT_TYPES)) {
-    if (!config.indicators.length) continue;
+    if (!config.directIndicators?.length && !config.packageCheck) continue;
 
-    const isFramework = await detectFramework(config.indicators);
+    const isFramework = await detectFramework(config);
     if (!isFramework) continue;
-    if (type === 'react') {
-      const commonReactPaths = [
-        'src/locales',
-        'public/locales',
-        'src/i18n',
-        'src/translations',
-        'src/lang',
-        'assets/i18n',
-        'locales'
-      ];
 
-      const translationPath = await findFirstExistingPath(commonReactPaths);
-      if (translationPath) {
-        return {
-          type,
-          defaults: {
-            ...config.defaults,
-            translationPath: `${translationPath}/`
-          }
-        };
-      }
-    }
-
-    if (type === 'nextjs') {
-      const commonNextPaths = [
-        'public/locales',
-        'src/locales',
-        'locales'
-      ];
-
-      const translationPath = await findFirstExistingPath(commonNextPaths);
+    if (config.commonPaths) {
+      const translationPath = await findFirstExistingPath(config.commonPaths);
       if (translationPath) {
         return {
           type,
@@ -158,42 +239,23 @@ async function detectProjectType() {
     }
     return { type, defaults: config.defaults };
   }
-  const commonTranslationDirs = [
-    'locales',
-    'src/locales',
-    'public/locales',
-    'src/i18n',
-    'src/translations',
-    'src/lang',
-    'assets/i18n',
-    'i18n',
-    'translations',
-    'lang'
-  ];
 
-  for (const dir of commonTranslationDirs) {
-    if (!(await directoryExists(dir))) continue;
-
-    const contents = await getDirectoryContents(dir);
-    if (!contents) continue;
-
-    if (contents.jsonFiles.length > 0) {
+  const translationPath = await findFirstExistingPath(PROJECT_TYPES.generic.commonPaths);
+  if (translationPath) {
+    const contents = await getDirectoryContents(translationPath);
+    if (contents) {
       return {
         type: 'detected',
         defaults: {
-          translationPath: `${dir}/`,
-          filePattern: '**/*.json'
+          translationPath: `${translationPath}/`,
+          filePattern: contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0
+            ? '**/*.json'
+            : '**/*.{json,yml,yaml}'
         }
       };
     }
-    return {
-      type: 'detected',
-      defaults: {
-        translationPath: `${dir}/`,
-        filePattern: '**/*.{json,yml,yaml}'
-      }
-    };
   }
+
   return {
     type: 'generic',
     defaults: PROJECT_TYPES.generic.defaults
@@ -268,27 +330,20 @@ async function promptForConfig(projectDefaults, projectService, promptService, c
     };
   }
 
-  const commonDirs = [
-    'locales',
-    'src/locales',
-    'public/locales',
-    'src/i18n',
-    'src/translations',
-    'assets/i18n'
-  ];
-
+  const commonPaths = projectDefaults.commonPaths || PROJECT_TYPES.generic.commonPaths;
   const existingDirs = [];
-  for (const dir of commonDirs) {
+
+  for (const dir of commonPaths) {
     if (await directoryExists(dir)) {
       existingDirs.push(dir);
     }
   }
 
-  let dirHint = 'Directory containing your translation files';
+  let dirHint = `Directory containing your translation files for ${projectDefaults.type || 'your'} project`;
   if (existingDirs.length > 0) {
     dirHint += `. Found existing directories: ${existingDirs.map(d => `"${d}/"`).join(', ')}`;
   } else {
-    dirHint += ', e.g., "locales/", "src/i18n/", "public/locales/"';
+    dirHint += `. Common paths: ${commonPaths.slice(0, 3).map(d => `"${d}/"`).join(', ')}`;
   }
 
   const translationPath = await promptService.input({

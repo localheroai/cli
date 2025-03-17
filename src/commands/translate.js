@@ -28,14 +28,12 @@ export async function translate(options = {}, deps = defaultDeps) {
   const { console, configUtils, authUtils, fileUtils, translationUtils, syncService } = deps;
   const { verbose } = options;
 
-  // Check authentication first
   const isAuthenticated = await authUtils.checkAuth();
   if (!isAuthenticated) {
     console.error(chalk.red('\n✖ Your API key is invalid. Please run `npx @localheroai/cli login` to authenticate.\n'));
     process.exit(1);
   }
 
-  // Load configuration
   const config = await configUtils.getProjectConfig();
   if (!config) {
     console.error(chalk.red('\n✖ No configuration found. Please run `npx @localheroai/cli init` first.\n'));
@@ -43,14 +41,12 @@ export async function translate(options = {}, deps = defaultDeps) {
     return;
   }
 
-  // Validate required config properties
   if (!config.translationFiles?.paths) {
     console.error(chalk.red('\n✖ Invalid configuration: missing translationFiles.paths. Please run `npx @localheroai/cli init` to set up your configuration.\n'));
     process.exit(1);
     return;
   }
 
-  // Check and apply any pending updates first
   const { hasUpdates, updates } = await syncService.checkForUpdates({ verbose });
   if (hasUpdates) {
     await syncService.applyUpdates(updates, { verbose });
@@ -64,7 +60,6 @@ export async function translate(options = {}, deps = defaultDeps) {
     console.log(chalk.gray(`  Translation files: ${config.translationFiles.paths.join(', ')}`));
   }
 
-  // Find translation files
   const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true });
   const { sourceFiles, targetFilesByLocale, allFiles } = result;
 
@@ -77,7 +72,6 @@ export async function translate(options = {}, deps = defaultDeps) {
     console.log(chalk.blue(`\nℹ Found ${allFiles.length} translation files`));
   }
 
-  // Process source files
   if (sourceFiles.length === 0) {
     console.error(chalk.red(`\n✖ No source files found for locale ${config.sourceLocale}\n`));
     process.exit(1);
@@ -89,13 +83,11 @@ export async function translate(options = {}, deps = defaultDeps) {
 
   const missingByLocale = {};
 
-  // Process each source file
   for (const sourceFile of sourceFiles) {
     const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
     const sourceContent = parseFile(sourceContentRaw, sourceFile.format);
     const sourceKeys = flattenTranslations(sourceContent[config.sourceLocale] || sourceContent);
 
-    // Process each target locale
     for (const targetLocale of config.outputLocales) {
       const targetFiles = targetFilesByLocale[targetLocale] || [];
       const result = processLocaleTranslations(sourceKeys, targetLocale, targetFiles, sourceFile, config.sourceLocale);
@@ -123,7 +115,6 @@ export async function translate(options = {}, deps = defaultDeps) {
     }
   }
 
-  // Process missing translations
   const missingLocales = Object.keys(missingByLocale);
   if (missingLocales.length === 0) {
     console.log(chalk.green('✓ All translations are up to date!'));
@@ -137,7 +128,6 @@ export async function translate(options = {}, deps = defaultDeps) {
     }
   }
 
-  // Create translation jobs
   const { batches, errors } = translationUtils.batchKeysWithMissing(sourceFiles, missingByLocale, BATCH_SIZE);
 
   if (errors.length > 0) {
@@ -164,9 +154,8 @@ export async function translate(options = {}, deps = defaultDeps) {
     try {
       const response = await translationUtils.createTranslationJob(jobRequest);
       const { jobs } = response;
-
-      // Collect all job IDs
       const batchJobIds = jobs.map(job => job.id);
+
       allJobIds.push(...batchJobIds);
 
       const pendingJobs = new Set(batchJobIds);
@@ -205,13 +194,11 @@ export async function translate(options = {}, deps = defaultDeps) {
             }
 
             if (status.status === 'completed' && status.translations?.data && status.language?.code) {
-              // Store the results_url if available and not already set
               if (status.results_url && !resultsBaseUrl) {
                 resultsBaseUrl = status.results_url.split('?')[0];
               }
 
               const languageCode = status.language.code;
-              // Only process each locale once
               if (!processedLocales.has(languageCode)) {
                 const targetPath = missingByLocale[languageCode].targetPath;
                 if (verbose) {
@@ -237,7 +224,6 @@ export async function translate(options = {}, deps = defaultDeps) {
         });
 
         if (pendingJobs.size > 0) {
-          // Wait a bit before checking remaining jobs again
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       }
