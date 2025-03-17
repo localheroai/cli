@@ -7,7 +7,7 @@ import { checkAuth } from '../utils/auth.js';
 import { findMissingTranslations, batchKeysWithMissing, processLocaleTranslations } from '../utils/translation-utils.js';
 import { syncService } from '../utils/sync-service.js';
 
-const BATCH_SIZE = 100;
+const BATCH_SIZE = 50;
 
 const defaultDeps = {
     console,
@@ -150,6 +150,9 @@ export async function translate(options = {}, deps = defaultDeps) {
 
     let totalTranslated = 0;
     let totalLanguages = 0;
+    const processedLocales = new Set();
+    const allJobIds = [];
+    let resultsBaseUrl = null;
 
     for (const batch of batches) {
         const jobRequest = {
@@ -162,51 +165,84 @@ export async function translate(options = {}, deps = defaultDeps) {
             const response = await translationUtils.createTranslationJob(jobRequest);
             const { jobs } = response;
 
-            for (const job of jobs) {
-                if (verbose) {
-                    console.log(chalk.blue(`\nℹ Created translation job ${job.id}`));
+            // Collect all job IDs
+            const batchJobIds = jobs.map(job => job.id);
+            allJobIds.push(...batchJobIds);
+
+            const pendingJobs = new Set(batchJobIds);
+
+            while (pendingJobs.size > 0) {
+                const jobPromises = Array.from(pendingJobs).map(async jobId => {
+                    if (verbose) {
+                        console.log(chalk.blue(`\nℹ Checking job ${jobId}`));
+                    }
+
+                    let status;
+                    let retries = 0;
+                    const MAX_WAIT_MINUTES = 10;
+                    const startTime = Date.now();
+
+                    do {
+                        status = await translationUtils.checkJobStatus(jobId, true);
+
+                        if (status.status === 'failed') {
+                            throw new Error(`Translation job failed: ${status.error_details || 'Unknown error'}`);
+                        }
+
+                        if (status.status === 'pending' || status.status === 'processing') {
+                            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                            if (elapsed > MAX_WAIT_MINUTES * 60) {
+                                throw new Error(`Translation timed out after ${MAX_WAIT_MINUTES} minutes`);
+                            }
+
+                            const waitSeconds = Math.min(2 ** retries, 30);
+                            if (verbose) {
+                                console.log(chalk.blue(`  Job ${jobId} is ${status.status}, checking again in ${waitSeconds}s...`));
+                            }
+                            await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+                            retries = Math.min(retries + 1, 5);
+                            return { jobId, status: 'pending' };
+                        }
+
+                        if (status.status === 'completed' && status.translations?.data && status.language?.code) {
+                            // Store the results_url if available and not already set
+                            if (status.results_url && !resultsBaseUrl) {
+                                resultsBaseUrl = status.results_url.split('?')[0];
+                            }
+
+                            const languageCode = status.language.code;
+                            // Only process each locale once
+                            if (!processedLocales.has(languageCode)) {
+                                const targetPath = missingByLocale[languageCode].targetPath;
+                                if (verbose) {
+                                    console.log(chalk.blue(`  Updating translations for ${languageCode} in ${targetPath}`));
+                                }
+                                await translationUtils.updateTranslationFile(targetPath, status.translations.data, languageCode);
+                                totalTranslated += missingByLocale[languageCode].keyCount;
+                                totalLanguages++;
+                                processedLocales.add(languageCode);
+                            }
+                            return { jobId, status: 'completed' };
+                        }
+
+                        return { jobId, status: status.status };
+                    } while (status.status === 'pending' || status.status === 'processing');
+                });
+
+                const results = await Promise.all(jobPromises);
+                results.forEach(result => {
+                    if (result.status === 'completed') {
+                        pendingJobs.delete(result.jobId);
+                    }
+                });
+
+                if (pendingJobs.size > 0) {
+                    // Wait a bit before checking remaining jobs again
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
-
-                let status;
-                let retries = 0;
-                const MAX_WAIT_MINUTES = 10;
-                const startTime = Date.now();
-
-                do {
-                    status = await translationUtils.checkJobStatus(job.id, true);
-
-                    if (status.status === 'failed') {
-                        throw new Error(`Translation job failed: ${status.error_details || 'Unknown error'}`);
-                    }
-
-                    if (status.status === 'pending' || status.status === 'processing') {
-                        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                        if (elapsed > MAX_WAIT_MINUTES * 60) {
-                            throw new Error(`Translation timed out after ${MAX_WAIT_MINUTES} minutes`);
-                        }
-
-                        const waitSeconds = Math.min(2 ** retries, 30); // Cap at 30 seconds
-                        if (verbose) {
-                            console.log(chalk.blue(`  Job ${job.id} is ${status.status}, checking again in ${waitSeconds}s...`));
-                        }
-                        await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-                        retries = Math.min(retries + 1, 5);
-                        continue;
-                    }
-
-                    if (status.status === 'completed' && status.translations?.data && status.language?.code) {
-                        const targetPath = missingByLocale[status.language.code].targetPath;
-                        if (verbose) {
-                            console.log(chalk.blue(`  Updating translations for ${status.language.code} in ${targetPath}`));
-                        }
-                        await translationUtils.updateTranslationFile(targetPath, status.translations.data, status.language.code);
-                        totalTranslated += Object.keys(status.translations.data).length;
-                        totalLanguages++;
-                    }
-                } while (status.status === 'pending' || status.status === 'processing');
             }
         } catch (error) {
-            console.error(chalk.red(`\n✖ Error creating translation job: ${error.message}\n`));
+            console.error(chalk.red(`\n✖ Error processing translation jobs: ${error.message}\n`));
             process.exit(1);
         }
     }
@@ -215,5 +251,9 @@ export async function translate(options = {}, deps = defaultDeps) {
 
     console.log(chalk.green('✓ Translations complete!'));
     console.log(`Updated ${totalTranslated} keys in ${totalLanguages} languages`);
-    console.log(`View translations at: https://localhero.ai/projects/${config.projectId}/translations`);
+
+    if (resultsBaseUrl && allJobIds.length > 0) {
+        const jobIdsParam = allJobIds.join(',');
+        console.log(`View job results at: ${resultsBaseUrl}?job_ids=${jobIdsParam}`);
+    }
 }

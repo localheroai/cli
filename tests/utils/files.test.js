@@ -398,4 +398,140 @@ en:
 
         expect(result.allFiles).toHaveLength(2);
     });
+
+    it('prioritizes known locales from config when detecting locale', async () => {
+        mockGlob.mockResolvedValue([
+            'apps/kundo-widget/public/locales/sv/translation.json',
+            'apps/kundo-widget/public/locales/en/translation.json',
+            'apps/kundo-widget/public/locales/fr/translation.json'
+        ]);
+        mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
+
+        const config = {
+            sourceLocale: 'sv',
+            outputLocales: ['en', 'fr'],
+            translationFiles: {
+                paths: ['apps/kundo-widget/public/locales/'],
+                pattern: '**/*.json'
+            }
+        };
+
+        const result = await findTranslationFiles(config, {
+            returnFullResult: true,
+            verbose: true
+        });
+
+        // Verify source files
+        expect(result.sourceFiles).toHaveLength(1);
+        expect(result.sourceFiles[0].locale).toBe('sv');
+        expect(result.sourceFiles[0].path).toContain('/sv/');
+
+        // Verify target files
+        expect(result.targetFilesByLocale.en).toHaveLength(1);
+        expect(result.targetFilesByLocale.en[0].locale).toBe('en');
+        expect(result.targetFilesByLocale.en[0].path).toContain('/en/');
+
+        expect(result.targetFilesByLocale.fr).toHaveLength(1);
+        expect(result.targetFilesByLocale.fr[0].locale).toBe('fr');
+        expect(result.targetFilesByLocale.fr[0].path).toContain('/fr/');
+
+        // Verify all files were found
+        expect(result.allFiles).toHaveLength(3);
+    });
+
+    it('handles case-insensitive locale detection', async () => {
+        mockGlob.mockResolvedValue([
+            'apps/kundo-widget/public/locales/SV/translation.json',
+            'apps/kundo-widget/public/locales/En/translation.json'
+        ]);
+        mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
+
+        const config = {
+            sourceLocale: 'sv',
+            outputLocales: ['en'],
+            translationFiles: {
+                paths: ['apps/kundo-widget/public/locales/']
+            }
+        };
+
+        const result = await findTranslationFiles(config, {
+            returnFullResult: true
+        });
+
+        expect(result.sourceFiles).toHaveLength(1);
+        expect(result.sourceFiles[0].locale).toBe('sv');
+        expect(result.targetFilesByLocale.en).toHaveLength(1);
+        expect(result.targetFilesByLocale.en[0].locale).toBe('en');
+    });
+
+    it('handles both directory-based and filename-based locale detection', async () => {
+        mockGlob.mockResolvedValue([
+            // Directory-based structure
+            'apps/kundo-widget/public/locales/sv/translation.json',
+            'apps/kundo-widget/public/locales/en/translation.json',
+            // Filename-based structure
+            'apps/kundo-widget/public/locales/translation.sv.json',
+            'apps/kundo-widget/public/locales/translation.en.json',
+            // Root level with locale in filename
+            'apps/kundo-widget/public/locales/sv.json',
+            'apps/kundo-widget/public/locales/en.json'
+        ]);
+        mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
+
+        const config = {
+            sourceLocale: 'sv',
+            outputLocales: ['en'],
+            translationFiles: {
+                paths: ['apps/kundo-widget/public/locales/'],
+                pattern: '**/*.json'
+            }
+        };
+
+        const result = await findTranslationFiles(config, {
+            returnFullResult: true,
+            verbose: true
+        });
+
+        // We should find all sv files (3 of them)
+        expect(result.sourceFiles).toHaveLength(3);
+        result.sourceFiles.forEach(file => {
+            expect(file.locale).toBe('sv');
+            expect(file.path).toMatch(/sv[/.]|[.]sv[.]/)
+        });
+
+        // We should find all en files (3 of them)
+        expect(result.targetFilesByLocale.en).toHaveLength(3);
+        result.targetFilesByLocale.en.forEach(file => {
+            expect(file.locale).toBe('en');
+            expect(file.path).toMatch(/en[/.]|[.]en[.]/)
+        });
+
+        // Total should be 6 files
+        expect(result.allFiles).toHaveLength(6);
+    });
+
+    it('prioritizes directory-based locale detection over filename-based', async () => {
+        mockGlob.mockResolvedValue([
+            // This file is in 'sv' directory but has 'en' in filename
+            'apps/kundo-widget/public/locales/sv/translation.en.json'
+        ]);
+        mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
+
+        const config = {
+            sourceLocale: 'sv',
+            outputLocales: ['en'],
+            translationFiles: {
+                paths: ['apps/kundo-widget/public/locales/']
+            }
+        };
+
+        const result = await findTranslationFiles(config, {
+            returnFullResult: true
+        });
+
+        // Should be detected as 'sv' from directory, not 'en' from filename
+        expect(result.sourceFiles).toHaveLength(1);
+        expect(result.sourceFiles[0].locale).toBe('sv');
+        expect(result.targetFilesByLocale.en).toHaveLength(0);
+    });
 }); 

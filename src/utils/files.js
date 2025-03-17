@@ -15,26 +15,36 @@ export function parseFile(content, format) {
     }
 }
 
-export function extractLocaleFromPath(filePath, localeRegex) {
-    const filename = path.basename(filePath);
-    const dirName = path.basename(path.dirname(filePath));
+export function extractLocaleFromPath(filePath, localeRegex, knownLocales = []) {
+    // If we have known locales, check for them first in the path components
+    if (knownLocales && knownLocales.length > 0) {
+        const pathParts = filePath.toLowerCase().split(path.sep);
+        // Look for any known locale in the path
+        const foundLocale = knownLocales.find(locale =>
+            locale && pathParts.includes(locale.toLowerCase())
+        );
+        if (foundLocale) {
+            return foundLocale.toLowerCase();
+        }
+    }
 
-    // Try the regex pattern first
-    try {
-        const regexMatch = filename.match(new RegExp(localeRegex));
+    // Fallback to directory name check
+    const dirName = path.basename(path.dirname(filePath));
+    if (dirName && isValidLocale(dirName)) {
+        return dirName.toLowerCase();
+    }
+
+    // Last resort: try the regex pattern if provided
+    if (localeRegex) {
+        const filename = path.basename(filePath);
+        const regexPattern = new RegExp(localeRegex);
+        const regexMatch = filename.match(regexPattern);
         if (regexMatch && regexMatch[1]) {
             const locale = regexMatch[1].toLowerCase();
             if (isValidLocale(locale)) {
                 return locale;
             }
         }
-    } catch (error) {
-        // If regex is invalid, continue with directory check
-    }
-
-    // Try directory name as fallback
-    if (isValidLocale(dirName)) {
-        return dirName;
     }
 
     throw new Error(`Could not extract locale from path: ${filePath}`);
@@ -197,45 +207,6 @@ function extractNamespace(filePath) {
     return '';
 }
 
-async function processFile(filePath, format, locale, options) {
-    const {
-        parseContent = true,
-        includeContent = true,
-        extractKeys = true,
-        includeNamespace = false
-    } = options;
-
-    const result = {
-        path: filePath,
-        format,
-        locale
-    };
-
-    if (!parseContent) {
-        return result;
-    }
-
-    const content = await readFile(filePath, 'utf8');
-    const parsedContent = parseFile(content, format);
-
-    if (includeContent) {
-        result.content = Buffer.from(content).toString('base64');
-    }
-
-    if (extractKeys) {
-        const hasLanguageWrapper = parsedContent[locale] !== undefined;
-        result.hasLanguageWrapper = hasLanguageWrapper;
-        const translationData = hasLanguageWrapper ? parsedContent[locale] : parsedContent;
-        result.translations = translationData;
-        result.keys = flattenTranslations(translationData);
-    }
-
-    if (includeNamespace) {
-        result.namespace = '';  // Default empty namespace
-    }
-
-    return result;
-}
 
 /**
  * Find translation files in the specified paths
@@ -264,6 +235,9 @@ export async function findTranslationFiles(config, options = {}) {
         verbose = false,
         returnFullResult = false
     } = options;
+
+    // Create array of all locales we're looking for
+    const knownLocales = [sourceLocale, ...targetLocales];
 
     const { translationFiles } = config;
     const {
@@ -304,7 +278,7 @@ export async function findTranslationFiles(config, options = {}) {
             try {
                 const filePath = file;
                 const format = path.extname(file).slice(1);
-                const locale = extractLocaleFromPath(file, localeRegex);
+                const locale = extractLocaleFromPath(file, localeRegex, knownLocales);
 
                 const result = {
                     path: filePath,

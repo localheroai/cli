@@ -358,8 +358,7 @@ export async function init(deps = {}) {
         });
     }
 
-    console.log(chalk.blue('\nWelcome to LocalHero.ai!'));
-    console.log('Let\'s set up configuration for your project.\n');
+    console.log('\nLet\'s set up configuration for your project.\n');
 
     const projectDefaults = await detectProjectType();
     const answers = await promptForConfig(projectDefaults, projectApi, promptService, console);

@@ -106,8 +106,6 @@ export async function updateTranslationFile(filePath, translations, languageCode
             await updateJsonFile(filePath, translations, languageCode);
             return result;
         }
-
-        // YAML handling
         let existingContent = '';
         let styles;
         try {
@@ -160,8 +158,6 @@ export async function updateTranslationFile(filePath, translations, languageCode
 export async function deleteKeysFromTranslationFile(filePath, keysToDelete, languageCode = 'en') {
     try {
         const fileExt = path.extname(filePath).slice(1).toLowerCase();
-
-        // Check if file exists
         try {
             await fs.access(filePath);
         } catch {
@@ -184,8 +180,6 @@ async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
         let jsonContent = JSON.parse(content);
         let hasLanguageWrapper = false;
         let rootContent = jsonContent;
-
-        // Check if the JSON has a language wrapper (e.g., { "en": { ... } })
         if (jsonContent[languageCode] && typeof jsonContent[languageCode] === 'object') {
             hasLanguageWrapper = true;
             rootContent = jsonContent[languageCode];
@@ -196,8 +190,6 @@ async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
         for (const keyPath of keysToDelete) {
             const keys = keyPath.split('.');
             const lastIndex = keys.length - 1;
-
-            // Navigate to the parent object
             let current = rootContent;
             let parent = null;
             let keyInParent = '';
@@ -216,28 +208,20 @@ async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
 
             if (found) {
                 const lastKey = keys[lastIndex];
-
-                // If we're at the last level, delete the key
                 if (current[lastKey] !== undefined) {
                     delete current[lastKey];
                     deletedKeys.push(keyPath);
-
-                    // If parent object is now empty, remove it too
                     if (parent && Object.keys(current).length === 0) {
                         delete parent[keyInParent];
                     }
                 }
             }
         }
-
-        // Update the content if we have a language wrapper
         if (hasLanguageWrapper) {
             jsonContent[languageCode] = rootContent;
         } else {
             jsonContent = rootContent;
         }
-
-        // Write the updated content back to the file
         await fs.writeFile(filePath, JSON.stringify(jsonContent, null, 2));
 
         return deletedKeys;
@@ -253,8 +237,6 @@ async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
         const hasTrailingSpace = /\s$/.test(content);
 
         const yamlContent = yaml.parse(content) || {};
-
-        // Check if YAML has language code as root
         if (!yamlContent[languageCode]) {
             return [];
         }
@@ -264,8 +246,6 @@ async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
         for (const keyPath of keysToDelete) {
             const keys = keyPath.split('.');
             const lastIndex = keys.length - 1;
-
-            // Navigate to the parent object
             let current = yamlContent[languageCode];
             let parent = null;
             let keyInParent = '';
@@ -284,21 +264,15 @@ async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
 
             if (found) {
                 const lastKey = keys[lastIndex];
-
-                // If we're at the last level, delete the key
                 if (current[lastKey] !== undefined) {
                     delete current[lastKey];
                     deletedKeys.push(keyPath);
-
-                    // If parent object is now empty, remove it too
                     if (parent && Object.keys(current).length === 0) {
                         delete parent[keyInParent];
                     }
                 }
             }
         }
-
-        // Write the updated content back to the file
         const yamlLines = stringifyYaml(yamlContent, 0, '', [], styles);
         const finalContent = yamlLines.join('\n') + (hasTrailingSpace ? '\n' : '');
 
@@ -323,8 +297,6 @@ async function updateJsonFile(filePath, translations, languageCode) {
         try {
             const content = await fs.readFile(filePath, 'utf8');
             existingContent = JSON.parse(content);
-
-            // Check if the JSON has a language wrapper (e.g., { "en": { ... } })
             if (existingContent[languageCode] && typeof existingContent[languageCode] === 'object') {
                 hasLanguageWrapper = true;
                 jsonFormat = detectJsonFormat(existingContent[languageCode]);
@@ -334,8 +306,6 @@ async function updateJsonFile(filePath, translations, languageCode) {
         } catch {
             console.warn(`Creating new JSON file: ${filePath}`);
             result.created = true;
-
-            // Only create directory if it doesn't exist and we're creating a new file
             const dir = path.dirname(filePath);
             if (dir !== '.') {
                 await fs.mkdir(dir, { recursive: true });
@@ -345,13 +315,8 @@ async function updateJsonFile(filePath, translations, languageCode) {
         let updatedContent;
 
         if (hasLanguageWrapper) {
-            // Handle structure with language code as top-level key
             existingContent[languageCode] = existingContent[languageCode] || {};
-
-            // Preserve the original structure by making a deep copy
             updatedContent = JSON.parse(JSON.stringify(existingContent));
-
-            // Merge new translations with existing content
             const mergedContent = preserveJsonStructure(
                 existingContent[languageCode],
                 translations,
@@ -360,15 +325,9 @@ async function updateJsonFile(filePath, translations, languageCode) {
 
             updatedContent[languageCode] = mergedContent;
         } else {
-            // Handle structure without language wrapper
-            // Make a deep copy of the existing content
             const existingCopy = JSON.parse(JSON.stringify(existingContent));
-
-            // Merge new translations with existing content
             updatedContent = preserveJsonStructure(existingCopy, translations, jsonFormat);
         }
-
-        // Format JSON with 2 spaces indentation for readability
         await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
 
         return result;

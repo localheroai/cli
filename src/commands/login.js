@@ -63,7 +63,9 @@ export async function login(deps = {}) {
     }
 
     console.log(chalk.blue(`💼️  Organization: ${result.organization.name}`));
-    console.log(chalk.blue(`📚  Projects: ${result.organization.projects.map(p => p.name).join(', ')}`));
+    if (result.organization.projects.length > 0) {
+        console.log(chalk.blue(`\n📚  Projects: ${result.organization.projects.map(p => p.name).join(', ')}`));
+    }
 
     const projectConfig = await configUtils.getProjectConfig(basePath);
 

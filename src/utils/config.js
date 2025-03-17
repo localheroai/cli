@@ -78,10 +78,6 @@ export const configService = {
             throw new Error('outputLocales must be an array with at least one locale');
         }
 
-        if (config.outputLocales.length > 10) {
-            throw new Error('Maximum 10 target languages allowed per request');
-        }
-
         if (!config.translationFiles.paths || !Array.isArray(config.translationFiles.paths)) {
             throw new Error('translationFiles.paths must be an array of paths');
         }

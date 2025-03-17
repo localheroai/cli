@@ -30,7 +30,6 @@ async function readFileContent(filePath) {
 
 export const importService = {
     async findTranslationFiles(config, basePath = process.cwd()) {
-        // Use the enhanced utility instead of duplicating code
         const files = await findTranslationFiles(config, {
             basePath,
             parseContent: false,

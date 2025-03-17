@@ -29,6 +29,7 @@ export function findMissingTranslations(sourceKeys, targetKeys) {
         }
 
         if (
+            typeof details === 'object' && details !== null &&
             typeof details.value === 'string' &&
             (details.value.toLowerCase().includes('wip_') || details.value.toLowerCase().includes('_wip') ||
                 details.value.toLowerCase().includes('__skip_translation__'))
@@ -88,7 +89,7 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
                 extractedValue = value;
             } else if (typeof value === 'object' && value !== null) {
                 if (value.value !== undefined) {
-                    extractedValue = value.value;
+                    extractedValue = value.value === null ? '' : value.value;
                 } else if (Object.keys(value).some(k => !isNaN(parseInt(k, 10)))) {
                     let reconstructedString = '';
                     let i = 0;
@@ -211,4 +212,4 @@ export function processLocaleTranslations(sourceKeys, targetLocale, targetFiles,
     } catch (error) {
         throw new Error(`Failed to process translations for ${targetLocale}: ${error.message}`);
     }
-} 
+}

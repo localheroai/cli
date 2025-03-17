@@ -133,7 +133,6 @@ describe('translate command', () => {
         expect(consoleOutput).toContain('Found 1 source files for locale en');
         expect(consoleOutput).toContain('Translations complete');
         expect(consoleOutput).toContain('Updated 1 keys in 1 languages');
-        expect(consoleOutput).toContain('https://localhero.ai/projects/test-project/translations');
 
         // Verify no errors were logged
         expect(mockConsole.error).not.toHaveBeenCalled();
@@ -250,7 +249,7 @@ describe('translate command', () => {
         await translate({}, createTranslateDeps());
 
         expect(mockConsole.error).toHaveBeenCalledWith(
-            expect.stringContaining('Error creating translation job: API Error')
+            expect.stringContaining('Error processing translation jobs: API Error')
         );
         expect(process.exit).toHaveBeenCalledWith(1);
     });
@@ -279,7 +278,7 @@ describe('translate command', () => {
         await translate({}, createTranslateDeps());
 
         expect(mockConsole.error).toHaveBeenCalledWith(
-            expect.stringContaining('Error creating translation job: Status check failed')
+            expect.stringContaining('Error processing translation jobs: Status check failed')
         );
         expect(process.exit).toHaveBeenCalledWith(1);
     });

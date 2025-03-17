@@ -102,13 +102,8 @@ describe('importService', () => {
                 return result;
             }),
 
-            // Add other exports that might be needed
-            parseFile: jest.fn().mockImplementation((content, format) => {
-                try {
-                    return JSON.parse(content);
-                } catch (e) {
-                    return { error: 'Failed to parse' };
-                }
+            parseFile: jest.fn().mockImplementation((content) => {
+                return JSON.parse(content);
             })
         }));
 
