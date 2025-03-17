@@ -7,74 +7,74 @@ import { configService } from '../utils/config.js';
 const API_KEY_PATTERN = /^tk_[a-zA-Z0-9]{48}$/;
 
 export async function login(deps = {}) {
-    const {
-        console = global.console,
-        basePath = process.cwd(),
-        promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
-        verifyApiKey = defaultVerifyApiKey,
-        gitUtils = { updateGitignore },
-        configUtils = configService,
-        isCalledFromInit = false
-    } = deps;
+  const {
+    console = global.console,
+    basePath = process.cwd(),
+    promptService = createPromptService({ inquirer: await import('@inquirer/prompts') }),
+    verifyApiKey = defaultVerifyApiKey,
+    gitUtils = { updateGitignore },
+    configUtils = configService,
+    isCalledFromInit = false
+  } = deps;
 
-    const existingConfig = await configUtils.getAuthConfig(basePath);
+  const existingConfig = await configUtils.getAuthConfig(basePath);
 
-    if (existingConfig?.api_key) {
-        console.log(chalk.yellow('\n⚠️  Warning: This will replace your existing API key configuration'));
+  if (existingConfig?.api_key) {
+    console.log(chalk.yellow('\n⚠️  Warning: This will replace your existing API key configuration'));
+  }
+
+  const apiKey = process.env.LOCALHERO_API_KEY || (
+    console.log('\n→ Get your API key from: https://localhero.ai/api-keys'),
+    console.log('→ New to LocalHero? Sign up at: https://localhero.ai/signup'),
+    console.log(chalk.gray('The API key will be saved to .localhero_key, and automatically added to your .gitignore file.\n')),
+    await promptService.getApiKey()
+  );
+
+  if (!apiKey) {
+    throw new Error('User cancelled');
+  }
+
+  if (!API_KEY_PATTERN.test(apiKey)) {
+    throw new Error('Invalid API key format');
+  }
+
+  const result = await verifyApiKey(apiKey);
+
+  if (result.error) {
+    if (result.error.code === 'invalid_api_key') {
+      console.log(chalk.red('\n❌ ' + result.error.message));
+      console.log(chalk.blue('\nℹ️  Get a new API key at https://localhero.ai/api-keys'));
+      process.exit(1);
     }
+    throw new Error(result.error.message);
+  }
 
-    const apiKey = process.env.LOCALHERO_API_KEY || (
-        console.log('\n→ Get your API key from: https://localhero.ai/api-keys'),
-        console.log('→ New to LocalHero? Sign up at: https://localhero.ai/signup'),
-        console.log(chalk.gray('The API key will be saved to .localhero_key, and automatically added to your .gitignore file.\n')),
-        await promptService.getApiKey()
-    );
+  const config = {
+    api_key: apiKey,
+    last_verified: new Date().toISOString()
+  };
 
-    if (!apiKey) {
-        throw new Error('User cancelled');
-    }
+  await configUtils.saveAuthConfig(config, basePath);
+  const gitignoreUpdated = await gitUtils.updateGitignore(basePath);
 
-    if (!API_KEY_PATTERN.test(apiKey)) {
-        throw new Error('Invalid API key format');
-    }
+  console.log(chalk.green('\n✓ API key verified and saved to .localhero_key'));
+  if (gitignoreUpdated) {
+    console.log(chalk.green('✓ Added .localhero_key to .gitignore'));
+  }
 
-    const result = await verifyApiKey(apiKey);
+  console.log(chalk.blue(`💼️  Organization: ${result.organization.name}`));
+  if (result.organization.projects.length > 0) {
+    console.log(chalk.blue(`\n📚  Projects: ${result.organization.projects.map(p => p.name).join(', ')}`));
+  }
 
-    if (result.error) {
-        if (result.error.code === 'invalid_api_key') {
-            console.log(chalk.red('\n❌ ' + result.error.message));
-            console.log(chalk.blue('\nℹ️  Get a new API key at https://localhero.ai/api-keys'));
-            process.exit(1);
-        }
-        throw new Error(result.error.message);
-    }
+  const projectConfig = await configUtils.getProjectConfig(basePath);
 
-    const config = {
-        api_key: apiKey,
-        last_verified: new Date().toISOString()
-    };
-
-    await configUtils.saveAuthConfig(config, basePath);
-    const gitignoreUpdated = await gitUtils.updateGitignore(basePath);
-
-    console.log(chalk.green('\n✓ API key verified and saved to .localhero_key'));
-    if (gitignoreUpdated) {
-        console.log(chalk.green('✓ Added .localhero_key to .gitignore'));
-    }
-
-    console.log(chalk.blue(`💼️  Organization: ${result.organization.name}`));
-    if (result.organization.projects.length > 0) {
-        console.log(chalk.blue(`\n📚  Projects: ${result.organization.projects.map(p => p.name).join(', ')}`));
-    }
-
-    const projectConfig = await configUtils.getProjectConfig(basePath);
-
-    if (!projectConfig && !isCalledFromInit) {
-        console.log(chalk.yellow('\n⚠️  Almost there! You need to set up your project configuration.'));
-        console.log(chalk.blue('Run this next:'));
-        console.log(chalk.white('\n  npx @localheroai/cli init\n'));
-    } else if (!isCalledFromInit) {
-        console.log('\nYou\'re ready to start translating!');
-        console.log('Try running: npx @localheroai/cli translate');
-    }
-} 
+  if (!projectConfig && !isCalledFromInit) {
+    console.log(chalk.yellow('\n⚠️  Almost there! You need to set up your project configuration.'));
+    console.log(chalk.blue('Run this next:'));
+    console.log(chalk.white('\n  npx @localheroai/cli init\n'));
+  } else if (!isCalledFromInit) {
+    console.log('\nYou\'re ready to start translating!');
+    console.log('Try running: npx @localheroai/cli translate');
+  }
+}

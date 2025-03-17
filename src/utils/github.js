@@ -90,4 +90,4 @@ export function autoCommitChanges(filesPath) {
     console.error("Auto-commit failed:", error.message);
     throw error;
   }
-} 
+}
