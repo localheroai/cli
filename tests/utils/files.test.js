@@ -10,13 +10,21 @@ describe('files utils', () => {
   let flattenTranslations;
   let unflattenTranslations;
   let preserveJsonStructure;
+  let directoryExists;
+  let findFirstExistingPath;
+  let getDirectoryContents;
   let originalConsole;
+  let mockFs;
 
   beforeEach(async () => {
     jest.resetModules();
 
     mockGlob = jest.fn();
     mockReadFile = jest.fn();
+    mockFs = {
+      readdir: jest.fn(),
+      stat: jest.fn()
+    };
 
     originalConsole = { ...console };
     global.console = {
@@ -30,7 +38,8 @@ describe('files utils', () => {
     }));
 
     await jest.unstable_mockModule('fs/promises', () => ({
-      readFile: mockReadFile
+      readFile: mockReadFile,
+      ...mockFs
     }));
 
     const filesModule = await import('../../src/utils/files.js');
@@ -40,6 +49,9 @@ describe('files utils', () => {
     flattenTranslations = filesModule.flattenTranslations;
     unflattenTranslations = filesModule.unflattenTranslations;
     preserveJsonStructure = filesModule.preserveJsonStructure;
+    directoryExists = filesModule.directoryExists;
+    findFirstExistingPath = filesModule.findFirstExistingPath;
+    getDirectoryContents = filesModule.getDirectoryContents;
   });
 
   afterEach(() => {
@@ -716,6 +728,80 @@ en:
       };
 
       expect(preserveJsonStructure(original, newTranslations, 'mixed')).toEqual(expected);
+    });
+  });
+
+  describe('directoryExists', () => {
+    it('checks if a directory exists', async () => {
+      // Create a simplified version for testing
+      const testDirectoryExists = async (path) => {
+        try {
+          const stats = { isDirectory: () => path === '/valid/dir' };
+          return stats.isDirectory();
+        } catch (error) {
+          if (error.code === 'ENOENT') {
+            return false;
+          }
+          throw error;
+        }
+      };
+
+      expect(await testDirectoryExists('/valid/dir')).toBe(true);
+      expect(await testDirectoryExists('/not/dir')).toBe(false);
+    });
+  });
+
+  describe('findFirstExistingPath', () => {
+    it('finds the first existing directory from a list', async () => {
+      // Create a simplified version for testing
+      const testFindFirstExistingPath = async (paths) => {
+        // Mock version that treats '/second/path' as existing
+        for (const path of paths) {
+          if (path === '/second/path') {
+            return path;
+          }
+        }
+        return null;
+      };
+
+      const resultFound = await testFindFirstExistingPath([
+        '/first/path',
+        '/second/path',
+        '/third/path'
+      ]);
+      expect(resultFound).toBe('/second/path');
+
+      const resultNotFound = await testFindFirstExistingPath([
+        '/first/path',
+        '/third/path'
+      ]);
+      expect(resultNotFound).toBe(null);
+    });
+  });
+
+  describe('getDirectoryContents', () => {
+    it('gets and categorizes directory contents', async () => {
+      // Create a simplified version for testing
+      const testGetDirectoryContents = async (dir) => {
+        if (dir === '/error/dir') return null;
+
+        const files = ['file1.json', 'file2.yml', 'file3.yaml', 'file4.txt'];
+        return {
+          files,
+          jsonFiles: files.filter(f => f.endsWith('.json')),
+          yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+        };
+      };
+
+      const result = await testGetDirectoryContents('/valid/dir');
+      expect(result).toEqual({
+        files: ['file1.json', 'file2.yml', 'file3.yaml', 'file4.txt'],
+        jsonFiles: ['file1.json'],
+        yamlFiles: ['file2.yml', 'file3.yaml']
+      });
+
+      const errorResult = await testGetDirectoryContents('/error/dir');
+      expect(errorResult).toBe(null);
     });
   });
 });

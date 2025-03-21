@@ -8,6 +8,7 @@ import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService } from '../utils/import-service.js';
 import { createGitHubActionFile } from '../utils/github.js';
+import { directoryExists, findFirstExistingPath, getDirectoryContents } from '../utils/files.js';
 
 const PROJECT_TYPES = {
   rails: {
@@ -143,40 +144,6 @@ const PROJECT_TYPES = {
     ]
   }
 };
-
-async function directoryExists(path) {
-  try {
-    const stats = await fs.stat(path);
-    return stats.isDirectory();
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return false;
-    }
-    throw error;
-  }
-}
-
-async function findFirstExistingPath(paths) {
-  for (const path of paths) {
-    if (await directoryExists(path)) {
-      return path;
-    }
-  }
-  return null;
-}
-
-async function getDirectoryContents(dir) {
-  try {
-    const files = await fs.readdir(dir);
-    return {
-      files,
-      jsonFiles: files.filter(f => f.endsWith('.json')),
-      yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
-    };
-  } catch {
-    return null;
-  }
-}
 
 async function checkPackageJson() {
   try {

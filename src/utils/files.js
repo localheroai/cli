@@ -3,6 +3,7 @@ import { glob } from 'glob';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import yaml from 'yaml';
+import { promises as fs } from 'fs';
 
 export function parseFile(content, format) {
   try {
@@ -332,3 +333,37 @@ export {
   detectJsonFormat,
   preserveJsonStructure
 };
+
+export async function directoryExists(path) {
+  try {
+    const stats = await fs.stat(path);
+    return stats.isDirectory();
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
+export async function findFirstExistingPath(paths) {
+  for (const path of paths) {
+    if (await directoryExists(path)) {
+      return path;
+    }
+  }
+  return null;
+}
+
+export async function getDirectoryContents(dir) {
+  try {
+    const files = await fs.readdir(dir);
+    return {
+      files,
+      jsonFiles: files.filter(f => f.endsWith('.json')),
+      yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+    };
+  } catch {
+    return null;
+  }
+}
