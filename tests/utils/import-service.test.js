@@ -7,6 +7,7 @@ describe('importService', () => {
   let mockFs;
   let mockImportsApi;
   let importService;
+  let originalConsole;
 
   beforeEach(async () => {
     jest.resetModules();
@@ -24,6 +25,12 @@ describe('importService', () => {
       checkImportStatus: jest.fn()
     };
 
+    originalConsole = { ...console };
+    console.log = jest.fn();
+    console.warn = jest.fn();
+    console.error = jest.fn();
+    console.info = jest.fn();
+
     await jest.unstable_mockModule('glob', () => ({
       glob: mockGlob
     }));
@@ -31,21 +38,17 @@ describe('importService', () => {
     await jest.unstable_mockModule('fs/promises', () => mockFs.promises);
     await jest.unstable_mockModule('../../src/api/imports.js', () => mockImportsApi);
 
-    // Mock the findTranslationFiles function from files.js
     await jest.unstable_mockModule('../../src/utils/files.js', () => ({
       findTranslationFiles: jest.fn().mockImplementation((config, options) => {
         const { basePath = process.cwd() } = options || {};
 
-        // If paths is empty, return an empty array
         if (!config.translationFiles?.paths || config.translationFiles.paths.length === 0) {
           return [];
         }
 
-        // Otherwise, use mockGlob to simulate file discovery
         const pattern = path.join(basePath, config.translationFiles.paths[0], '**/*.{json,yml,yaml}');
         const ignore = (config.translationFiles.ignore || []).map(i => path.join(basePath, i));
 
-        // Call mockGlob so the tests can verify the correct arguments
         const globParams = {
           ignore,
           nodir: true
@@ -85,7 +88,6 @@ describe('importService', () => {
         });
       }),
 
-      // Add the flattenTranslations function that import-service.js needs
       flattenTranslations: jest.fn().mockImplementation((obj) => {
         const result = {};
         const flatten = (obj, prefix = '') => {
@@ -109,6 +111,10 @@ describe('importService', () => {
 
     const importServiceModule = await import('../../src/utils/import-service.js');
     importService = importServiceModule.importService;
+  });
+
+  afterEach(() => {
+    global.console = originalConsole;
   });
 
   describe('findTranslationFiles', () => {

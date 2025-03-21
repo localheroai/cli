@@ -2,17 +2,34 @@ import { execSync } from 'child_process';
 import { promises as fs } from 'fs';
 import path from 'path';
 
-export function isGitHubAction() {
-  return process.env.GITHUB_ACTIONS === 'true';
-}
+const defaultDependencies = {
+  exec: (cmd, options) => execSync(cmd, options),
+  fs,
+  path,
+  env: process.env
+};
 
-export async function createGitHubActionFile(basePath, translationPaths) {
-  const workflowDir = path.join(basePath, '.github', 'workflows');
-  const workflowFile = path.join(workflowDir, 'localhero-translate.yml');
+export const githubService = {
+  deps: { ...defaultDependencies },
 
-  await fs.mkdir(workflowDir, { recursive: true });
+  // For testing - reset or inject custom dependencies
+  setDependencies(customDeps = {}) {
+    this.deps = { ...defaultDependencies, ...customDeps };
+    return this;
+  },
 
-  const actionContent = `name: Localhero.ai - I18n translation
+  isGitHubAction() {
+    return this.deps.env.GITHUB_ACTIONS === 'true';
+  },
+
+  async createGitHubActionFile(basePath, translationPaths) {
+    const { fs, path } = this.deps;
+    const workflowDir = path.join(basePath, '.github', 'workflows');
+    const workflowFile = path.join(workflowDir, 'localhero-translate.yml');
+
+    await fs.mkdir(workflowDir, { recursive: true });
+
+    const actionContent = `name: Localhero.ai - I18n translation
 
 on:
   pull_request:
@@ -44,50 +61,62 @@ jobs:
         GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
       run: npx @localheroai/cli translate`;
 
-  await fs.writeFile(workflowFile, actionContent);
-  return workflowFile;
+    await fs.writeFile(workflowFile, actionContent);
+    return workflowFile;
+  },
+
+  autoCommitChanges(filesPath) {
+    const { exec, env } = this.deps;
+
+    if (!this.isGitHubAction()) return;
+
+    console.log("Running in GitHub Actions. Committing changes...");
+    try {
+      exec('git config --global user.name "LocalHero Bot"', { stdio: "inherit" });
+      exec('git config --global user.email "hi@localhero.ai"', { stdio: "inherit" });
+
+      const branchName = env.GITHUB_HEAD_REF;
+      if (!branchName) {
+        throw new Error('Could not determine branch name from GITHUB_HEAD_REF');
+      }
+
+      exec(`git add ${filesPath}`, { stdio: "inherit" });
+
+      const status = exec('git status --porcelain').toString();
+      if (!status) {
+        console.log("No changes to commit.");
+        return;
+      }
+
+      exec('git commit -m "Update translations"', { stdio: "inherit" });
+
+      const token = env.GITHUB_TOKEN;
+      if (!token) {
+        throw new Error('GITHUB_TOKEN is not set');
+      }
+
+      const repository = env.GITHUB_REPOSITORY;
+      if (!repository) {
+        throw new Error('GITHUB_REPOSITORY is not set');
+      }
+
+      const remoteUrl = `https://x-access-token:${token}@github.com/${repository}.git`;
+
+      exec(`git remote set-url origin ${remoteUrl}`, { stdio: "inherit" });
+      exec(`git push origin HEAD:${branchName}`, { stdio: "inherit" });
+      console.log("Changes committed and pushed successfully.");
+    } catch (error) {
+      console.error("Auto-commit failed:", error.message);
+      throw error;
+    }
+  }
+};
+
+// Only export the functions needed externally
+export function createGitHubActionFile(basePath, translationPaths) {
+  return githubService.createGitHubActionFile(basePath, translationPaths);
 }
 
 export function autoCommitChanges(filesPath) {
-  if (!isGitHubAction()) return;
-
-  console.log("Running in GitHub Actions. Committing changes...");
-  try {
-    execSync('git config --global user.name "LocalHero Bot"', { stdio: "inherit" });
-    execSync('git config --global user.email "hi@localhero.ai"', { stdio: "inherit" });
-
-    const branchName = process.env.GITHUB_HEAD_REF;
-    if (!branchName) {
-      throw new Error('Could not determine branch name from GITHUB_HEAD_REF');
-    }
-
-    execSync(`git add ${filesPath}`, { stdio: "inherit" });
-
-    const status = execSync('git status --porcelain').toString();
-    if (!status) {
-      console.log("No changes to commit.");
-      return;
-    }
-
-    execSync('git commit -m "Update translations"', { stdio: "inherit" });
-
-    const token = process.env.GITHUB_TOKEN;
-    if (!token) {
-      throw new Error('GITHUB_TOKEN is not set');
-    }
-
-    const repository = process.env.GITHUB_REPOSITORY;
-    if (!repository) {
-      throw new Error('GITHUB_REPOSITORY is not set');
-    }
-
-    const remoteUrl = `https://x-access-token:${token}@github.com/${repository}.git`;
-
-    execSync(`git remote set-url origin ${remoteUrl}`, { stdio: "inherit" });
-    execSync(`git push origin HEAD:${branchName}`, { stdio: "inherit" });
-    console.log("Changes committed and pushed successfully.");
-  } catch (error) {
-    console.error("Auto-commit failed:", error.message);
-    throw error;
-  }
+  return githubService.autoCommitChanges(filesPath);
 }

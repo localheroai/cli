@@ -5,11 +5,13 @@ describe('auth utils', () => {
   let getApiKey;
   let checkAuth;
   let originalEnv;
+  let originalConsole;
 
   beforeEach(async () => {
     jest.resetModules();
     originalEnv = process.env;
     process.env = { ...originalEnv };
+
     mockConfigService = {
       getAuthConfig: jest.fn()
     };
@@ -21,10 +23,18 @@ describe('auth utils', () => {
     const authModule = await import('../../src/utils/auth.js');
     getApiKey = authModule.getApiKey;
     checkAuth = authModule.checkAuth;
+
+    originalConsole = { ...console };
+    console.log = jest.fn();
+    console.warn = jest.fn();
+    console.error = jest.fn();
+    console.info = jest.fn();
   });
 
   afterEach(() => {
     process.env = originalEnv;
+    global.console = originalConsole;
+    jest.restoreAllMocks();
   });
 
   describe('getApiKey', () => {

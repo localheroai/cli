@@ -15,14 +15,32 @@ const DEFAULT_PROJECT_CONFIG = {
   lastSyncedAt: null
 };
 
+const defaultDeps = {
+  fs,
+  path,
+  process,
+  cwd: process.cwd
+};
+
 export const configService = {
-  configFilePath() {
-    return path.join(process.cwd(), PROJECT_CONFIG_FILE);
+  deps: { ...defaultDeps },
+
+  setDependencies(customDeps = {}) {
+    this.deps = { ...defaultDeps, ...customDeps };
+    return this;
   },
 
-  async getAuthConfig(basePath = process.cwd()) {
+  configFilePath(basePath) {
+    const { path } = this.deps;
+    const baseDir = basePath || this.deps.cwd();
+    return path.join(baseDir, PROJECT_CONFIG_FILE);
+  },
+
+  async getAuthConfig(basePath) {
+    const { fs, path } = this.deps;
+    const baseDir = basePath || this.deps.cwd();
     try {
-      const configPath = path.join(basePath, AUTH_CONFIG_FILE);
+      const configPath = path.join(baseDir, AUTH_CONFIG_FILE);
       const content = await fs.readFile(configPath, 'utf8');
       return JSON.parse(content);
     } catch {
@@ -30,16 +48,19 @@ export const configService = {
     }
   },
 
-  async saveAuthConfig(config, basePath = process.cwd()) {
-    const configPath = path.join(basePath, AUTH_CONFIG_FILE);
+  async saveAuthConfig(config, basePath) {
+    const { fs, path } = this.deps;
+    const baseDir = basePath || this.deps.cwd();
+    const configPath = path.join(baseDir, AUTH_CONFIG_FILE);
     await fs.writeFile(configPath, JSON.stringify(config, null, 2), {
       mode: 0o600
     });
   },
 
-  async getProjectConfig() {
+  async getProjectConfig(basePath) {
+    const { fs } = this.deps;
     try {
-      const configPath = this.configFilePath();
+      const configPath = this.configFilePath(basePath);
       const content = await fs.readFile(configPath, 'utf8');
       const config = JSON.parse(content);
 
@@ -56,8 +77,9 @@ export const configService = {
     }
   },
 
-  async saveProjectConfig(config) {
-    const configPath = this.configFilePath();
+  async saveProjectConfig(config, basePath) {
+    const { fs } = this.deps;
+    const configPath = this.configFilePath(basePath);
     const configWithSchema = {
       ...DEFAULT_PROJECT_CONFIG,
       ...config,
@@ -85,7 +107,7 @@ export const configService = {
     return true;
   },
 
-  async getValidProjectConfig(basePath = process.cwd()) {
+  async getValidProjectConfig(basePath) {
     const config = await this.getProjectConfig(basePath);
     if (!config) {
       throw new Error('No project config found. Run `npx @localheroai/cli init` first');
@@ -94,7 +116,7 @@ export const configService = {
     return config;
   },
 
-  async updateLastSyncedAt(basePath = process.cwd()) {
+  async updateLastSyncedAt(basePath) {
     const config = await this.getValidProjectConfig(basePath);
     config.lastSyncedAt = new Date().toISOString();
     await this.saveProjectConfig(config, basePath);

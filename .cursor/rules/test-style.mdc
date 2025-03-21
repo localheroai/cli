@@ -7,3 +7,4 @@ Tests should follow these conventions:
 - Test Naming: Use direct descriptive statements in present tense ("processes files correctly", "handles errors gracefully") rather than "should" statements. Keep names concise but descriptive.
 - Function Syntax: Use arrow functions () => {} for all test declarations (both describe and it blocks) for consistency.
 - Don't focus on testing console.log / console.warn if not needed, focus on the actual behavior and effects of the code that is getting tested.
+- Dependency injection is a good way to avoid complex mocking situations. 

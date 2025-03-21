@@ -6,6 +6,7 @@ import { updateTranslationFile } from '../utils/translation-updater.js';
 import { checkAuth } from '../utils/auth.js';
 import { findMissingTranslations, batchKeysWithMissing, processLocaleTranslations } from '../utils/translation-utils.js';
 import { syncService } from '../utils/sync-service.js';
+import { autoCommitChanges } from '../utils/github.js';
 
 const BATCH_SIZE = 50;
 
@@ -21,11 +22,12 @@ const defaultDeps = {
     findMissingTranslations,
     batchKeysWithMissing
   },
-  syncService
+  syncService,
+  gitUtils: { autoCommitChanges }
 };
 
 export async function translate(options = {}, deps = defaultDeps) {
-  const { console, configUtils, authUtils, fileUtils, translationUtils, syncService } = deps;
+  const { console, configUtils, authUtils, fileUtils, translationUtils, syncService, gitUtils } = deps;
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
@@ -243,6 +245,15 @@ export async function translate(options = {}, deps = defaultDeps) {
 
   console.log(chalk.green('✓ Translations complete!'));
   console.log(`Updated ${totalTranslated} keys in ${totalLanguages} languages`);
+
+  // Auto-commit changes if we're running in GitHub Actions
+  if (totalTranslated > 0) {
+    try {
+      gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '));
+    } catch (error) {
+      console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${error.message}`));
+    }
+  }
 
   if (resultsBaseUrl && allJobIds.length > 0) {
     const jobIdsParam = allJobIds.join(',');

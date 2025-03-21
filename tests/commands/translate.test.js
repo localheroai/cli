@@ -8,6 +8,7 @@ describe('translate command', () => {
   let fileUtils;
   let translationUtils;
   let syncService;
+  let gitUtils;
 
   function createTranslateDeps(overrides = {}) {
     return {
@@ -17,6 +18,7 @@ describe('translate command', () => {
       fileUtils,
       translationUtils,
       syncService,
+      gitUtils,
       ...overrides
     };
   }
@@ -26,7 +28,7 @@ describe('translate command', () => {
   });
 
   beforeEach(() => {
-    mockConsole = { log: jest.fn(), error: jest.fn(), info: jest.fn() };
+    mockConsole = { log: jest.fn(), error: jest.fn(), info: jest.fn(), warn: jest.fn() };
 
     configUtils = {
       getProjectConfig: jest.fn().mockResolvedValue({
@@ -74,6 +76,10 @@ describe('translate command', () => {
     syncService = {
       checkForUpdates: jest.fn().mockResolvedValue({ hasUpdates: false }),
       applyUpdates: jest.fn().mockResolvedValue({ totalUpdates: 0, totalDeleted: 0 })
+    };
+
+    gitUtils = {
+      autoCommitChanges: jest.fn()
     };
   });
 
@@ -123,6 +129,7 @@ describe('translate command', () => {
 
     expect(syncService.checkForUpdates).toHaveBeenCalledWith({ verbose: true });
     expect(syncService.applyUpdates).not.toHaveBeenCalled();
+    expect(gitUtils.autoCommitChanges).toHaveBeenCalledWith('locales/');
 
     // Verify console output indicates success
     const consoleOutput = mockConsole.log.mock.calls

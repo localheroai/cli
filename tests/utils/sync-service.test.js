@@ -7,6 +7,7 @@ describe('syncService', () => {
   let mockConsole;
   let mockFilesUtils;
   let syncService;
+  let originalConsole;
 
   beforeEach(async () => {
     jest.resetModules();
@@ -29,9 +30,12 @@ describe('syncService', () => {
       findTranslationFiles: jest.fn()
     };
 
+    originalConsole = { ...console };
     mockConsole = {
       log: jest.fn(),
-      error: jest.fn()
+      warn: jest.fn(),
+      error: jest.fn(),
+      info: jest.fn()
     };
     global.console = mockConsole;
 
@@ -49,6 +53,10 @@ describe('syncService', () => {
 
     const syncServiceModule = await import('../../src/utils/sync-service.js');
     syncService = syncServiceModule.syncService;
+  });
+
+  afterEach(() => {
+    global.console = originalConsole;
   });
 
   describe('checkForUpdates', () => {
