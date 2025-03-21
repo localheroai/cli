@@ -2,13 +2,22 @@ import { jest } from '@jest/globals';
 
 describe('auth API', () => {
   let verifyApiKey;
+  let mockApiRequest;
 
   beforeEach(async () => {
     jest.resetModules();
-    global.fetch = jest.fn();
+    mockApiRequest = jest.fn();
+
+    await jest.unstable_mockModule('../../src/api/client.js', () => ({
+      apiRequest: mockApiRequest
+    }));
 
     const authModule = await import('../../src/api/auth.js');
     verifyApiKey = authModule.verifyApiKey;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('verifies API key with correct parameters', async () => {
@@ -19,62 +28,45 @@ describe('auth API', () => {
       }
     };
 
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockResponse)
-    });
+    mockApiRequest.mockResolvedValueOnce(mockResponse);
 
     const result = await verifyApiKey('test-key');
 
-    expect(global.fetch).toHaveBeenCalledWith(
-      'https://api.localhero.ai/api/v1/auth/verify',
-      {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer test-key'
-        }
-      }
-    );
+    expect(mockApiRequest).toHaveBeenCalledWith('/api/v1/auth/verify', {
+      apiKey: 'test-key'
+    });
     expect(result).toEqual(mockResponse);
   });
 
-  it('handles invalid API key response', async () => {
-    const errorResponse = {
-      error: {
-        code: 'invalid_api_key',
-        message: 'Your API key is invalid or has been revoked. Please run `npx @localheroai/cli login` to update your API key.'
-      }
-    };
-
-    global.fetch.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      json: () => Promise.resolve(errorResponse)
-    });
+  it('handles invalid API key error', async () => {
+    const error = new Error('Your API key is invalid');
+    error.code = 'invalid_api_key';
+    mockApiRequest.mockRejectedValueOnce(error);
 
     const result = await verifyApiKey('invalid-key');
 
     expect(result.error.code).toBe('invalid_api_key');
-    expect(result.error.message).toBe('Your API key is invalid or has been revoked. Please run `npx @localheroai/cli login` to update your API key.');
+    expect(result.error.message).toBe('Your API key is invalid');
   });
 
   it('handles generic verification errors', async () => {
-    const errorResponse = {
-      error: {
-        message: 'Network error'
-      }
-    };
-
-    global.fetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      json: () => Promise.resolve(errorResponse)
-    });
+    const error = new Error('Network error');
+    mockApiRequest.mockRejectedValueOnce(error);
 
     const result = await verifyApiKey('test-key');
 
     expect(result.error.code).toBe('verification_failed');
     expect(result.error.message).toBe('Network error');
+  });
+
+  it('provides default error message when no message is available', async () => {
+    const error = new Error();
+    error.message = null;
+    mockApiRequest.mockRejectedValueOnce(error);
+
+    const result = await verifyApiKey('test-key');
+
+    expect(result.error.code).toBe('verification_failed');
+    expect(result.error.message).toBe('Failed to verify API key');
   });
 });

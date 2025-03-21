@@ -1,12 +1,23 @@
 import { jest } from '@jest/globals';
 import { apiRequest, getApiHost } from '../../src/api/client.js';
 
-global.fetch = jest.fn();
-
 describe('API Client', () => {
+  let originalFetch;
+  let originalEnv;
+
   beforeEach(() => {
-    jest.resetAllMocks();
+    originalFetch = global.fetch;
+    global.fetch = jest.fn();
+
+    originalEnv = process.env;
+    process.env = { ...originalEnv };
     process.env.LOCALHERO_API_KEY = 'test-api-key';
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+    jest.restoreAllMocks();
   });
 
   it('makes API requests', async () => {

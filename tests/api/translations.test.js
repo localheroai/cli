@@ -1,8 +1,11 @@
 import { jest } from '@jest/globals';
 
+const TEST_API_KEY = 'tk_123456789012345678901234567890123456789012345678';
+
 describe('translations API', () => {
   let mockGetApiKey;
   let mockGetCurrentBranch;
+  let mockApiRequest;
   let getUpdates;
   let createTranslationJob;
   let checkJobStatus;
@@ -10,15 +13,19 @@ describe('translations API', () => {
 
   beforeEach(async () => {
     jest.resetModules();
-    global.fetch = jest.fn();
 
-    mockGetApiKey = jest.fn().mockResolvedValue('tk_123456789012345678901234567890123456789012345678');
+    mockGetApiKey = jest.fn().mockResolvedValue(TEST_API_KEY);
     mockGetCurrentBranch = jest.fn().mockResolvedValue(null);
+    mockApiRequest = jest.fn();
+
     await jest.unstable_mockModule('../../src/utils/auth.js', () => ({
       getApiKey: mockGetApiKey
     }));
     await jest.unstable_mockModule('../../src/utils/git.js', () => ({
       getCurrentBranch: mockGetCurrentBranch
+    }));
+    await jest.unstable_mockModule('../../src/api/client.js', () => ({
+      apiRequest: mockApiRequest
     }));
 
     const translationsModule = await import('../../src/api/translations.js');
@@ -28,9 +35,15 @@ describe('translations API', () => {
     getTranslations = translationsModule.getTranslations;
   });
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   describe('createTranslationJob', () => {
     it('creates translation job successfully', async () => {
-      mockGetCurrentBranch.mockResolvedValueOnce('feature/test-branch');
+      const branchName = 'feature/test-branch';
+      mockGetCurrentBranch.mockResolvedValueOnce(branchName);
+
       const mockResponse = {
         jobs: [
           {
@@ -42,10 +55,7 @@ describe('translations API', () => {
         ]
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const projectId = 'proj_123';
       const sourceFiles = [{
@@ -57,19 +67,21 @@ describe('translations API', () => {
 
       const result = await createTranslationJob({ projectId, sourceFiles, targetLocales });
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/projects/proj_123/translation_jobs',
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/projects/proj_123/translation_jobs',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          },
           body: JSON.stringify({
             target_languages: targetLocales,
-            files: sourceFiles,
-            branch: 'feature/test-branch'
-          })
+            files: sourceFiles.map(file => ({
+              path: file.path,
+              content: file.content,
+              format: file.format,
+              target_paths: undefined
+            })),
+            branch: branchName
+          }),
+          apiKey: TEST_API_KEY
         }
       );
       expect(result).toEqual({
@@ -79,10 +91,7 @@ describe('translations API', () => {
     });
 
     it('handles empty jobs response', async () => {
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ jobs: [] })
-      });
+      mockApiRequest.mockResolvedValueOnce({ jobs: [] });
 
       await expect(createTranslationJob({
         projectId: 'proj_123',
@@ -102,22 +111,13 @@ describe('translations API', () => {
         completed_at: '2024-03-15T14:31:00Z'
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await checkJobStatus('job_123');
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/translation_jobs/job_123',
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          }
-        }
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/translation_jobs/job_123',
+        { apiKey: TEST_API_KEY }
       );
       expect(result).toEqual(mockResponse);
     });
@@ -131,22 +131,13 @@ describe('translations API', () => {
         }
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await checkJobStatus('job_123', true);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/translation_jobs/job_123?include_translations=true',
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          }
-        }
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/translation_jobs/job_123?include_translations=true',
+        { apiKey: TEST_API_KEY }
       );
       expect(result).toEqual(mockResponse);
     });
@@ -161,29 +152,20 @@ describe('translations API', () => {
         }
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await getTranslations('job_123');
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/translation_jobs/job_123/translations',
-        {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          }
-        }
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/translation_jobs/job_123/translations',
+        { apiKey: TEST_API_KEY }
       );
       expect(result).toEqual(mockResponse);
     });
   });
 
   describe('getUpdates', () => {
-    it('should fetch translation updates with valid parameters', async () => {
+    it('fetches translation updates with valid parameters', async () => {
       const mockResponse = {
         updates: {
           timestamp: '2024-03-15T14:30:00Z',
@@ -212,30 +194,20 @@ describe('translations API', () => {
         }
       };
 
-      global.fetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const projectId = 'test-project';
       const since = '2024-03-15T00:00:00Z';
       const result = await getUpdates(projectId, { since });
-      const expectedUrl = `https://api.localhero.ai/api/v1/projects/${projectId}/updates?since=${encodeURIComponent(since)}&page=1`;
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        expectedUrl,
-        {
-          method: 'GET',
-          headers: {
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678',
-            'Content-Type': 'application/json'
-          }
-        }
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        `/api/v1/projects/${projectId}/updates?since=${encodeURIComponent(since)}&page=1`,
+        { apiKey: TEST_API_KEY }
       );
       expect(result).toEqual(mockResponse);
     });
 
-    it('should throw error when since parameter is missing', async () => {
+    it('throws error when since parameter is missing', async () => {
       const projectId = 'test-project';
       await expect(getUpdates(projectId, {}))
         .rejects

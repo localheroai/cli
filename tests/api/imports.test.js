@@ -4,21 +4,31 @@ const TEST_API_KEY = 'tk_123456789012345678901234567890123456789012345678';
 
 describe('imports API', () => {
   let mockGetApiKey;
+  let mockApiRequest;
   let createImport;
   let checkImportStatus;
 
   beforeEach(async () => {
     jest.resetModules();
-    global.fetch = jest.fn();
 
     mockGetApiKey = jest.fn().mockResolvedValue(TEST_API_KEY);
+    mockApiRequest = jest.fn();
+
     await jest.unstable_mockModule('../../src/utils/auth.js', () => ({
       getApiKey: mockGetApiKey
+    }));
+
+    await jest.unstable_mockModule('../../src/api/client.js', () => ({
+      apiRequest: mockApiRequest
     }));
 
     const importsModule = await import('../../src/api/imports.js');
     createImport = importsModule.createImport;
     checkImportStatus = importsModule.checkImportStatus;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('createImport', () => {
@@ -40,22 +50,16 @@ describe('imports API', () => {
         }
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await createImport({ projectId, translations });
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/projects/proj_123/imports',
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/projects/proj_123/imports',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${TEST_API_KEY}`
-          },
-          body: JSON.stringify({ translations })
+          body: JSON.stringify({ translations }),
+          apiKey: TEST_API_KEY
         }
       );
       expect(result).toEqual(mockResponse.import);
@@ -65,17 +69,7 @@ describe('imports API', () => {
       const projectId = 'proj_123';
       const translations = {};
 
-      const errorResponse = {
-        error: {
-          message: 'No translations provided'
-        }
-      };
-
-      global.fetch.mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        json: () => Promise.resolve(errorResponse)
-      });
+      mockApiRequest.mockRejectedValueOnce(new Error('No translations provided'));
 
       await expect(createImport({ projectId, translations }))
         .rejects.toThrow('No translations provided');
@@ -98,21 +92,14 @@ describe('imports API', () => {
         }
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await checkImportStatus(projectId, importId);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/projects/proj_123/imports/imp_123',
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/projects/proj_123/imports/imp_123',
         {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${TEST_API_KEY}`
-          }
+          apiKey: TEST_API_KEY
         }
       );
       expect(result).toEqual(mockResponse.import);
@@ -122,17 +109,7 @@ describe('imports API', () => {
       const projectId = 'proj_123';
       const importId = 'invalid_import';
 
-      const errorResponse = {
-        error: {
-          message: 'Import not found'
-        }
-      };
-
-      global.fetch.mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        json: () => Promise.resolve(errorResponse)
-      });
+      mockApiRequest.mockRejectedValueOnce(new Error('Import not found'));
 
       await expect(checkImportStatus(projectId, importId))
         .rejects.toThrow('Import not found');

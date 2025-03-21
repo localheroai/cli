@@ -1,22 +1,34 @@
 import { jest } from '@jest/globals';
 
+const TEST_API_KEY = 'tk_123456789012345678901234567890123456789012345678';
+
 describe('projects API', () => {
   let mockGetApiKey;
+  let mockApiRequest;
   let listProjects;
   let createProject;
 
   beforeEach(async () => {
     jest.resetModules();
-    global.fetch = jest.fn();
 
-    mockGetApiKey = jest.fn().mockResolvedValue('tk_123456789012345678901234567890123456789012345678');
+    mockGetApiKey = jest.fn().mockResolvedValue(TEST_API_KEY);
+    mockApiRequest = jest.fn();
+
     await jest.unstable_mockModule('../../src/utils/auth.js', () => ({
       getApiKey: mockGetApiKey
+    }));
+
+    await jest.unstable_mockModule('../../src/api/client.js', () => ({
+      apiRequest: mockApiRequest
     }));
 
     const projectsModule = await import('../../src/api/projects.js');
     listProjects = projectsModule.listProjects;
     createProject = projectsModule.createProject;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   describe('listProjects', () => {
@@ -32,40 +44,25 @@ describe('projects API', () => {
         ]
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await listProjects();
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/projects',
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/projects',
         {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          }
+          apiKey: TEST_API_KEY
         }
       );
       expect(result).toEqual(mockResponse.projects);
     });
 
     it('handles API errors', async () => {
-      const errorResponse = {
-        error: {
-          message: 'Failed to fetch projects'
-        }
-      };
+      mockApiRequest.mockRejectedValueOnce(new Error('Failed to fetch projects'));
 
-      global.fetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        json: () => Promise.resolve(errorResponse)
-      });
-
-      await expect(listProjects()).rejects.toThrow('Failed to fetch projects');
+      await expect(listProjects())
+        .rejects
+        .toThrow('Failed to fetch projects');
     });
   });
 
@@ -85,28 +82,22 @@ describe('projects API', () => {
         }
       };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockResponse)
-      });
+      mockApiRequest.mockResolvedValueOnce(mockResponse);
 
       const result = await createProject(projectData);
 
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://api.localhero.ai/api/v1/projects',
+      expect(mockApiRequest).toHaveBeenCalledWith(
+        '/api/v1/projects',
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer tk_123456789012345678901234567890123456789012345678'
-          },
           body: JSON.stringify({
             project: {
               name: projectData.name,
               source_language: projectData.sourceLocale,
               target_languages: projectData.targetLocales
             }
-          })
+          }),
+          apiKey: TEST_API_KEY
         }
       );
       expect(result).toEqual(mockResponse.project);
@@ -118,19 +109,12 @@ describe('projects API', () => {
         sourceLocale: 'en',
         targetLocales: ['fr', 'es']
       };
-      const errorResponse = {
-        error: {
-          message: 'Project creation failed'
-        }
-      };
 
-      global.fetch.mockResolvedValueOnce({
-        ok: false,
-        status: 422,
-        json: () => Promise.resolve(errorResponse)
-      });
+      mockApiRequest.mockRejectedValueOnce(new Error('Project creation failed'));
 
-      await expect(createProject(projectData)).rejects.toThrow('Project creation failed');
+      await expect(createProject(projectData))
+        .rejects
+        .toThrow('Project creation failed');
     });
   });
 });
