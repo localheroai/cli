@@ -1,0 +1,8 @@
+---
+description: How handle new feature requests
+globs: 
+alwaysApply: true
+---
+- Carefully read through the request and analyze the requirements. 
+- Create a highlevel plan for the implementation.
+- Ask any followp questions before starting to implementation. Iterate on questions if needed.
