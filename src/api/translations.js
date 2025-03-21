@@ -2,7 +2,7 @@ import { getApiKey } from '../utils/auth.js';
 import { apiRequest } from './client.js';
 import { getCurrentBranch } from '../utils/git.js';
 
-export async function createTranslationJob({ sourceFiles, targetLocales, projectId }) {
+export async function createTranslationJob({ sourceFiles, targetLocales, projectId, targetPaths }) {
   const apiKey = await getApiKey();
   const branch = await getCurrentBranch();
 
@@ -13,7 +13,8 @@ export async function createTranslationJob({ sourceFiles, targetLocales, project
       files: sourceFiles.map(file => ({
         path: file.path,
         content: file.content,
-        format: file.format
+        format: file.format,
+        target_paths: targetPaths
       })),
       ...(branch && { branch })
     }),

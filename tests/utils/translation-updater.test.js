@@ -1,3 +1,4 @@
+import { jest } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -5,17 +6,27 @@ import { updateTranslationFile, deleteKeysFromTranslationFile } from '../../src/
 
 describe('translation-updater', () => {
   let tempDir;
+  let originalConsole;
 
   beforeEach(() => {
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'localhero-test-'));
+
+    originalConsole = { ...console };
+    global.console = {
+      log: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+      info: originalConsole.info
+    };
   });
 
   afterEach(() => {
     fs.rmSync(tempDir, { recursive: true, force: true });
+    global.console = originalConsole;
   });
 
   describe('updateTranslationFile', () => {
-    test('preserves existing quote styles in YAML files', async () => {
+    it('preserves existing quote styles in YAML files', async () => {
       const filePath = path.join(tempDir, 'en.yml');
       const initialContent = `
 en:
@@ -37,7 +48,7 @@ en:
       expect(updatedContent).toContain('plain: simple');
     });
 
-    test('adds quotes for values with special characters', async () => {
+    it('adds quotes for values with special characters', async () => {
       const filePath = path.join(tempDir, 'en.yml');
       await updateTranslationFile(filePath, {
         'special': 'Contains: special, characters!',
@@ -49,7 +60,7 @@ en:
       expect(content).toContain('normal: plain text');
     });
 
-    test('handles nested structures correctly', async () => {
+    it('handles nested structures correctly', async () => {
       const filePath = path.join(tempDir, 'en.yml');
       await updateTranslationFile(filePath, {
         'buttons.submit': 'Submit',
@@ -62,7 +73,7 @@ en:
       expect(content).toMatch(/messages:\n\s+welcome: Welcome/);
     });
 
-    test('preserves existing content structure', async () => {
+    it('preserves existing content structure', async () => {
       const filePath = path.join(tempDir, 'en.yml');
       const initialContent = `
 en:
@@ -84,7 +95,7 @@ en:
       expect(content).toMatch(/messages:\n\s+welcome: Welcome\n\s+goodbye: Goodbye/);
     });
 
-    test('handles errors gracefully', async () => {
+    it('handles errors gracefully', async () => {
       const filePath = path.join(tempDir, 'nonexistent', 'en.yml');
       const updates = { 'key': 'value' };
 
@@ -94,10 +105,62 @@ en:
         created: true
       });
     });
+
+    it('handles JSON files with existing content', async () => {
+      const filePath = path.join(tempDir, 'translations.json');
+
+      const initialContent = {
+        navbar: {
+          home: 'Old Home'
+        }
+      };
+      fs.writeFileSync(filePath, JSON.stringify(initialContent, null, 2));
+
+      const translations = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About'
+      };
+
+      const result = await updateTranslationFile(filePath, translations, 'en');
+
+      expect(result).toEqual({
+        updatedKeys: ['navbar.home', 'navbar.about'],
+        created: false
+      });
+
+      const updatedContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      expect(updatedContent).toEqual({
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        }
+      });
+    });
+
+    it('creates new JSON file if it does not exist', async () => {
+      const filePath = path.join(tempDir, 'new-translations.json');
+      const translations = {
+        'navbar.home': 'Home'
+      };
+
+      const result = await updateTranslationFile(filePath, translations, 'en');
+
+      expect(result).toEqual({
+        updatedKeys: ['navbar.home'],
+        created: true
+      });
+
+      const fileContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      expect(fileContent).toEqual({
+        navbar: {
+          home: 'Home'
+        }
+      });
+    });
   });
 
   describe('deleteKeysFromTranslationFile', () => {
-    test('deletes keys from JSON file', async () => {
+    it('deletes keys from JSON file', async () => {
       const filePath = path.join(tempDir, 'en.json');
       const initialContent = {
         greeting: 'Hello',
@@ -121,12 +184,11 @@ en:
       expect(updatedContent).toHaveProperty('buttons.cancel');
       expect(updatedContent).not.toHaveProperty('deprecated.feature');
 
-      // The parent object should still exist if it has other keys
       expect(updatedContent).toHaveProperty('deprecated');
       expect(updatedContent.deprecated).toHaveProperty('other');
     });
 
-    test('deletes keys from YAML file', async () => {
+    it('deletes keys from YAML file', async () => {
       const filePath = path.join(tempDir, 'en.yml');
       const initialContent = `
 en:
@@ -149,7 +211,7 @@ en:
       expect(content).toContain('other: "Other Feature"');
     });
 
-    test('deletes entire parent object when all children are deleted', async () => {
+    it('deletes entire parent object when all children are deleted', async () => {
       const filePath = path.join(tempDir, 'en.json');
       const initialContent = {
         greeting: 'Hello',
@@ -165,11 +227,10 @@ en:
       const updatedContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       expect(updatedContent).toHaveProperty('greeting');
 
-      // The parent object should be removed if it has no other keys
       expect(updatedContent).not.toHaveProperty('deprecated');
     });
 
-    test('handles files with language wrapper', async () => {
+    it('handles files with language wrapper', async () => {
       const filePath = path.join(tempDir, 'en.json');
       const initialContent = {
         en: {
@@ -189,7 +250,7 @@ en:
       expect(updatedContent.en).not.toHaveProperty('deprecated');
     });
 
-    test('handles non-existent keys gracefully', async () => {
+    it('handles non-existent keys gracefully', async () => {
       const filePath = path.join(tempDir, 'en.json');
       const initialContent = {
         greeting: 'Hello'
@@ -203,7 +264,7 @@ en:
       expect(updatedContent).toEqual(initialContent);
     });
 
-    test('handles non-existent files gracefully', async () => {
+    it('handles non-existent files gracefully', async () => {
       const filePath = path.join(tempDir, 'nonexistent.json');
 
       await expect(deleteKeysFromTranslationFile(filePath, ['some.key']))

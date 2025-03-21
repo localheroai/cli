@@ -145,10 +145,16 @@ export async function translate(options = {}, deps = defaultDeps) {
   let resultsBaseUrl = null;
 
   for (const batch of batches) {
+    const targetPaths = Object.entries(missingByLocale).reduce((acc, [locale, data]) => {
+      acc[locale] = data.targetPath;
+      return acc;
+    }, {});
+
     const jobRequest = {
       projectId: config.projectId,
       sourceFiles: batch.files,
-      targetLocales: batch.locales
+      targetLocales: batch.locales,
+      targetPaths
     };
 
     try {

@@ -103,8 +103,11 @@ export async function updateTranslationFile(filePath, translations, languageCode
     };
 
     if (fileExt === 'json') {
-      await updateJsonFile(filePath, translations, languageCode);
-      return result;
+      const jsonResult = await updateJsonFile(filePath, translations, languageCode);
+      return {
+        updatedKeys: result.updatedKeys,
+        created: jsonResult.created
+      };
     }
     let existingContent = '';
     let styles;

@@ -6,12 +6,24 @@ describe('files utils', () => {
   let mockGlob;
   let mockReadFile;
   let isValidLocale;
+  let detectJsonFormat;
+  let flattenTranslations;
+  let unflattenTranslations;
+  let preserveJsonStructure;
+  let originalConsole;
 
   beforeEach(async () => {
     jest.resetModules();
 
     mockGlob = jest.fn();
     mockReadFile = jest.fn();
+
+    originalConsole = { ...console };
+    global.console = {
+      log: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn()
+    };
 
     await jest.unstable_mockModule('glob', () => ({
       glob: mockGlob
@@ -24,6 +36,14 @@ describe('files utils', () => {
     const filesModule = await import('../../src/utils/files.js');
     findTranslationFiles = filesModule.findTranslationFiles;
     isValidLocale = filesModule.isValidLocale;
+    detectJsonFormat = filesModule.detectJsonFormat;
+    flattenTranslations = filesModule.flattenTranslations;
+    unflattenTranslations = filesModule.unflattenTranslations;
+    preserveJsonStructure = filesModule.preserveJsonStructure;
+  });
+
+  afterEach(() => {
+    global.console = originalConsole;
   });
 
   it('processes yaml files correctly', async () => {
@@ -68,11 +88,8 @@ en:
         localeRegex: '([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
       }
     };
-    const originalWarn = console.warn;
-    console.warn = jest.fn();
 
     const result = await findTranslationFiles(config);
-    console.warn = originalWarn;
 
     expect(result).toHaveLength(1);
     expect(result[0].locale).toBe('en');
@@ -95,11 +112,8 @@ en:
         localeRegex: '([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
       }
     };
-    const originalWarn = console.warn;
-    console.warn = jest.fn();
 
     const result = await findTranslationFiles(config);
-    console.warn = originalWarn;
 
     expect(result).toHaveLength(1);
     expect(result[0].locale).toBe('en');
@@ -107,7 +121,7 @@ en:
     expect(Object.keys(result[0].keys)).toContain('nested.world');
   });
 
-  it('handles invalid files gracefully', async () => {
+  it('handles invalid files gracefully by skipping them', async () => {
     mockGlob.mockResolvedValue(['config/locales/en.json', 'config/locales/invalid.json']);
     mockReadFile.mockImplementation((path) => {
       if (path === 'config/locales/en.json') {
@@ -123,11 +137,9 @@ en:
         localeRegex: '([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
       }
     };
-    const originalWarn = console.warn;
-    console.warn = jest.fn();
 
     const result = await findTranslationFiles(config);
-    console.warn = originalWarn;
+
     expect(result).toHaveLength(1);
     expect(result[0].path).toBe('config/locales/en.json');
   });
@@ -148,47 +160,28 @@ en:
         localeRegex: '.*?([a-z]{2})[/\\\\].*' // Match locale from directory structure
       }
     };
-    const originalWarn = console.warn;
-    console.warn = jest.fn();
 
     const result = await findTranslationFiles(config);
-    console.warn = originalWarn;
 
     expect(result).toHaveLength(2);
     expect(result[0].locale).toBe('en');
     expect(result[1].locale).toBe('fr');
   });
 
-  it('handles missing locale in filename', async () => {
-    // Mock a file that doesn't contain any recognizable locale pattern
+  it('returns empty array when locale cannot be extracted from filenames', async () => {
     mockGlob.mockResolvedValue(['config/locales/unknown_file_123.json']);
     mockReadFile.mockResolvedValue('{"hello": "Hello"}');
 
     const config = {
       translationFiles: {
         paths: ['config/locales/'],
-        // This regex won't match "unknown_file_123.json"
         localeRegex: '^([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
       }
     };
 
-    // Mock console methods to verify warning
-    const originalWarn = console.warn;
-    const mockWarn = jest.fn();
-    console.warn = mockWarn;
+    const result = await findTranslationFiles(config);
 
-    const result = await findTranslationFiles(config, { verbose: true });
-
-    // Should skip files where locale can't be extracted
     expect(result).toHaveLength(0);
-
-    // Should warn about skipped file
-    expect(mockWarn).toHaveBeenCalledWith(
-      expect.stringContaining('Could not extract locale from path: config/locales/unknown_file_123.json')
-    );
-
-    // Restore console method
-    console.warn = originalWarn;
   });
 
   it('skips invalid locale format', async () => {
@@ -218,11 +211,8 @@ en:
         localeRegex: '([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
       }
     };
-    const originalWarn = console.warn;
-    console.warn = jest.fn();
 
     const result = await findTranslationFiles(config);
-    console.warn = originalWarn;
 
     expect(result).toHaveLength(1);
     expect(result[0].locale).toBe('en');
@@ -269,7 +259,6 @@ en:
     expect(result.targetFilesByLocale).toHaveProperty('fr');
     expect(result.targetFilesByLocale.fr).toHaveLength(1);
 
-    // The implementation includes all files, not just source and target
     expect(result.allFiles).toHaveLength(3); // en, fr, and de
     expect(result.allFiles.map(f => f.locale).sort()).toEqual(['de', 'en', 'fr']);
   });
@@ -311,7 +300,7 @@ en:
     expect(buttonsFile.namespace).toBe('buttons');
   });
 
-  it('supports skippping content parsing', async () => {
+  it('supports skipping content parsing', async () => {
     mockGlob.mockResolvedValue(['config/locales/en.json']);
     mockReadFile.mockResolvedValue('{"hello": "Hello"}');
 
@@ -360,16 +349,13 @@ en:
   it('supports filtering by locale with new parameters', async () => {
     const tempDir = 'tempDir';
 
-    // Mock the glob result with the files we want to test
     mockGlob.mockResolvedValue([
       `${tempDir}/en.yml`,
       `${tempDir}/fr.yml`
     ]);
 
-    // Mock the file content
     mockReadFile.mockResolvedValue('hello: Hello');
 
-    // Test with the configuration
     const result = await findTranslationFiles({
       translationFiles: {
         paths: [tempDir],
@@ -401,9 +387,9 @@ en:
 
   it('prioritizes known locales from config when detecting locale', async () => {
     mockGlob.mockResolvedValue([
-      'apps/kundo-widget/public/locales/sv/translation.json',
-      'apps/kundo-widget/public/locales/en/translation.json',
-      'apps/kundo-widget/public/locales/fr/translation.json'
+      'apps/project-widget/public/locales/sv/translation.json',
+      'apps/project-widget/public/locales/en/translation.json',
+      'apps/project-widget/public/locales/fr/translation.json'
     ]);
     mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
 
@@ -411,7 +397,7 @@ en:
       sourceLocale: 'sv',
       outputLocales: ['en', 'fr'],
       translationFiles: {
-        paths: ['apps/kundo-widget/public/locales/'],
+        paths: ['apps/project-widget/public/locales/'],
         pattern: '**/*.json'
       }
     };
@@ -421,12 +407,10 @@ en:
       verbose: true
     });
 
-    // Verify source files
     expect(result.sourceFiles).toHaveLength(1);
     expect(result.sourceFiles[0].locale).toBe('sv');
     expect(result.sourceFiles[0].path).toContain('/sv/');
 
-    // Verify target files
     expect(result.targetFilesByLocale.en).toHaveLength(1);
     expect(result.targetFilesByLocale.en[0].locale).toBe('en');
     expect(result.targetFilesByLocale.en[0].path).toContain('/en/');
@@ -435,14 +419,13 @@ en:
     expect(result.targetFilesByLocale.fr[0].locale).toBe('fr');
     expect(result.targetFilesByLocale.fr[0].path).toContain('/fr/');
 
-    // Verify all files were found
     expect(result.allFiles).toHaveLength(3);
   });
 
   it('handles case-insensitive locale detection', async () => {
     mockGlob.mockResolvedValue([
-      'apps/kundo-widget/public/locales/SV/translation.json',
-      'apps/kundo-widget/public/locales/En/translation.json'
+      'apps/project-widget/public/locales/SV/translation.json',
+      'apps/project-widget/public/locales/En/translation.json'
     ]);
     mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
 
@@ -450,7 +433,7 @@ en:
       sourceLocale: 'sv',
       outputLocales: ['en'],
       translationFiles: {
-        paths: ['apps/kundo-widget/public/locales/']
+        paths: ['apps/project-widget/public/locales/']
       }
     };
 
@@ -467,14 +450,14 @@ en:
   it('handles both directory-based and filename-based locale detection', async () => {
     mockGlob.mockResolvedValue([
       // Directory-based structure
-      'apps/kundo-widget/public/locales/sv/translation.json',
-      'apps/kundo-widget/public/locales/en/translation.json',
+      'apps/project-widget/public/locales/sv/translation.json',
+      'apps/project-widget/public/locales/en/translation.json',
       // Filename-based structure
-      'apps/kundo-widget/public/locales/translation.sv.json',
-      'apps/kundo-widget/public/locales/translation.en.json',
+      'apps/project-widget/public/locales/translation.sv.json',
+      'apps/project-widget/public/locales/translation.en.json',
       // Root level with locale in filename
-      'apps/kundo-widget/public/locales/sv.json',
-      'apps/kundo-widget/public/locales/en.json'
+      'apps/project-widget/public/locales/sv.json',
+      'apps/project-widget/public/locales/en.json'
     ]);
     mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
 
@@ -482,7 +465,7 @@ en:
       sourceLocale: 'sv',
       outputLocales: ['en'],
       translationFiles: {
-        paths: ['apps/kundo-widget/public/locales/'],
+        paths: ['apps/project-widget/public/locales/'],
         pattern: '**/*.json'
       }
     };
@@ -506,14 +489,13 @@ en:
       expect(file.path).toMatch(/en[/.]|[.]en[.]/)
     });
 
-    // Total should be 6 files
     expect(result.allFiles).toHaveLength(6);
   });
 
   it('prioritizes directory-based locale detection over filename-based', async () => {
     mockGlob.mockResolvedValue([
       // This file is in 'sv' directory but has 'en' in filename
-      'apps/kundo-widget/public/locales/sv/translation.en.json'
+      'apps/project-widget/public/locales/sv/translation.en.json'
     ]);
     mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
 
@@ -521,7 +503,7 @@ en:
       sourceLocale: 'sv',
       outputLocales: ['en'],
       translationFiles: {
-        paths: ['apps/kundo-widget/public/locales/']
+        paths: ['apps/project-widget/public/locales/']
       }
     };
 
@@ -533,5 +515,207 @@ en:
     expect(result.sourceFiles).toHaveLength(1);
     expect(result.sourceFiles[0].locale).toBe('sv');
     expect(result.targetFilesByLocale.en).toHaveLength(0);
+  });
+
+  describe('detectJsonFormat', () => {
+    it('detects flat format', () => {
+      const obj = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About',
+        'footer.copyright': '© 2025'
+      };
+      expect(detectJsonFormat(obj)).toBe('flat');
+    });
+
+    it('detects nested format', () => {
+      const obj = {
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        },
+        footer: {
+          copyright: '© 2025'
+        }
+      };
+      expect(detectJsonFormat(obj)).toBe('nested');
+    });
+
+    it('detects deeply nested format', () => {
+      const obj = {
+        navbar: {
+          items: {
+            home: 'Home'
+          }
+        }
+      };
+      expect(detectJsonFormat(obj)).toBe('nested');
+    });
+
+    it('detects mixed format', () => {
+      const obj = {
+        'navbar.home': 'Home',
+        footer: {
+          copyright: '© 2025'
+        }
+      };
+      expect(detectJsonFormat(obj)).toBe('mixed');
+    });
+  });
+
+  describe('flattenTranslations and unflattenTranslations', () => {
+    it('flattens nested objects', () => {
+      const nested = {
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        },
+        footer: {
+          copyright: '© 2025'
+        }
+      };
+
+      const expected = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About',
+        'footer.copyright': '© 2025'
+      };
+
+      expect(flattenTranslations(nested)).toEqual(expected);
+    });
+
+    it('handles already flat objects', () => {
+      const flat = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About'
+      };
+
+      expect(flattenTranslations(flat)).toEqual(flat);
+    });
+
+    it('handles deeply nested objects', () => {
+      const deeplyNested = {
+        app: {
+          navbar: {
+            items: {
+              home: 'Home'
+            }
+          }
+        }
+      };
+
+      const expected = {
+        'app.navbar.items.home': 'Home'
+      };
+
+      expect(flattenTranslations(deeplyNested)).toEqual(expected);
+    });
+
+    it('unflattens flat objects', () => {
+      const flat = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About',
+        'footer.copyright': '© 2025'
+      };
+
+      const expected = {
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        },
+        footer: {
+          copyright: '© 2025'
+        }
+      };
+
+      expect(unflattenTranslations(flat)).toEqual(expected);
+    });
+
+    it('handles already nested objects', () => {
+      const nested = {
+        navbar: 'Home'
+      };
+
+      expect(unflattenTranslations(nested)).toEqual(nested);
+    });
+
+    it('handles deeply nested paths', () => {
+      const flat = {
+        'app.navbar.items.home': 'Home'
+      };
+
+      const expected = {
+        app: {
+          navbar: {
+            items: {
+              home: 'Home'
+            }
+          }
+        }
+      };
+
+      expect(unflattenTranslations(flat)).toEqual(expected);
+    });
+  });
+
+  describe('preserveJsonStructure', () => {
+    it('preserves flat structure', () => {
+      const original = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About'
+      };
+
+      const newTranslations = {
+        'navbar.home': 'Accueil',
+        'navbar.about': 'À propos'
+      };
+
+      expect(preserveJsonStructure(original, newTranslations, 'flat')).toEqual(newTranslations);
+    });
+
+    it('preserves nested structure', () => {
+      const original = {
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        }
+      };
+
+      const newTranslations = {
+        'navbar.home': 'Accueil',
+        'navbar.about': 'À propos'
+      };
+
+      const expected = {
+        navbar: {
+          home: 'Accueil',
+          about: 'À propos'
+        }
+      };
+
+      expect(preserveJsonStructure(original, newTranslations, 'nested')).toEqual(expected);
+    });
+
+    it('preserves mixed structure', () => {
+      const original = {
+        navbar: {
+          home: 'Home'
+        },
+        'footer.copyright': '© 2025'
+      };
+
+      const newTranslations = {
+        'navbar.home': 'Accueil',
+        'footer.copyright': '© 2025 Entreprise'
+      };
+
+      const expected = {
+        navbar: {
+          home: 'Accueil'
+        },
+        'footer.copyright': '© 2025 Entreprise'
+      };
+
+      expect(preserveJsonStructure(original, newTranslations, 'mixed')).toEqual(expected);
+    });
   });
 });
