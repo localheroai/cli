@@ -62,7 +62,7 @@ describe('imports API', () => {
           apiKey: TEST_API_KEY
         }
       );
-      expect(result).toEqual(mockResponse.import);
+      expect(result.import).toEqual(mockResponse.import);
     });
 
     it('handles import creation errors', async () => {
