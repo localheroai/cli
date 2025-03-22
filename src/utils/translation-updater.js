@@ -76,6 +76,7 @@ function getExistingQuoteStyles(content) {
 const SPECIAL_CHARS_REGEX = /[:@#,[\]{}?|>&*!\n]/;
 const INTERPOLATION = '%{';
 const INDENT_CACHE = new Map();
+const MAX_ARRAY_LENGTH = 1000; // Reasonable limit for translation arrays
 
 function getIndent(level) {
   let indent = INDENT_CACHE.get(level);
@@ -86,6 +87,43 @@ function getIndent(level) {
   return indent;
 }
 
+function formatArrayItems(array, indentStr) {
+  return array.map(item => {
+    const stringValue = String(item);
+    // Only quote strings that contain special characters
+    const needsQuotes = typeof item === 'string' &&
+      (item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item));
+    const escapedValue = needsQuotes && stringValue.includes('"')
+      ? stringValue.replace(/"/g, '\\"')
+      : stringValue;
+
+    return `${indentStr}  - ${needsQuotes ? `"${escapedValue}"` : escapedValue}`;
+  });
+}
+
+function tryParseJsonArray(value) {
+  if (typeof value !== 'string' || !value.startsWith('["') || !value.endsWith('"]')) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+
+    // We don't want extremely large arrays
+    if (parsed.length > MAX_ARRAY_LENGTH) {
+      console.warn(`Array length ${parsed.length} exceeds maximum allowed length of ${MAX_ARRAY_LENGTH}`);
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
   const indentStr = getIndent(indent);
 
@@ -93,34 +131,57 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
     const currentPath = parentPath ? `${parentPath}.${key}` : key;
     const style = styles.get(currentPath);
 
+    // Handle arrays
+    let array = null;
+    if (Array.isArray(value)) {
+      array = value;
+    } else if (typeof value === 'string') {
+      array = tryParseJsonArray(value);
+    }
+
+    if (array) {
+      if (array.length > MAX_ARRAY_LENGTH) {
+        console.warn(`Skipping array for key ${key}: length exceeds maximum`);
+        result.push(`${indentStr}${key}: []`);
+        continue;
+      }
+      result.push(`${indentStr}${key}:`);
+      result.push(...formatArrayItems(array, indentStr));
+      continue;
+    }
+
+    // Handle nested objects
     if (value && typeof value === 'object') {
       result.push(`${indentStr}${key}:`);
       stringifyYaml(value, indent + 2, currentPath, result, styles);
-    } else {
-      if (typeof value === 'string' && (style?.multiline || value.includes('\n'))) {
-        result.push(`${indentStr}${key}: |`);
-        const lines = value.split('\n');
-        for (const line of lines) {
-          result.push(`${indentStr}  ${line}`);
-        }
-      } else {
-        let formattedValue = value;
-
-        if (typeof value === 'string') {
-          const existingStyle = styles.get(currentPath);
-
-          if (existingStyle?.quoted) {
-            formattedValue = `${existingStyle.quoteType}${value}${existingStyle.quoteType}`;
-          } else if (existingStyle?.originalValue === value) {
-            formattedValue = existingStyle.originalValue;
-          } else if (value.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(value)) {
-            formattedValue = `"${value}"`;
-          }
-        }
-
-        result.push(`${indentStr}${key}: ${formattedValue}`);
-      }
+      continue;
     }
+
+    // Handle multiline strings
+    if (typeof value === 'string' && (style?.multiline || value.includes('\n'))) {
+      result.push(`${indentStr}${key}: |`);
+      const lines = value.split('\n');
+      for (const line of lines) {
+        result.push(`${indentStr}  ${line}`);
+      }
+      continue;
+    }
+
+    // Handle regular strings
+    if (typeof value === 'string') {
+      const existingStyle = styles.get(currentPath);
+      if (existingStyle?.quoted) {
+        result.push(`${indentStr}${key}: ${existingStyle.quoteType}${value}${existingStyle.quoteType}`);
+      } else if (value.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(value)) {
+        result.push(`${indentStr}${key}: "${value}"`);
+      } else {
+        result.push(`${indentStr}${key}: ${value}`);
+      }
+      continue;
+    }
+
+    // Handle all other values
+    result.push(`${indentStr}${key}: ${value}`);
   }
 
   return result;

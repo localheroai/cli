@@ -238,6 +238,65 @@ en:
         expect(content).toContain('    content: Regular content');
       });
     });
+
+    describe('array handling', () => {
+      it('formats arrays with proper YAML syntax', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'company.address': ['Street 123', 'Floor 4', '12345 City'],
+          'categories': ['A', 'B', 'C']
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        expect(content).toMatch(/en:\n  company:\n    address:\n      - Street 123\n      - Floor 4\n      - 12345 City/);
+        expect(content).toMatch(/  categories:\n    - A\n    - B\n    - C/);
+      });
+
+      it('properly quotes array items with special characters', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'items': ['Item with %{var}', 'Item with "quotes"', 'Regular item']
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        expect(content).toMatch(/en:\n  items:\n    - "Item with %{var}"\n    - Item with "quotes"\n    - Regular item/);
+      });
+
+      it('parses JSON array strings from API response', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'app.the_array': '["First element", "Second element", "Third element"]',
+          'app.another_array': '["Item with %{var}", "Item with quotes", "Regular item"]'
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        expect(content).toMatch(/en:\n  app:\n    the_array:\n      - First element\n      - Second element\n      - Third element/);
+        expect(content).toMatch(/    another_array:\n      - "Item with %{var}"\n      - Item with quotes\n      - Regular item/);
+      });
+
+      it('handles invalid JSON array strings gracefully', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'app.invalid_array': '["Broken JSON string'
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        // Should keep the original string if JSON parsing fails
+        expect(content).toMatch(/en:\n  app:\n    invalid_array: "\["Broken JSON string"/);
+      });
+    });
   });
 
   describe('deleteKeysFromTranslationFile', () => {

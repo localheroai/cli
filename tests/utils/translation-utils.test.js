@@ -278,6 +278,32 @@ describe('translation-utils', () => {
       expect(typeof content.keys['app.display_help'].value).toBe('boolean');
       expect(typeof content.keys['app.skip_wizard'].value).toBe('boolean');
     });
+
+    it('handles arrays correctly', () => {
+      const sourceFiles = [{
+        path: 'locales/en.yml',
+        format: 'yaml',
+        content: Buffer.from('en:\n  app:\n    the_array:\n      - First element\n      - Second element\n      - Third element').toString('base64')
+      }];
+
+      const missingByLocale = {
+        fr: {
+          path: 'locales/en.yml',
+          keys: {
+            'app.the_array': ['First element', 'Second element', 'Third element']
+          }
+        }
+      };
+
+      const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale);
+
+      expect(errors).toHaveLength(0);
+      expect(batches).toHaveLength(1);
+
+      const content = JSON.parse(Buffer.from(batches[0].files[0].content, 'base64').toString());
+      expect(content.keys['app.the_array'].value).toEqual(['First element', 'Second element', 'Third element']);
+      expect(Array.isArray(content.keys['app.the_array'].value)).toBe(true);
+    });
   });
 
   describe('generateTargetPath', () => {

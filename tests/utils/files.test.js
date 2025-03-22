@@ -706,6 +706,52 @@ en:
 
       expect(unflattenTranslations(flat)).toEqual(expected);
     });
+
+    it('handles arrays correctly', () => {
+      const input = {
+        company: {
+          address: ['Street 123', 'Floor 4', '12345 City'],
+          tags: ['important', 'business']
+        },
+        categories: ['A', 'B', 'C']
+      };
+
+      const expected = {
+        'company.address': ['Street 123', 'Floor 4', '12345 City'],
+        'company.tags': ['important', 'business'],
+        'categories': ['A', 'B', 'C']
+      };
+
+      expect(flattenTranslations(input)).toEqual(expected);
+    });
+
+    it('handles arrays with special characters', () => {
+      const input = {
+        items: ['Item with %{var}', 'Item with "quotes"', 'Regular item']
+      };
+
+      const expected = {
+        'items': ['Item with %{var}', 'Item with "quotes"', 'Regular item']
+      };
+
+      expect(flattenTranslations(input)).toEqual(expected);
+    });
+
+    it('preserves arrays when unflattening', () => {
+      const flat = {
+        'company.address': ['Street 123', 'Floor 4', '12345 City'],
+        'categories': ['A', 'B', 'C']
+      };
+
+      const expected = {
+        company: {
+          address: ['Street 123', 'Floor 4', '12345 City']
+        },
+        categories: ['A', 'B', 'C']
+      };
+
+      expect(unflattenTranslations(flat)).toEqual(expected);
+    });
   });
 
   describe('preserveJsonStructure', () => {

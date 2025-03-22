@@ -102,21 +102,21 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
     for (const [key, value] of Object.entries(localeData.keys)) {
       let extractedValue;
 
-      if (typeof value === 'boolean' || typeof value === 'string') {
+      if (Array.isArray(value)) {
         extractedValue = value;
-      }
-      else if (typeof value === 'object' && value !== null) {
+      } else if (typeof value === 'boolean') {
+        extractedValue = value;
+      } else if (typeof value === 'string') {
+        extractedValue = value;
+      } else if (typeof value === 'object' && value !== null) {
         if ('value' in value) {
-          extractedValue = value.value ?? '';
-        }
-        else if (Object.keys(value).some(k => !isNaN(parseInt(k, 10)))) {
+          extractedValue = value.value;
+        } else if (Object.keys(value).some(k => !isNaN(parseInt(k, 10)))) {
           extractedValue = Object.values(value).join('');
-        }
-        else {
+        } else {
           extractedValue = JSON.stringify(value);
         }
-      }
-      else {
+      } else {
         extractedValue = String(value);
       }
 
@@ -136,7 +136,7 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
       const contentObj = { keys: {} };
       for (const [key, value] of Object.entries(batchKeys)) {
         contentObj.keys[key] = {
-          value: typeof value === 'boolean' ? value : String(value)
+          value: value
         };
       }
 
