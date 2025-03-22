@@ -35,6 +35,33 @@ export function createPromptService(deps = {}) {
     async confirm(options) {
       if (!inquirer) return false;
       return inquirer.confirm(options);
+    },
+
+    async selectProject(projectService) {
+      const projects = await projectService.listProjects();
+
+      if (!projects || projects.length === 0) {
+        return { choice: 'new' };
+      }
+
+      const choices = [
+        { name: '✨ Create new project', value: 'new' },
+        { name: '─────────────', value: 'separator', disabled: true },
+        ...projects.map(p => ({
+          name: p.name,
+          value: p.id
+        }))
+      ];
+
+      const projectChoice = await this.select({
+        message: 'Would you like to use an existing project or create a new one?',
+        choices
+      });
+
+      return {
+        choice: projectChoice,
+        project: projects.find(p => p.id === projectChoice)
+      };
     }
   };
 }

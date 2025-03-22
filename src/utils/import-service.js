@@ -41,7 +41,7 @@ export const importService = {
     return files.map(file => ({
       path: path.isAbsolute(file.path) ? path.relative(basePath, file.path) : file.path,
       language: file.locale,
-      format: file.format,
+      format: file.format === 'yml' ? 'yaml' : file.format,
       namespace: file.namespace || ''
     }));
   },
@@ -74,7 +74,7 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format,
+        format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
         content: await readFileContent(fullPath)
       });
@@ -84,7 +84,7 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format,
+        format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
         content: await readFileContent(fullPath)
       });

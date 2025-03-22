@@ -47,7 +47,8 @@ describe('init command', () => {
       input: jest.fn(),
       confirm: jest.fn(),
       getProjectSetup: jest.fn(),
-      getApiKey: jest.fn()
+      getApiKey: jest.fn(),
+      selectProject: jest.fn()
     };
     projectApi = {
       listProjects: jest.fn(),
@@ -88,6 +89,7 @@ describe('init command', () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
       .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
@@ -125,6 +127,7 @@ describe('init command', () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
       .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
@@ -150,7 +153,7 @@ describe('init command', () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([testProject]);
-    promptService.select.mockResolvedValue(testProject.id);
+    promptService.selectProject.mockResolvedValue({ choice: testProject.id, project: testProject });
     promptService.input
       .mockResolvedValueOnce('locales/')
       .mockResolvedValueOnce('');
@@ -177,6 +180,7 @@ describe('init command', () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
       .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
@@ -206,6 +210,7 @@ describe('init command', () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
       .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')

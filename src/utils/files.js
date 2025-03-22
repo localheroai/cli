@@ -18,13 +18,21 @@ export function parseFile(content, format) {
 
 export function extractLocaleFromPath(filePath, localeRegex, knownLocales = []) {
   if (knownLocales && knownLocales.length > 0) {
+    const basename = path.basename(filePath, path.extname(filePath));
+    const foundLocaleInFilename = knownLocales.find(locale =>
+      locale && basename.toLowerCase() === locale.toLowerCase()
+    );
+    if (foundLocaleInFilename) {
+      return foundLocaleInFilename.toLowerCase();
+    }
+
+    // Then try to match in the path
     const pathParts = filePath.toLowerCase().split(path.sep);
-    const foundLocale = knownLocales.find(locale =>
+    const foundLocaleInPath = knownLocales.find(locale =>
       locale && pathParts.includes(locale.toLowerCase())
     );
-
-    if (foundLocale) {
-      return foundLocale.toLowerCase();
+    if (foundLocaleInPath) {
+      return foundLocaleInPath.toLowerCase();
     }
   }
 

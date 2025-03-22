@@ -229,34 +229,8 @@ async function detectProjectType() {
   };
 }
 
-async function selectProject(projectService, promptService) {
-  const projects = await projectService.listProjects();
-
-  if (!projects || projects.length === 0) {
-    return { choice: 'new' };
-  }
-
-  const choices = [
-    { name: '✨ Create new project', value: 'new' },
-    { name: '─────────────', value: 'separator', disabled: true },
-    ...projects.map(p => ({
-      name: p.name,
-      value: p.id
-    }))
-  ];
-  const projectChoice = await promptService.select({
-    message: 'Would you like to use an existing project or create a new one?',
-    choices
-  });
-
-  return {
-    choice: projectChoice,
-    project: projects.find(p => p.id === projectChoice)
-  };
-}
-
 async function promptForConfig(projectDefaults, projectService, promptService, console = global.console) {
-  const { choice: projectChoice, project: existingProject } = await selectProject(projectService, promptService);
+  const { choice: projectChoice, project: existingProject } = await promptService.selectProject(projectService);
   let projectId = projectChoice;
   let newProject = false;
   let config = await promptService.getProjectSetup();
