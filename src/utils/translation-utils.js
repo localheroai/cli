@@ -136,7 +136,7 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
       const contentObj = { keys: {} };
       for (const [key, value] of Object.entries(batchKeys)) {
         contentObj.keys[key] = {
-          value: value
+          value
         };
       }
 

@@ -176,7 +176,7 @@ en:
 
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).toContain('en:');
-        expect(content).toMatch(/en:\n  description: \|/);
+        expect(content).toMatch(/en:\n {2}description: \|/);
         expect(content).toContain('    First line');
         expect(content).toContain('    Second line');
         expect(content).toContain('    Third line');
@@ -200,7 +200,7 @@ en:
         }, 'en');
 
         const content = fs.readFileSync(filePath, 'utf8');
-        expect(content).toMatch(/en:\n  description: \|/);
+        expect(content).toMatch(/en:\n {2}description: \|/);
         expect(content).toContain('    First line');
         expect(content).toContain('    Second line');
         expect(content).toContain('    Third line');
@@ -216,7 +216,7 @@ en:
         await updateTranslationFile(filePath, translations, 'en');
 
         const content = fs.readFileSync(filePath, 'utf8');
-        expect(content).toMatch(/en:\n  content: \|/);
+        expect(content).toMatch(/en:\n {2}content: \|/);
         expect(content).toContain('    First paragraph');
         expect(content).toContain('    ');  // Empty line preserved
         expect(content).toContain('    Second paragraph with special chars: %{name}!');
@@ -234,7 +234,7 @@ en:
         await updateTranslationFile(filePath, translations, 'en');
 
         const content = fs.readFileSync(filePath, 'utf8');
-        expect(content).toMatch(/en:\n  section:\n    description: \|\n      First line\n      Second line/);
+        expect(content).toMatch(/en:\n {2}section:\n {4}description: \|\n {6}First line\n {6}Second line/);
         expect(content).toContain('    content: Regular content');
       });
     });
@@ -251,8 +251,8 @@ en:
 
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).toContain('en:');
-        expect(content).toMatch(/en:\n  company:\n    address:\n      - Street 123\n      - Floor 4\n      - 12345 City/);
-        expect(content).toMatch(/  categories:\n    - A\n    - B\n    - C/);
+        expect(content).toMatch(/en:\n {2}company:\n {4}address:\n {6}- Street 123\n {6}- Floor 4\n {6}- 12345 City/);
+        expect(content).toMatch(/ {2}categories:\n {4}- A\n {4}- B\n {4}- C/);
       });
 
       it('properly quotes array items with special characters', async () => {
@@ -265,7 +265,7 @@ en:
 
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).toContain('en:');
-        expect(content).toMatch(/en:\n  items:\n    - "Item with %{var}"\n    - Item with "quotes"\n    - Regular item/);
+        expect(content).toMatch(/en:\n {2}items:\n {4}- "Item with %{var}"\n {4}- Item with "quotes"\n {4}- Regular item/);
       });
 
       it('parses JSON array strings from API response', async () => {
@@ -279,8 +279,8 @@ en:
 
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).toContain('en:');
-        expect(content).toMatch(/en:\n  app:\n    the_array:\n      - First element\n      - Second element\n      - Third element/);
-        expect(content).toMatch(/    another_array:\n      - "Item with %{var}"\n      - Item with quotes\n      - Regular item/);
+        expect(content).toMatch(/en:\n {2}app:\n {4}the_array:\n {6}- First element\n {6}- Second element\n {6}- Third element/);
+        expect(content).toMatch(/ {4}another_array:\n {6}- "Item with %{var}"\n {6}- Item with quotes\n {6}- Regular item/);
       });
 
       it('handles invalid JSON array strings gracefully', async () => {
@@ -294,7 +294,7 @@ en:
         const content = fs.readFileSync(filePath, 'utf8');
         expect(content).toContain('en:');
         // Should keep the original string if JSON parsing fails
-        expect(content).toMatch(/en:\n  app:\n    invalid_array: "\["Broken JSON string"/);
+        expect(content).toMatch(/en:\n {2}app:\n {4}invalid_array: "\["Broken JSON string"/);
       });
     });
   });

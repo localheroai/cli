@@ -12,6 +12,9 @@ describe('files utils', () => {
   let preserveJsonStructure;
   let originalConsole;
   let mockFs;
+  let directoryExists;
+  let findFirstExistingPath;
+  let getDirectoryContents;
 
   beforeEach(async () => {
     jest.resetModules();
@@ -53,6 +56,226 @@ describe('files utils', () => {
 
   afterEach(() => {
     global.console = originalConsole;
+  });
+
+  it('processes various file formats correctly', async () => {
+    mockGlob.mockResolvedValue([
+      'config/locales/en.yml',
+      'config/locales/en.json',
+      'config/locales/nested.en.json'
+    ]);
+
+    mockReadFile.mockImplementation((path) => {
+      if (path.endsWith('.yml')) {
+        return Promise.resolve(`
+en:
+  hello: Hello
+  nested:
+    world: World
+`);
+      } else if (path.endsWith('nested.en.json')) {
+        return Promise.resolve(`{
+  "en": {
+    "hello": "Hello",
+    "nested": {
+      "world": "World"
+    }
+  }
+}`);
+      } else {
+        return Promise.resolve(`{
+  "hello": "Hello",
+  "nested.world": "World"
+}`);
+      }
+    });
+
+    const config = {
+      translationFiles: {
+        paths: ['config/locales/'],
+        localeRegex: '(?:^|[/.])([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
+      }
+    };
+
+    const result = await findTranslationFiles(config);
+
+    expect(result).toHaveLength(3);
+
+    // YAML file checks
+    const yamlFile = result.find(f => f.path.endsWith('.yml'));
+    expect(yamlFile.locale).toBe('en');
+    expect(yamlFile.format).toBe('yml');
+    expect(yamlFile.hasLanguageWrapper).toBe(true);
+    expect(yamlFile.keys).toEqual({
+      'hello': 'Hello',
+      'nested.world': 'World'
+    });
+
+    // Flat JSON file checks
+    const jsonFile = result.find(f => f.path === 'config/locales/en.json');
+    expect(jsonFile.locale).toBe('en');
+    expect(jsonFile.format).toBe('json');
+    expect(jsonFile.hasLanguageWrapper).toBe(false);
+    expect(jsonFile.keys).toEqual({
+      'hello': 'Hello',
+      'nested.world': 'World'
+    });
+
+    // Nested JSON with language wrapper checks
+    const nestedJsonFile = result.find(f => f.path.endsWith('nested.en.json'));
+    expect(nestedJsonFile.locale).toBe('en');
+    expect(nestedJsonFile.format).toBe('json');
+    expect(nestedJsonFile.hasLanguageWrapper).toBe(true);
+    expect(nestedJsonFile.keys).toEqual({
+      'hello': 'Hello',
+      'nested.world': 'World'
+    });
+  });
+
+  it('handles various directory structures and locale patterns', async () => {
+    mockGlob.mockResolvedValue([
+      // Directory-based structure
+      'config/locales/sv/common.json',
+      'config/locales/en/common.json',
+      // Filename-based structure
+      'config/locales/messages.sv.json',
+      'config/locales/messages.en.json',
+      // Root level with locale in filename
+      'config/locales/sv.json',
+      'config/locales/en.json',
+      // Mixed case locales
+      'config/locales/SV/mixed.json',
+      'config/locales/En/mixed.json',
+      // Ambiguous case (directory vs filename)
+      'config/locales/sv/translation.en.json'
+    ]);
+
+    mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
+
+    const config = {
+      sourceLocale: 'sv',
+      outputLocales: ['en'],
+      translationFiles: {
+        paths: ['config/locales/'],
+        pattern: '**/*.json'
+      }
+    };
+
+    const result = await findTranslationFiles(config, {
+      returnFullResult: true,
+      verbose: true,
+      includeNamespace: true
+    });
+
+    // Source files checks
+    expect(result.sourceFiles).toHaveLength(5); // All sv files including mixed case
+    result.sourceFiles.forEach(file => {
+      expect(file.locale).toBe('sv');
+      expect(file.path).toMatch(/sv[/.]|[.]sv[.]|SV/i);
+    });
+
+    // Target files checks
+    expect(result.targetFilesByLocale.en).toHaveLength(4); // All en files including mixed case
+    result.targetFilesByLocale.en.forEach(file => {
+      expect(file.locale).toBe('en');
+      expect(file.path).toMatch(/en[/.]|[.]en[.]|En/i);
+    });
+
+    // Namespace checks
+    const commonFile = result.allFiles.find(f => f.path.includes('/common.json'));
+    expect(commonFile.namespace).toBe('common');
+
+    const messagesFile = result.allFiles.find(f => f.path.includes('messages.'));
+    expect(messagesFile.namespace).toBe('messages');
+
+    // Directory priority check
+    const ambiguousFile = result.allFiles.find(f => f.path.includes('/sv/translation.en.json'));
+    expect(ambiguousFile.locale).toBe('sv'); // Should prioritize directory-based locale
+  });
+
+  it('handles comprehensive data structures and transformations', () => {
+    const complexInput = {
+      simple: 'value',
+      boolean: {
+        isTrue: true,
+        isFalse: false
+      },
+      arrays: {
+        simple: ['A', 'B', 'C'],
+        withSpecials: ['Item with %{var}', 'Item with "quotes"', 'Regular item'],
+        nested: {
+          items: ['Nested', 'Array', 'Items']
+        }
+      },
+      nested: {
+        level1: {
+          level2: {
+            key: 'Deep value',
+            array: ['Deep', 'Array']
+          }
+        }
+      },
+      flat_key: 'Flat value',
+      mixed: {
+        nested: {
+          flat_key: 'Mixed value'
+        }
+      }
+    };
+
+    // Test flattening
+    const flattened = flattenTranslations(complexInput);
+    expect(flattened).toEqual({
+      'simple': 'value',
+      'boolean.isTrue': true,
+      'boolean.isFalse': false,
+      'arrays.simple': ['A', 'B', 'C'],
+      'arrays.withSpecials': ['Item with %{var}', 'Item with "quotes"', 'Regular item'],
+      'arrays.nested.items': ['Nested', 'Array', 'Items'],
+      'nested.level1.level2.key': 'Deep value',
+      'nested.level1.level2.array': ['Deep', 'Array'],
+      'flat_key': 'Flat value',
+      'mixed.nested.flat_key': 'Mixed value'
+    });
+
+    // Test unflattening
+    const unflattened = unflattenTranslations(flattened);
+    expect(unflattened).toEqual(complexInput);
+
+    // Test structure preservation with actual flat format
+    const flatFormat = {
+      'key_one': 'One',
+      'key_two': 'Two'
+    };
+    const nestedFormat = {
+      key: {
+        one: 'One',
+        two: 'Two'
+      }
+    };
+    const mixedFormat = {
+      key: {
+        one: 'One'
+      },
+      'nested.level1': 'Flat',
+      key_two: 'Two'
+    };
+
+    // For flat format, expect the flattened structure to be preserved
+    const flatResult = preserveJsonStructure(flatFormat, flattened, 'flat');
+    expect(flatResult['arrays.simple']).toEqual(['A', 'B', 'C']);
+    expect(flatResult['nested.level1.level2.key']).toBe('Deep value');
+
+    // For nested format, expect nested structure
+    const nestedResult = preserveJsonStructure(nestedFormat, flattened, 'nested');
+    expect(nestedResult.arrays.simple).toEqual(['A', 'B', 'C']);
+    expect(nestedResult.nested.level1.level2.key).toBe('Deep value');
+
+    // For mixed format, expect a mix of flat and nested based on original structure
+    const mixedResult = preserveJsonStructure(mixedFormat, flattened, 'mixed');
+    expect(mixedResult.arrays.simple).toEqual(['A', 'B', 'C']);
+    expect(mixedResult.nested.level1.level2.key).toBe('Deep value');
+    expect(mixedResult['nested.level1']).toBe('Flat');
   });
 
   it('processes yaml files correctly', async () => {
@@ -484,14 +707,12 @@ en:
       verbose: true
     });
 
-    // We should find all sv files (3 of them)
     expect(result.sourceFiles).toHaveLength(3);
     result.sourceFiles.forEach(file => {
       expect(file.locale).toBe('sv');
       expect(file.path).toMatch(/sv[/.]|[.]sv[.]/)
     });
 
-    // We should find all en files (3 of them)
     expect(result.targetFilesByLocale.en).toHaveLength(3);
     result.targetFilesByLocale.en.forEach(file => {
       expect(file.locale).toBe('en');
@@ -544,17 +765,6 @@ en:
         },
         footer: {
           copyright: '© 2025'
-        }
-      };
-      expect(detectJsonFormat(obj)).toBe('nested');
-    });
-
-    it('detects deeply nested format', () => {
-      const obj = {
-        navbar: {
-          items: {
-            home: 'Home'
-          }
         }
       };
       expect(detectJsonFormat(obj)).toBe('nested');
@@ -817,76 +1027,96 @@ en:
   });
 
   describe('directoryExists', () => {
-    it('checks if a directory exists', async () => {
-      // Create a simplified version for testing
-      const testDirectoryExists = async (path) => {
-        try {
-          const stats = { isDirectory: () => path === '/valid/dir' };
-          return stats.isDirectory();
-        } catch (error) {
-          if (error.code === 'ENOENT') {
-            return false;
-          }
-          throw error;
-        }
-      };
+    it('returns true when a directory exists', async () => {
+      mockFs.stat.mockResolvedValue({
+        isDirectory: () => true
+      });
 
-      expect(await testDirectoryExists('/valid/dir')).toBe(true);
-      expect(await testDirectoryExists('/not/dir')).toBe(false);
+      const result = await directoryExists('/valid/dir', mockFs);
+      expect(result).toBe(true);
+      expect(mockFs.stat).toHaveBeenCalledWith('/valid/dir');
+    });
+
+    it('returns false when a path is a file, not a directory', async () => {
+      mockFs.stat.mockResolvedValue({
+        isDirectory: () => false
+      });
+
+      const result = await directoryExists('/path/to/file', mockFs);
+      expect(result).toBe(false);
+      expect(mockFs.stat).toHaveBeenCalledWith('/path/to/file');
+    });
+
+    it('returns false when a path does not exist', async () => {
+      const error = new Error('File not found');
+      error.code = 'ENOENT';
+      mockFs.stat.mockRejectedValue(error);
+
+      const result = await directoryExists('/nonexistent/path', mockFs);
+      expect(result).toBe(false);
+      expect(mockFs.stat).toHaveBeenCalledWith('/nonexistent/path');
+    });
+
+    it('rethrows other errors', async () => {
+      const error = new Error('Permission denied');
+      error.code = 'EACCES';
+      mockFs.stat.mockRejectedValue(error);
+
+      await expect(directoryExists('/protected/path', mockFs)).rejects.toThrow('Permission denied');
+      expect(mockFs.stat).toHaveBeenCalledWith('/protected/path');
     });
   });
 
   describe('findFirstExistingPath', () => {
-    it('finds the first existing directory from a list', async () => {
-      // Create a simplified version for testing
-      const testFindFirstExistingPath = async (paths) => {
-        // Mock version that treats '/second/path' as existing
-        for (const path of paths) {
-          if (path === '/second/path') {
-            return path;
-          }
+    it('returns the first path that exists', async () => {
+      // Mock directoryExists to return true only for the second path
+      mockFs.stat.mockImplementation((path) => {
+        if (path === '/second/path') {
+          return Promise.resolve({ isDirectory: () => true });
         }
-        return null;
-      };
+        const error = new Error('No such file or directory');
+        error.code = 'ENOENT';
+        return Promise.reject(error);
+      });
 
-      const resultFound = await testFindFirstExistingPath([
-        '/first/path',
-        '/second/path',
-        '/third/path'
-      ]);
-      expect(resultFound).toBe('/second/path');
+      const paths = ['/first/path', '/second/path', '/third/path'];
+      const result = await findFirstExistingPath(paths, mockFs);
+      expect(result).toBe('/second/path');
+      expect(mockFs.stat).toHaveBeenCalledTimes(2); // Should stop after finding the second path
+    });
 
-      const resultNotFound = await testFindFirstExistingPath([
-        '/first/path',
-        '/third/path'
-      ]);
-      expect(resultNotFound).toBe(null);
+    it('returns null if no paths exist', async () => {
+      const error = new Error('No such file or directory');
+      error.code = 'ENOENT';
+      mockFs.stat.mockRejectedValue(error);
+
+      const paths = ['/first/path', '/second/path', '/third/path'];
+      const result = await findFirstExistingPath(paths, mockFs);
+      expect(result).toBe(null);
+      expect(mockFs.stat).toHaveBeenCalledTimes(3); // Should check all paths
     });
   });
 
   describe('getDirectoryContents', () => {
-    it('gets and categorizes directory contents', async () => {
-      // Create a simplified version for testing
-      const testGetDirectoryContents = async (dir) => {
-        if (dir === '/error/dir') return null;
+    it('returns files categorized by type', async () => {
+      const mockFiles = ['file1.json', 'file2.yml', 'file3.yaml', 'file4.txt'];
+      mockFs.readdir.mockResolvedValue(mockFiles);
 
-        const files = ['file1.json', 'file2.yml', 'file3.yaml', 'file4.txt'];
-        return {
-          files,
-          jsonFiles: files.filter(f => f.endsWith('.json')),
-          yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
-        };
-      };
-
-      const result = await testGetDirectoryContents('/valid/dir');
+      const result = await getDirectoryContents('/test/dir', mockFs);
       expect(result).toEqual({
-        files: ['file1.json', 'file2.yml', 'file3.yaml', 'file4.txt'],
+        files: mockFiles,
         jsonFiles: ['file1.json'],
         yamlFiles: ['file2.yml', 'file3.yaml']
       });
+      expect(mockFs.readdir).toHaveBeenCalledWith('/test/dir');
+    });
 
-      const errorResult = await testGetDirectoryContents('/error/dir');
-      expect(errorResult).toBe(null);
+    it('returns null if directory cannot be read', async () => {
+      mockFs.readdir.mockRejectedValue(new Error('Cannot read directory'));
+
+      const result = await getDirectoryContents('/invalid/dir', mockFs);
+      expect(result).toBe(null);
+      expect(mockFs.readdir).toHaveBeenCalledWith('/invalid/dir');
     });
   });
 });

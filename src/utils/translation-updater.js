@@ -13,7 +13,6 @@ function getExistingQuoteStyles(content) {
   const doubleQuoteRegex = /^"(.*)"$/;
   const singleQuoteRegex = /^'(.*)'$/;
   let inMultiline = false;
-  let multilinePath = '';
   let multilineIndent = 0;
 
   for (let i = 0; i < lines.length; i++) {
@@ -44,7 +43,6 @@ function getExistingQuoteStyles(content) {
       // Detect multiline string start
       if (value?.trim() === '|') {
         inMultiline = true;
-        multilinePath = fullPath;
         multilineIndent = indent + 2;
         styles.set(fullPath, {
           multiline: true,

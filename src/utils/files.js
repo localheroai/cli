@@ -208,22 +208,6 @@ function extractNamespace(filePath) {
   return '';
 }
 
-
-/**
- * Find translation files in the specified paths
- * @param {Object} config - Project configuration
- * @param {Object} [options={}] - Options for file processing
- * @param {boolean} [options.parseContent=true] - Whether to parse and process file content
- * @param {boolean} [options.includeContent=true] - Whether to include raw file content in the result
- * @param {boolean} [options.extractKeys=true] - Whether to extract and process translation keys
- * @param {string} [options.basePath=process.cwd()] - Base path for file resolution
- * @param {string} [options.sourceLocale] - Source locale for filtering
- * @param {string[]} [options.targetLocales] - Target locales for filtering
- * @param {boolean} [options.includeNamespace=false] - Whether to include namespace info
- * @param {boolean} [options.verbose=false] - Whether to log verbose information
- * @param {boolean} [options.returnFullResult=false] - Whether to return the full result object or just the allFiles array
- * @returns {Object} - Object containing all files, source files, and target files by locale
- */
 export async function findTranslationFiles(config, options = {}) {
   const {
     parseContent = true,
@@ -236,10 +220,7 @@ export async function findTranslationFiles(config, options = {}) {
     verbose = false,
     returnFullResult = false
   } = options;
-
-  // Create array of all locales we're looking for
   const knownLocales = [sourceLocale, ...targetLocales];
-
   const { translationFiles } = config;
   const {
     paths = [],
@@ -339,12 +320,15 @@ export async function findTranslationFiles(config, options = {}) {
 export {
   unflattenTranslations,
   detectJsonFormat,
-  preserveJsonStructure
+  preserveJsonStructure,
+  directoryExists,
+  findFirstExistingPath,
+  getDirectoryContents
 };
 
-export async function directoryExists(path) {
+async function directoryExists(path, fsModule = fs) {
   try {
-    const stats = await fs.stat(path);
+    const stats = await fsModule.stat(path);
     return stats.isDirectory();
   } catch (error) {
     if (error.code === 'ENOENT') {
@@ -354,18 +338,18 @@ export async function directoryExists(path) {
   }
 }
 
-export async function findFirstExistingPath(paths) {
+async function findFirstExistingPath(paths, fsModule = fs) {
   for (const path of paths) {
-    if (await directoryExists(path)) {
+    if (await directoryExists(path, fsModule)) {
       return path;
     }
   }
   return null;
 }
 
-export async function getDirectoryContents(dir) {
+async function getDirectoryContents(dir, fsModule = fs) {
   try {
-    const files = await fs.readdir(dir);
+    const files = await fsModule.readdir(dir);
     return {
       files,
       jsonFiles: files.filter(f => f.endsWith('.json')),
