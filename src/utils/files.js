@@ -67,7 +67,7 @@ export function flattenTranslations(obj, parentKey = '') {
   for (const [key, value] of Object.entries(obj)) {
     const newKey = parentKey ? `${parentKey}.${key}` : key;
 
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       Object.assign(result, flattenTranslations(value, newKey));
     } else {
       result[newKey] = value;
