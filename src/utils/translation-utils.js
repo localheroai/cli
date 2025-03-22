@@ -167,27 +167,36 @@ export function generateTargetPath(sourceFile, targetLocale, sourceLocale) {
   const sourceDir = path.dirname(sourceFile.path);
   const sourceName = path.basename(sourceFile.path, sourceExt);
 
+  // Case 1: File is named exactly as the source locale (e.g., "en.yml")
   if (sourceName === sourceLocale) {
     return path.join(sourceDir, `${targetLocale}${sourceExt}`);
   }
 
+  // Case 2: File ends with .locale (e.g., "translations.en.yml")
   if (sourceName.endsWith(`.${sourceLocale}`)) {
     const baseName = sourceName.slice(0, -(sourceLocale.length + 1));
     return path.join(sourceDir, `${baseName}.${targetLocale}${sourceExt}`);
   }
 
+  // Case 3: File uses hyphen-locale format (e.g., "translations-en.yml")
   if (sourceName.includes(`-${sourceLocale}`)) {
     const baseName = sourceName.slice(0, -(sourceLocale.length + 1));
     return path.join(sourceDir, `${baseName}-${targetLocale}${sourceExt}`);
   }
 
+  // Case 4: Source locale is a directory name
   const sourceParentDir = path.basename(sourceDir);
   if (sourceParentDir === sourceLocale) {
     const grandParentDir = path.dirname(sourceDir);
     return path.join(grandParentDir, targetLocale, path.basename(sourceFile.path));
   }
 
-  return sourceFile.path.replace(sourceLocale, targetLocale);
+  // Default case: If none of the above patterns match,
+  // construct the target path by replacing the locale in the filename only
+  const dirPath = path.dirname(sourceFile.path);
+  const fileName = path.basename(sourceFile.path);
+  const newFileName = fileName.replace(sourceLocale, targetLocale);
+  return path.join(dirPath, newFileName);
 }
 
 export function processTargetContent(targetContent, targetLocale) {

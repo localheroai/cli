@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath } from '../../src/utils/translation-utils.js';
 
 describe('translation-utils', () => {
   describe('findMissingTranslations', () => {
@@ -277,6 +277,33 @@ describe('translation-utils', () => {
       expect(content.keys['app.skip_wizard'].value).toBe(false);
       expect(typeof content.keys['app.display_help'].value).toBe('boolean');
       expect(typeof content.keys['app.skip_wizard'].value).toBe('boolean');
+    });
+  });
+
+  describe('generateTargetPath', () => {
+    it('handles simple locale replacement', () => {
+      const sourceFile = { path: 'config/locales/en.yml' };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/es.yml');
+    });
+
+    it('handles locale in filename with dot', () => {
+      const sourceFile = { path: 'config/locales/translations.en.yml' };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/translations.es.yml');
+    });
+
+    it('handles locale in filename with hyphen', () => {
+      const sourceFile = { path: 'config/locales/translations-en.yml' };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/translations-es.yml');
+    });
+
+    it('handles locale in directory name', () => {
+      const sourceFile = { path: 'config/locales/en/messages.yml' };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/es/messages.yml');
+    });
+
+    it('prevents double dots in filenames', () => {
+      const sourceFile = { path: 'config/en/translations.en.yml' };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/en/translations.es.yml');
     });
   });
 });

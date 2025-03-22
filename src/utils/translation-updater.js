@@ -12,6 +12,9 @@ function getExistingQuoteStyles(content) {
   const keyValueRegex = /^([^:]+):\s*(.*)$/;
   const doubleQuoteRegex = /^"(.*)"$/;
   const singleQuoteRegex = /^'(.*)'$/;
+  let inMultiline = false;
+  let multilinePath = '';
+  let multilineIndent = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -20,8 +23,15 @@ function getExistingQuoteStyles(content) {
     const indent = line.match(indentRegex)[0].length;
     const level = indent >> 1; /* Divide by 2 using bit shift */
 
-    pathLength = level;
+    if (inMultiline) {
+      if (indent < multilineIndent) {
+        inMultiline = false;
+      } else {
+        continue;
+      }
+    }
 
+    pathLength = level;
     const match = line.trim().match(keyValueRegex);
 
     if (match) {
@@ -29,9 +39,22 @@ function getExistingQuoteStyles(content) {
       const value = match[2];
 
       currentPath[level] = key;
+      const fullPath = currentPath.slice(0, pathLength + 1).join('.');
+
+      // Detect multiline string start
+      if (value?.trim() === '|') {
+        inMultiline = true;
+        multilinePath = fullPath;
+        multilineIndent = indent + 2;
+        styles.set(fullPath, {
+          multiline: true,
+          indicator: '|',
+          indentation: indent
+        });
+        continue;
+      }
 
       if (value) {
-        const fullPath = currentPath.slice(0, pathLength + 1).join('.');
         const valueTrimed = value.trim();
         const hasDoubleQuotes = doubleQuoteRegex.test(valueTrimed);
         const hasSingleQuotes = !hasDoubleQuotes && singleQuoteRegex.test(valueTrimed);
@@ -68,26 +91,35 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
 
   for (const [key, value] of Object.entries(obj)) {
     const currentPath = parentPath ? `${parentPath}.${key}` : key;
+    const style = styles.get(currentPath);
 
     if (value && typeof value === 'object') {
       result.push(`${indentStr}${key}:`);
       stringifyYaml(value, indent + 2, currentPath, result, styles);
     } else {
-      let formattedValue = value;
-
-      if (typeof value === 'string') {
-        const existingStyle = styles.get(currentPath);
-
-        if (existingStyle?.quoted) {
-          formattedValue = `${existingStyle.quoteType}${value}${existingStyle.quoteType}`;
-        } else if (existingStyle?.originalValue === value) {
-          formattedValue = existingStyle.originalValue;
-        } else if (value.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(value)) {
-          formattedValue = `"${value}"`;
+      if (typeof value === 'string' && (style?.multiline || value.includes('\n'))) {
+        result.push(`${indentStr}${key}: |`);
+        const lines = value.split('\n');
+        for (const line of lines) {
+          result.push(`${indentStr}  ${line}`);
         }
-      }
+      } else {
+        let formattedValue = value;
 
-      result.push(`${indentStr}${key}: ${formattedValue}`);
+        if (typeof value === 'string') {
+          const existingStyle = styles.get(currentPath);
+
+          if (existingStyle?.quoted) {
+            formattedValue = `${existingStyle.quoteType}${value}${existingStyle.quoteType}`;
+          } else if (existingStyle?.originalValue === value) {
+            formattedValue = existingStyle.originalValue;
+          } else if (value.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(value)) {
+            formattedValue = `"${value}"`;
+          }
+        }
+
+        result.push(`${indentStr}${key}: ${formattedValue}`);
+      }
     }
   }
 
@@ -329,7 +361,9 @@ async function updateJsonFile(filePath, translations, languageCode) {
       updatedContent[languageCode] = mergedContent;
     } else {
       const existingCopy = JSON.parse(JSON.stringify(existingContent));
-      updatedContent = preserveJsonStructure(existingCopy, translations, jsonFormat);
+      updatedContent = {
+        [languageCode]: preserveJsonStructure(existingCopy, translations, jsonFormat)
+      };
     }
     await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
 

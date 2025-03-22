@@ -110,8 +110,10 @@ en:
       const filePath = path.join(tempDir, 'translations.json');
 
       const initialContent = {
-        navbar: {
-          home: 'Old Home'
+        en: {
+          navbar: {
+            home: 'Old Home'
+          }
         }
       };
       fs.writeFileSync(filePath, JSON.stringify(initialContent, null, 2));
@@ -130,9 +132,11 @@ en:
 
       const updatedContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       expect(updatedContent).toEqual({
-        navbar: {
-          home: 'Home',
-          about: 'About'
+        en: {
+          navbar: {
+            home: 'Home',
+            about: 'About'
+          }
         }
       });
     });
@@ -152,9 +156,86 @@ en:
 
       const fileContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       expect(fileContent).toEqual({
-        navbar: {
-          home: 'Home'
+        en: {
+          navbar: {
+            home: 'Home'
+          }
         }
+      });
+    });
+
+    describe('multiline string handling', () => {
+      it('formats long text from API as multiline when it contains newlines', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'description': 'First line\nSecond line\nThird line',
+          'title': 'Simple title'
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        expect(content).toMatch(/en:\n  description: \|/);
+        expect(content).toContain('    First line');
+        expect(content).toContain('    Second line');
+        expect(content).toContain('    Third line');
+        expect(content).toContain('  title: Simple title');
+      });
+
+      it('preserves existing multiline format when updating other values', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const initialContent = `
+en:
+  description: |
+    First line
+    Second line
+    Third line
+  title: "Old Title"
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'title': 'New Title'
+        }, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toMatch(/en:\n  description: \|/);
+        expect(content).toContain('    First line');
+        expect(content).toContain('    Second line');
+        expect(content).toContain('    Third line');
+        expect(content).toContain('  title: "New Title"');
+      });
+
+      it('handles multiline strings with empty lines and special characters', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'content': 'First paragraph\n\nSecond paragraph with special chars: %{name}!\n* List item\n> Quote',
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toMatch(/en:\n  content: \|/);
+        expect(content).toContain('    First paragraph');
+        expect(content).toContain('    ');  // Empty line preserved
+        expect(content).toContain('    Second paragraph with special chars: %{name}!');
+        expect(content).toContain('    * List item');
+        expect(content).toContain('    > Quote');
+      });
+
+      it('handles nested multiline strings with proper indentation', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'section.description': 'First line\nSecond line',
+          'section.content': 'Regular content'
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toMatch(/en:\n  section:\n    description: \|\n      First line\n      Second line/);
+        expect(content).toContain('    content: Regular content');
       });
     });
   });
