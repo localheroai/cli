@@ -206,6 +206,8 @@ export async function translate(options = {}, deps = defaultDeps) {
                 resultsBaseUrl = status.results_url.split('?')[0];
               }
 
+              console.log('API Response:', status);
+
               const languageCode = status.language.code;
               if (!processedLocales.has(languageCode)) {
                 const targetPath = missingByLocale[languageCode].targetPath;

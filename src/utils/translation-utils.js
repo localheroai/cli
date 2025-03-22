@@ -28,6 +28,16 @@ export function findMissingTranslations(sourceKeys, targetKeys) {
       continue;
     }
 
+    if (typeof details === 'boolean') {
+      if (!targetKeys[key]) {
+        missingKeys[key] = {
+          value: details,
+          sourceKey: key
+        };
+      }
+      continue;
+    }
+
     if (
       typeof details === 'object' && details !== null &&
       typeof details.value === 'string' &&
@@ -42,10 +52,17 @@ export function findMissingTranslations(sourceKeys, targetKeys) {
     }
 
     if (!targetKeys[key]) {
-      missingKeys[key] = {
-        ...details,
-        sourceKey: key
-      };
+      if (typeof details === 'object' && details !== null && 'value' in details) {
+        missingKeys[key] = {
+          ...details,
+          sourceKey: key
+        };
+      } else {
+        missingKeys[key] = {
+          value: details,
+          sourceKey: key
+        };
+      }
     }
   }
 
@@ -85,28 +102,22 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
     for (const [key, value] of Object.entries(localeData.keys)) {
       let extractedValue;
 
-      if (typeof value === 'string') {
+      if (typeof value === 'boolean' || typeof value === 'string') {
         extractedValue = value;
-      } else if (typeof value === 'object' && value !== null) {
-        if (value.value !== undefined) {
-          extractedValue = value.value === null ? '' : value.value;
-        } else if (Object.keys(value).some(k => !isNaN(parseInt(k, 10)))) {
-          let reconstructedString = '';
-          let i = 0;
-          while (value[i] !== undefined) {
-            reconstructedString += value[i];
-            i++;
-          }
-          extractedValue = reconstructedString;
-        } else {
+      }
+      else if (typeof value === 'object' && value !== null) {
+        if ('value' in value) {
+          extractedValue = value.value ?? '';
+        }
+        else if (Object.keys(value).some(k => !isNaN(parseInt(k, 10)))) {
+          extractedValue = Object.values(value).join('');
+        }
+        else {
           extractedValue = JSON.stringify(value);
         }
-      } else {
-        extractedValue = String(value);
       }
-
-      if (typeof extractedValue !== 'string') {
-        extractedValue = String(extractedValue);
+      else {
+        extractedValue = String(value);
       }
 
       formattedKeys[key] = extractedValue;
@@ -125,7 +136,7 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
       const contentObj = { keys: {} };
       for (const [key, value] of Object.entries(batchKeys)) {
         contentObj.keys[key] = {
-          value: String(value)
+          value: typeof value === 'boolean' ? value : String(value)
         };
       }
 

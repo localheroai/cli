@@ -26,6 +26,34 @@ describe('translation-utils', () => {
       expect(result.skippedKeys).toEqual({});
     });
 
+    it('should handle boolean values correctly', () => {
+      const sourceKeys = {
+        'app.utils.show_wizard': true,
+        'app.utils.skip_wizard': false,
+        'app.utils.display_help': { value: true }
+      };
+
+      const targetKeys = {};
+
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+
+      expect(result.missingKeys).toEqual({
+        'app.utils.show_wizard': {
+          value: true,
+          sourceKey: 'app.utils.show_wizard'
+        },
+        'app.utils.skip_wizard': {
+          value: false,
+          sourceKey: 'app.utils.skip_wizard'
+        },
+        'app.utils.display_help': {
+          value: true,
+          sourceKey: 'app.utils.display_help'
+        }
+      });
+      expect(result.skippedKeys).toEqual({});
+    });
+
     it('should skip WIP keys with wip_ prefix', () => {
       const sourceKeys = {
         hello: { value: 'Hello' },
@@ -220,6 +248,35 @@ describe('translation-utils', () => {
       expect(Object.keys(batch1Content.keys)).toHaveLength(5);
       expect(Object.keys(batch2Content.keys)).toHaveLength(5);
       expect(Object.keys(batch3Content.keys)).toHaveLength(5);
+    });
+
+    it('handles boolean values correctly', () => {
+      const sourceFiles = [{
+        path: 'locales/en.yml',
+        format: 'yaml',
+        content: Buffer.from('en:\n  app:\n    display_help: true\n    skip_wizard: false').toString('base64')
+      }];
+
+      const missingByLocale = {
+        fr: {
+          path: 'locales/en.yml',
+          keys: {
+            'app.display_help': true,
+            'app.skip_wizard': false
+          }
+        }
+      };
+
+      const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale);
+
+      expect(errors).toHaveLength(0);
+      expect(batches).toHaveLength(1);
+
+      const content = JSON.parse(Buffer.from(batches[0].files[0].content, 'base64').toString());
+      expect(content.keys['app.display_help'].value).toBe(true);
+      expect(content.keys['app.skip_wizard'].value).toBe(false);
+      expect(typeof content.keys['app.display_help'].value).toBe('boolean');
+      expect(typeof content.keys['app.skip_wizard'].value).toBe('boolean');
     });
   });
 });

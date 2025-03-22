@@ -10,9 +10,6 @@ describe('files utils', () => {
   let flattenTranslations;
   let unflattenTranslations;
   let preserveJsonStructure;
-  let directoryExists;
-  let findFirstExistingPath;
-  let getDirectoryContents;
   let originalConsole;
   let mockFs;
 
@@ -595,6 +592,26 @@ en:
       expect(flattenTranslations(nested)).toEqual(expected);
     });
 
+    it('handles boolean values correctly', () => {
+      const input = {
+        settings: {
+          strip_insignificant_zeros: false,
+          show_decimals: true,
+          nested: {
+            enabled: false
+          }
+        }
+      };
+
+      const expected = {
+        'settings.strip_insignificant_zeros': false,
+        'settings.show_decimals': true,
+        'settings.nested.enabled': false
+      };
+
+      expect(flattenTranslations(input)).toEqual(expected);
+    });
+
     it('handles already flat objects', () => {
       const flat = {
         'navbar.home': 'Home',
@@ -661,6 +678,28 @@ en:
             items: {
               home: 'Home'
             }
+          }
+        }
+      };
+
+      expect(unflattenTranslations(flat)).toEqual(expected);
+    });
+
+    it('handles boolean values when unflattening', () => {
+      const flat = {
+        'settings.strip_insignificant_zeros': false,
+        'settings.show_decimals': true,
+        'settings.nested.enabled': false,
+        'settings.nested.visible': true
+      };
+
+      const expected = {
+        settings: {
+          strip_insignificant_zeros: false,
+          show_decimals: true,
+          nested: {
+            enabled: false,
+            visible: true
           }
         }
       };
