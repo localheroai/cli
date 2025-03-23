@@ -195,7 +195,9 @@ export function generateTargetPath(sourceFile, targetLocale, sourceLocale) {
   // construct the target path by replacing the locale in the filename only
   const dirPath = path.dirname(sourceFile.path);
   const fileName = path.basename(sourceFile.path);
-  const newFileName = fileName.replace(sourceLocale, targetLocale);
+  // Use regex to match the exact locale string to avoid partial matches
+  const localeRegex = new RegExp(`\\b${sourceLocale}\\b`, 'g');
+  const newFileName = fileName.replace(localeRegex, targetLocale);
   return path.join(dirPath, newFileName);
 }
 

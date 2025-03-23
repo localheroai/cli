@@ -160,7 +160,7 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
       result.push(`${indentStr}${key}: |`);
       const lines = value.split('\n');
       for (const line of lines) {
-        result.push(`${indentStr}  ${line}`);
+        result.push(line.length > 0 ? `${indentStr}  ${line}` : '');
       }
       continue;
     }

@@ -183,6 +183,24 @@ en:
         expect(content).toContain('  title: Simple title');
       });
 
+      it('handles multiline strings with empty lines correctly', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'preamble': 'First paragraph\n\nSecond paragraph\n\nThird paragraph'
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('en:');
+        expect(content).toMatch(/en:\n {2}preamble: \|/);
+        expect(content).toContain('    First paragraph');
+        expect(content).toContain('');  // Empty line without indentation
+        expect(content).toContain('    Second paragraph');
+        expect(content).toContain('');  // Empty line without indentation
+        expect(content).toContain('    Third paragraph');
+      });
+
       it('preserves existing multiline format when updating other values', async () => {
         const filePath = path.join(tempDir, 'en.yml');
         const initialContent = `

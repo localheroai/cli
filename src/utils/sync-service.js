@@ -17,7 +17,7 @@ export const syncService = {
     const since = config.lastSyncedAt || new Date(0).toISOString();
 
     if (verbose) {
-      console.log(chalk.blue(`🔄 Checking for updates since ${since}`));
+      console.log(chalk.blue(`Checking for updates since ${since}`));
     }
 
     let allFiles = [];
