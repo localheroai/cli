@@ -12,8 +12,10 @@ function getExistingQuoteStyles(content) {
   const keyValueRegex = /^([^:]+):\s*(.*)$/;
   const doubleQuoteRegex = /^"(.*)"$/;
   const singleQuoteRegex = /^'(.*)'$/;
+  const arrayItemRegex = /^\s*-\s+(.+)$/;
   let inMultiline = false;
   let multilineIndent = 0;
+  let currentArrayPath = '';
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -31,6 +33,19 @@ function getExistingQuoteStyles(content) {
     }
 
     pathLength = level;
+    const arrayMatch = line.trim().match(arrayItemRegex);
+
+    if (arrayMatch && currentArrayPath) {
+      const value = arrayMatch[1];
+      const quoteType = doubleQuoteRegex.test(value) ? '"' : (singleQuoteRegex.test(value) ? "'" : '');
+
+      const arrayStyles = styles.get(currentArrayPath) || { arrayItems: [] };
+      arrayStyles.arrayItems = arrayStyles.arrayItems || [];
+      arrayStyles.arrayItems.push({ quoted: Boolean(quoteType), quoteType });
+      styles.set(currentArrayPath, arrayStyles);
+      continue;
+    }
+
     const match = line.trim().match(keyValueRegex);
 
     if (match) {
@@ -39,6 +54,16 @@ function getExistingQuoteStyles(content) {
 
       currentPath[level] = key;
       const fullPath = currentPath.slice(0, pathLength + 1).join('.');
+
+      // Track if this is the start of an array
+      if (value === '') {
+        const nextLine = lines[i + 1];
+        if (nextLine && nextLine.trim().startsWith('-')) {
+          currentArrayPath = fullPath;
+          styles.set(fullPath, { isArray: true, arrayItems: [] });
+          continue;
+        }
+      }
 
       // Detect multiline string start
       if (value?.trim() === '|') {
@@ -53,6 +78,7 @@ function getExistingQuoteStyles(content) {
       }
 
       if (value) {
+        currentArrayPath = '';
         const valueTrimed = value.trim();
         const hasDoubleQuotes = doubleQuoteRegex.test(valueTrimed);
         const hasSingleQuotes = !hasDoubleQuotes && singleQuoteRegex.test(valueTrimed);
@@ -65,6 +91,8 @@ function getExistingQuoteStyles(content) {
           });
         }
       }
+    } else {
+      currentArrayPath = '';
     }
   }
 
@@ -85,10 +113,23 @@ function getIndent(level) {
   return indent;
 }
 
-function formatArrayItems(array, indentStr) {
-  return array.map(item => {
+function formatArrayItems(array, indentStr, styles, currentPath) {
+  const style = styles.get(currentPath);
+  const arrayStyles = style?.arrayItems || [];
+
+  return array.map((item, index) => {
     const stringValue = String(item);
-    // Only quote strings that contain special characters
+    const itemStyle = arrayStyles[index];
+
+    // If we have a stored style for this item, use it
+    if (itemStyle) {
+      const escapedValue = itemStyle.quoteType === '"' && stringValue.includes('"')
+        ? stringValue.replace(/"/g, '\\"')
+        : stringValue;
+      return `${indentStr}  - ${itemStyle.quoted ? `${itemStyle.quoteType}${escapedValue}${itemStyle.quoteType}` : escapedValue}`;
+    }
+
+    // Fall back to the original logic for new items
     const needsQuotes = typeof item === 'string' &&
       (item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item));
     const escapedValue = needsQuotes && stringValue.includes('"')
@@ -144,7 +185,7 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
         continue;
       }
       result.push(`${indentStr}${key}:`);
-      result.push(...formatArrayItems(array, indentStr));
+      result.push(...formatArrayItems(array, indentStr, styles, currentPath));
       continue;
     }
 
@@ -185,6 +226,22 @@ function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
   return result;
 }
 
+// Utility to process array items with proper quoting
+function processArrayItems(array, yamlDoc) {
+  return array.map(item => {
+    const itemNode = yamlDoc.createNode(item);
+
+    // Add quotes for items that need them
+    if (typeof item === 'string') {
+      const needsQuotes = item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item);
+      if (needsQuotes) {
+        itemNode.type = 'QUOTE_DOUBLE';
+      }
+    }
+    return itemNode;
+  });
+}
+
 export async function updateTranslationFile(filePath, translations, languageCode = 'en') {
   try {
     const fileExt = path.extname(filePath).slice(1).toLowerCase();
@@ -200,48 +257,91 @@ export async function updateTranslationFile(filePath, translations, languageCode
         created: jsonResult.created
       };
     }
+
     let existingContent = '';
-    let styles;
+    let yamlDoc;
+
     try {
       existingContent = await fs.readFile(filePath, 'utf8');
-      styles = getExistingQuoteStyles(existingContent);
-    } catch {
+      yamlDoc = yaml.parseDocument(existingContent);
+    } catch (error) {
       console.warn(`Creating new file: ${filePath}`);
-      styles = new Map();
       result.created = true;
+      yamlDoc = new yaml.Document();
+      yamlDoc.contents = yamlDoc.createNode({});
     }
 
-    const hasTrailingSpace = /\s$/.test(existingContent);
-    const yamlContent = yaml.parse(existingContent) || {};
-    const sourceLanguage = Object.keys(yamlContent)[0];
-
-    if (sourceLanguage && sourceLanguage !== languageCode && yamlContent[sourceLanguage]) {
-      return result;
+    // Get the root node, create language node if needed
+    if (!yamlDoc.contents) {
+      yamlDoc.contents = yamlDoc.createNode({});
     }
 
-    yamlContent[languageCode] = yamlContent[languageCode] || {};
+    let rootNode = yamlDoc.contents;
+    if (!rootNode.has(languageCode)) {
+      rootNode.set(languageCode, yamlDoc.createNode({}));
+    }
 
+    let langNode = rootNode.get(languageCode);
+
+    // Update each translation key
     for (const [keyPath, newValue] of Object.entries(translations)) {
       const keys = keyPath.split('.');
-      let current = yamlContent[languageCode];
-      const lastIndex = keys.length - 1;
+      let current = langNode;
 
-      for (let i = 0; i < lastIndex; i++) {
+      // Navigate to the parent node, creating intermediate nodes as needed
+      for (let i = 0; i < keys.length - 1; i++) {
         const key = keys[i];
-        current[key] = current[key] || {};
-        current = current[key];
+        if (!current.has(key)) {
+          current.set(key, yamlDoc.createNode({}));
+        }
+        current = current.get(key);
       }
 
-      current[keys[lastIndex]] = newValue;
+      // Set the final value
+      const lastKey = keys[keys.length - 1];
+
+      // Handle arrays
+      if (Array.isArray(newValue)) {
+        const arrayNode = new yaml.YAMLSeq();
+        processArrayItems(newValue, yamlDoc).forEach(item => arrayNode.add(item));
+        current.set(lastKey, arrayNode);
+        continue;
+      }
+
+      // Handle potential JSON array strings
+      const array = tryParseJsonArray(newValue);
+      if (array) {
+        const arrayNode = new yaml.YAMLSeq();
+        processArrayItems(array, yamlDoc).forEach(item => arrayNode.add(item));
+        current.set(lastKey, arrayNode);
+        continue;
+      }
+
+      // Handle multiline strings
+      if (typeof newValue === 'string' && newValue.includes('\n')) {
+        const scalar = new yaml.Scalar(newValue);
+        scalar.type = 'BLOCK_LITERAL';
+        current.set(lastKey, scalar);
+        continue;
+      }
+
+      // Handle regular values
+      const node = yamlDoc.createNode(newValue);
+      if (typeof newValue === 'string' && (newValue.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(newValue))) {
+        node.type = 'QUOTE_DOUBLE';
+      }
+      current.set(lastKey, node);
     }
 
     const dir = path.dirname(filePath);
     await fs.mkdir(dir, { recursive: true });
 
-    const content = stringifyYaml(yamlContent, 0, '', [], styles);
-    const finalContent = content.join('\n') + (hasTrailingSpace ? '\n' : '');
+    // Configure the document options for consistent formatting
+    yamlDoc.options.indent = 2;
+    yamlDoc.options.indentSeq = true;
 
-    await fs.writeFile(filePath, finalContent);
+    // Use Document.toString() to preserve comments and structure
+    await fs.writeFile(filePath, yamlDoc.toString());
     return result;
 
   } catch (error) {
@@ -327,51 +427,46 @@ async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
 async function deleteKeysFromYamlFile(filePath, keysToDelete, languageCode) {
   try {
     const content = await fs.readFile(filePath, 'utf8');
-    const styles = getExistingQuoteStyles(content);
-    const hasTrailingSpace = /\s$/.test(content);
-
-    const yamlContent = yaml.parse(content) || {};
-    if (!yamlContent[languageCode]) {
+    const yamlDoc = yaml.parseDocument(content);
+    if (!yamlDoc.contents || !yamlDoc.contents.has(languageCode)) {
       return [];
     }
 
+    const langNode = yamlDoc.contents.get(languageCode);
     const deletedKeys = [];
 
     for (const keyPath of keysToDelete) {
       const keys = keyPath.split('.');
       const lastIndex = keys.length - 1;
-      let current = yamlContent[languageCode];
+      let current = langNode;
       let parent = null;
       let keyInParent = '';
       let found = true;
 
       for (let i = 0; i < lastIndex; i++) {
         const key = keys[i];
-        if (!current[key] || typeof current[key] !== 'object') {
+        if (!current.has(key)) {
           found = false;
           break;
         }
         parent = current;
         keyInParent = key;
-        current = current[key];
+        current = current.get(key);
       }
 
       if (found) {
         const lastKey = keys[lastIndex];
-        if (current[lastKey] !== undefined) {
-          delete current[lastKey];
+        if (current.has(lastKey)) {
+          current.delete(lastKey);
           deletedKeys.push(keyPath);
-          if (parent && Object.keys(current).length === 0) {
-            delete parent[keyInParent];
+          if (parent && current.items.length === 0) {
+            parent.delete(keyInParent);
           }
         }
       }
     }
-    const yamlLines = stringifyYaml(yamlContent, 0, '', [], styles);
-    const finalContent = yamlLines.join('\n') + (hasTrailingSpace ? '\n' : '');
 
-    await fs.writeFile(filePath, finalContent);
-
+    await fs.writeFile(filePath, yamlDoc.toString());
     return deletedKeys;
   } catch (error) {
     throw new Error(`Failed to delete keys from YAML file ${filePath}: ${error.message}`);
