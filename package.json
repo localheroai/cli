@@ -2,6 +2,11 @@
   "name": "@localheroai/cli",
   "version": "0.0.3",
   "description": "CLI tool for managing translations with LocalHero.ai",
+  "homepage": "https://localhero.ai",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/localheroai/cli"
+  },
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -41,7 +46,7 @@
   },
   "files": [
     "src",
-    "README.md",
+    "README",
     "LICENSE"
   ],
   "jest": {
