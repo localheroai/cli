@@ -59,7 +59,7 @@ describe('github module', () => {
             expect(fileContent).toContain('name: Localhero.ai - I18n translation');
             expect(fileContent).toContain('- "locales/**/*.json"');
             expect(fileContent).toContain('- "translations/*.yml"');
-            expect(fileContent).toContain('run: npx @localheroai/cli translate');
+            expect(fileContent).toContain('run: npx -y @localheroai/cli translate');
 
             // Verify return value is the workflow file path
             expect(result).toBe('/project/.github/workflows/localhero-translate.yml');

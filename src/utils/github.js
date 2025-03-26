@@ -59,7 +59,7 @@ jobs:
       env:
         LOCALHERO_API_KEY: \${{ secrets.LOCALHERO_API_KEY }}
         GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-      run: npx @localheroai/cli translate`;
+      run: npx -y @localheroai/cli translate`;
 
     await fs.writeFile(workflowFile, actionContent);
     return workflowFile;
