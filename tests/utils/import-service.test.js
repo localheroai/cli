@@ -287,5 +287,56 @@ describe('importService', () => {
         ]
       });
     });
+
+    it('handles warnings in import response', async () => {
+      const files = [
+        path.join(TEST_BASE_PATH, 'locales/en.json'),
+        path.join(TEST_BASE_PATH, 'locales/sv.json')
+      ];
+
+      mockGlob.mockResolvedValue(files);
+      mockFs.promises.readFile.mockImplementation((filePath) => {
+        if (filePath.endsWith('en.json')) {
+          return Promise.resolve('{"hello":"Hello"}');
+        }
+        if (filePath.endsWith('sv.json')) {
+          return Promise.resolve('{"hello":"Hej", "extra.key":"Extra"}');
+        }
+        return Promise.reject(new Error(`Unexpected file: ${filePath}`));
+      });
+
+      mockImportsApi.createImport.mockResolvedValue({
+        status: 'completed',
+        id: 'import-123',
+        warnings: [
+          {
+            language: 'sv',
+            filename: 'locales/sv.json',
+            key: 'extra.key',
+            message: 'Key not found in source language'
+          }
+        ],
+        statistics: {
+          total_keys: 1,
+          languages: [
+            { code: 'en', translated: 1, missing: 0 },
+            { code: 'sv', translated: 1, missing: 0 }
+          ]
+        }
+      });
+
+      const result = await importService.importTranslations(testConfig, TEST_BASE_PATH);
+
+      expect(result.status).toBe('completed');
+      expect(result.warnings).toEqual([
+        {
+          language: 'sv',
+          filename: 'locales/sv.json',
+          key: 'extra.key',
+          message: 'Key not found in source language'
+        }
+      ]);
+      expect(result.statistics).toBeDefined();
+    });
   });
 });

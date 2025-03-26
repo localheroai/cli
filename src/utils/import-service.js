@@ -115,8 +115,14 @@ export const importService = {
       }
     }
 
+    // Ensure we pass through all relevant fields from the API response
+    const { status, statistics, warnings, translations_url, sourceImport } = finalImportResult;
     return {
-      ...finalImportResult,
+      status,
+      statistics,
+      warnings,
+      translations_url,
+      sourceImport,
       files: importedFiles
     };
   }

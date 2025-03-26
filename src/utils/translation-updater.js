@@ -503,7 +503,13 @@ async function updateJsonFile(filePath, translations, languageCode) {
 
     let updatedContent;
 
-    if (hasLanguageWrapper) {
+    if (result.created) {
+      // For new files, use language wrapper by default
+      updatedContent = {
+        [languageCode]: preserveJsonStructure({}, translations, jsonFormat)
+      };
+    } else if (hasLanguageWrapper) {
+      // For existing files with language wrapper, preserve it
       existingContent[languageCode] = existingContent[languageCode] || {};
       updatedContent = JSON.parse(JSON.stringify(existingContent));
       const mergedContent = preserveJsonStructure(
@@ -511,16 +517,14 @@ async function updateJsonFile(filePath, translations, languageCode) {
         translations,
         jsonFormat
       );
-
       updatedContent[languageCode] = mergedContent;
     } else {
+      // For existing files without language wrapper, preserve flat structure
       const existingCopy = JSON.parse(JSON.stringify(existingContent));
-      updatedContent = {
-        [languageCode]: preserveJsonStructure(existingCopy, translations, jsonFormat)
-      };
+      updatedContent = preserveJsonStructure(existingCopy, translations, jsonFormat);
     }
-    await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
 
+    await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
     return result;
   } catch (error) {
     throw new Error(`Failed to update JSON file ${filePath}: ${error.message}`);

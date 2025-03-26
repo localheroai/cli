@@ -4,7 +4,7 @@ import { getUpdates } from '../api/translations.js';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater.js';
 import { findTranslationFiles } from './files.js';
 
-const MAX_PAGES = 10;
+const MAX_PAGES = 20;
 
 export const syncService = {
   async checkForUpdates({ verbose = false } = {}) {

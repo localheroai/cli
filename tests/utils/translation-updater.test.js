@@ -143,6 +143,37 @@ en:
       });
     });
 
+    it('preserves flat JSON structure without adding language wrapper', async () => {
+      const filePath = path.join(tempDir, 'flat-translations.json');
+
+      const initialContent = {
+        navbar: {
+          home: 'Old Home'
+        }
+      };
+      fs.writeFileSync(filePath, JSON.stringify(initialContent, null, 2));
+
+      const translations = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About'
+      };
+
+      const result = await updateTranslationFile(filePath, translations, 'en');
+
+      expect(result).toEqual({
+        updatedKeys: ['navbar.home', 'navbar.about'],
+        created: false
+      });
+
+      const updatedContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      expect(updatedContent).toEqual({
+        navbar: {
+          home: 'Home',
+          about: 'About'
+        }
+      });
+    });
+
     it('creates new JSON file if it does not exist', async () => {
       const filePath = path.join(tempDir, 'new-translations.json');
       const translations = {
@@ -161,6 +192,43 @@ en:
         en: {
           navbar: {
             home: 'Home'
+          }
+        }
+      });
+    });
+
+    it('maintains language wrapper if originally present', async () => {
+      const filePath = path.join(tempDir, 'translations-with-wrapper.json');
+
+      // Initial content with language wrapper
+      const initialContent = {
+        en: {
+          navbar: {
+            home: 'Old Home'
+          }
+        }
+      };
+      fs.writeFileSync(filePath, JSON.stringify(initialContent, null, 2));
+
+      const translations = {
+        'navbar.home': 'Home',
+        'navbar.about': 'About'
+      };
+
+      const result = await updateTranslationFile(filePath, translations, 'en');
+
+      expect(result).toEqual({
+        updatedKeys: ['navbar.home', 'navbar.about'],
+        created: false
+      });
+
+      const updatedContent = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      // Should maintain structure with language wrapper
+      expect(updatedContent).toEqual({
+        en: {
+          navbar: {
+            home: 'Home',
+            about: 'About'
           }
         }
       });
