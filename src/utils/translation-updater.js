@@ -3,140 +3,50 @@ import path from 'path';
 import yaml from 'yaml';
 import { detectJsonFormat, preserveJsonStructure } from './files.js';
 
-function getExistingQuoteStyles(content) {
-  const styles = new Map();
-  const lines = content.match(/[^\n]+/g) || [];
-  const currentPath = new Array(10);
-  let pathLength = 0;
-  const indentRegex = /^\s*/;
-  const keyValueRegex = /^([^:]+):\s*(.*)$/;
-  const doubleQuoteRegex = /^"(.*)"$/;
-  const singleQuoteRegex = /^'(.*)'$/;
-  const arrayItemRegex = /^\s*-\s+(.+)$/;
-  let inMultiline = false;
-  let multilineIndent = 0;
-  let currentArrayPath = '';
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line || line.trim().startsWith('#')) continue;
-
-    const indent = line.match(indentRegex)[0].length;
-    const level = indent >> 1; /* Divide by 2 using bit shift */
-
-    if (inMultiline) {
-      if (indent < multilineIndent) {
-        inMultiline = false;
-      } else {
-        continue;
-      }
-    }
-
-    pathLength = level;
-    const arrayMatch = line.trim().match(arrayItemRegex);
-
-    if (arrayMatch && currentArrayPath) {
-      const value = arrayMatch[1];
-      const quoteType = doubleQuoteRegex.test(value) ? '"' : (singleQuoteRegex.test(value) ? "'" : '');
-
-      const arrayStyles = styles.get(currentArrayPath) || { arrayItems: [] };
-      arrayStyles.arrayItems = arrayStyles.arrayItems || [];
-      arrayStyles.arrayItems.push({ quoted: Boolean(quoteType), quoteType });
-      styles.set(currentArrayPath, arrayStyles);
-      continue;
-    }
-
-    const match = line.trim().match(keyValueRegex);
-
-    if (match) {
-      const key = match[1].trim();
-      const value = match[2];
-
-      currentPath[level] = key;
-      const fullPath = currentPath.slice(0, pathLength + 1).join('.');
-
-      // Track if this is the start of an array
-      if (value === '') {
-        const nextLine = lines[i + 1];
-        if (nextLine && nextLine.trim().startsWith('-')) {
-          currentArrayPath = fullPath;
-          styles.set(fullPath, { isArray: true, arrayItems: [] });
-          continue;
-        }
-      }
-
-      // Detect multiline string start
-      if (value?.trim() === '|') {
-        inMultiline = true;
-        multilineIndent = indent + 2;
-        styles.set(fullPath, {
-          multiline: true,
-          indicator: '|',
-          indentation: indent
-        });
-        continue;
-      }
-
-      if (value) {
-        currentArrayPath = '';
-        const valueTrimed = value.trim();
-        const hasDoubleQuotes = doubleQuoteRegex.test(valueTrimed);
-        const hasSingleQuotes = !hasDoubleQuotes && singleQuoteRegex.test(valueTrimed);
-
-        if (hasDoubleQuotes || hasSingleQuotes || valueTrimed) {
-          styles.set(fullPath, {
-            quoted: hasDoubleQuotes || hasSingleQuotes,
-            quoteType: hasDoubleQuotes ? '"' : (hasSingleQuotes ? "'" : ''),
-            originalValue: valueTrimed
-          });
-        }
-      }
-    } else {
-      currentArrayPath = '';
-    }
-  }
-
-  return styles;
-}
-
 const SPECIAL_CHARS_REGEX = /[:@#,[\]{}?|>&*!\n]/;
 const INTERPOLATION = '%{';
-const INDENT_CACHE = new Map();
 const MAX_ARRAY_LENGTH = 1000; // Reasonable limit for translation arrays
 
-function getIndent(level) {
-  let indent = INDENT_CACHE.get(level);
-  if (!indent) {
-    indent = ' '.repeat(level);
-    INDENT_CACHE.set(level, indent);
+function detectYamlOptions(content) {
+  // Only look at first 10 non-empty lines
+  const lines = content
+    .split('\n')
+    .filter(line => line.trim())
+    .slice(0, 10);
+
+  const options = {
+    indent: 2,
+    indentSeq: true
+  };
+
+  // Find first indented line to detect indent size
+  const indentMatch = lines.find(line => /^\s+\S/.test(line))?.match(/^(\s+)\S/);
+  if (indentMatch) {
+    options.indent = indentMatch[1].length;
+    if (indentMatch[1].includes('\t')) {
+      options.indent = 2;
+    }
   }
-  return indent;
+
+  // Check if sequences are indented
+  const seqMatch = lines.find(line => /^\s*-\s+\S/.test(line));
+  if (seqMatch) {
+    options.indentSeq = /^\s+-\s+/.test(seqMatch);
+  }
+
+  return options;
 }
 
-function formatArrayItems(array, indentStr, styles, currentPath) {
-  const style = styles.get(currentPath);
-  const arrayStyles = style?.arrayItems || [];
-
-  return array.map((item, index) => {
-    const stringValue = String(item);
-    const itemStyle = arrayStyles[index];
-
-    // If we have a stored style for this item, use it
-    if (itemStyle) {
-      const escapedValue = itemStyle.quoteType === '"' && stringValue.includes('"')
-        ? stringValue.replace(/"/g, '\\"')
-        : stringValue;
-      return `${indentStr}  - ${itemStyle.quoted ? `${itemStyle.quoteType}${escapedValue}${itemStyle.quoteType}` : escapedValue}`;
+function processArrayItems(array, yamlDoc) {
+  return array.map(item => {
+    const itemNode = yamlDoc.createNode(item);
+    if (typeof item === 'string') {
+      const needsQuotes = item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item);
+      if (needsQuotes) {
+        itemNode.type = 'QUOTE_DOUBLE';
+      }
     }
-
-    // Fall back to the original logic for new items
-    const needsQuotes = typeof item === 'string' &&
-      (item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item));
-    const escapedValue = needsQuotes && stringValue.includes('"')
-      ? stringValue.replace(/"/g, '\\"')
-      : stringValue;
-
-    return `${indentStr}  - ${needsQuotes ? `"${escapedValue}"` : escapedValue}`;
+    return itemNode;
   });
 }
 
@@ -151,7 +61,6 @@ function tryParseJsonArray(value) {
       return null;
     }
 
-    // We don't want extremely large arrays
     if (parsed.length > MAX_ARRAY_LENGTH) {
       console.warn(`Array length ${parsed.length} exceeds maximum allowed length of ${MAX_ARRAY_LENGTH}`);
       return null;
@@ -163,209 +72,138 @@ function tryParseJsonArray(value) {
   }
 }
 
-function stringifyYaml(obj, indent = 0, parentPath = '', result = [], styles) {
-  const indentStr = getIndent(indent);
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  for (const [key, value] of Object.entries(obj)) {
-    const currentPath = parentPath ? `${parentPath}.${key}` : key;
-    const style = styles.get(currentPath);
+async function ensureDirectoryExists(filePath) {
+  const dir = path.dirname(filePath);
+  if (dir !== '.') {
+    await fs.mkdir(dir, { recursive: true });
+  }
+}
 
-    // Handle arrays
-    let array = null;
-    if (Array.isArray(value)) {
-      array = value;
-    } else if (typeof value === 'string') {
-      array = tryParseJsonArray(value);
+async function createYamlDocument(filePath) {
+  const exists = await fileExists(filePath);
+  if (!exists) {
+    console.warn(`Creating new file: ${filePath}`);
+    const doc = new yaml.Document();
+    doc.contents = doc.createNode({});
+    return { doc, created: true, options: { indent: 2, indentSeq: true } };
+  }
+
+  const content = await fs.readFile(filePath, 'utf8');
+  const options = detectYamlOptions(content);
+  return {
+    doc: yaml.parseDocument(content),
+    created: false,
+    options
+  };
+}
+
+async function updateYamlTranslations(yamlDoc, translations, languageCode) {
+  if (!yamlDoc.contents) {
+    yamlDoc.contents = yamlDoc.createNode({});
+  }
+
+  const rootNode = yamlDoc.contents;
+  if (!rootNode.has(languageCode)) {
+    rootNode.set(languageCode, yamlDoc.createNode({}));
+  }
+
+  const langNode = rootNode.get(languageCode);
+
+  for (const [keyPath, newValue] of Object.entries(translations)) {
+    const keys = keyPath.split('.');
+    let current = langNode;
+
+    for (let i = 0; i < keys.length - 1; i++) {
+      const key = keys[i];
+      if (!current.has(key)) {
+        current.set(key, yamlDoc.createNode({}));
+      }
+      current = current.get(key);
     }
 
-    if (array) {
-      if (array.length > MAX_ARRAY_LENGTH) {
-        console.warn(`Skipping array for key ${key}: length exceeds maximum`);
-        result.push(`${indentStr}${key}: []`);
-        continue;
-      }
-      result.push(`${indentStr}${key}:`);
-      result.push(...formatArrayItems(array, indentStr, styles, currentPath));
+    const lastKey = keys[keys.length - 1];
+
+    // Handle arrays
+    if (Array.isArray(newValue)) {
+      const arrayNode = new yaml.YAMLSeq();
+      processArrayItems(newValue, yamlDoc).forEach(item => arrayNode.add(item));
+      current.set(lastKey, arrayNode);
       continue;
     }
 
-    // Handle nested objects
-    if (value && typeof value === 'object') {
-      result.push(`${indentStr}${key}:`);
-      stringifyYaml(value, indent + 2, currentPath, result, styles);
+    // Handle potential JSON array strings
+    const array = tryParseJsonArray(newValue);
+    if (array) {
+      const arrayNode = new yaml.YAMLSeq();
+      processArrayItems(array, yamlDoc).forEach(item => arrayNode.add(item));
+      current.set(lastKey, arrayNode);
       continue;
     }
 
     // Handle multiline strings
-    if (typeof value === 'string' && (style?.multiline || value.includes('\n'))) {
-      result.push(`${indentStr}${key}: |`);
-      const lines = value.split('\n');
-      for (const line of lines) {
-        result.push(line.length > 0 ? `${indentStr}  ${line}` : '');
-      }
+    if (typeof newValue === 'string' && newValue.includes('\n')) {
+      const scalar = new yaml.Scalar(newValue);
+      scalar.type = 'BLOCK_LITERAL';
+      current.set(lastKey, scalar);
       continue;
     }
 
-    // Handle regular strings
-    if (typeof value === 'string') {
-      const existingStyle = styles.get(currentPath);
-      if (existingStyle?.quoted) {
-        result.push(`${indentStr}${key}: ${existingStyle.quoteType}${value}${existingStyle.quoteType}`);
-      } else if (value.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(value)) {
-        result.push(`${indentStr}${key}: "${value}"`);
-      } else {
-        result.push(`${indentStr}${key}: ${value}`);
-      }
-      continue;
+    // Handle regular values
+    const node = yamlDoc.createNode(newValue);
+    if (typeof newValue === 'string' && (newValue.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(newValue))) {
+      node.type = 'QUOTE_DOUBLE';
     }
-
-    // Handle all other values
-    result.push(`${indentStr}${key}: ${value}`);
+    current.set(lastKey, node);
   }
-
-  return result;
-}
-
-// Utility to process array items with proper quoting
-function processArrayItems(array, yamlDoc) {
-  return array.map(item => {
-    const itemNode = yamlDoc.createNode(item);
-
-    // Add quotes for items that need them
-    if (typeof item === 'string') {
-      const needsQuotes = item.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(item);
-      if (needsQuotes) {
-        itemNode.type = 'QUOTE_DOUBLE';
-      }
-    }
-    return itemNode;
-  });
 }
 
 export async function updateTranslationFile(filePath, translations, languageCode = 'en') {
-  try {
-    const fileExt = path.extname(filePath).slice(1).toLowerCase();
-    const result = {
-      updatedKeys: Object.keys(translations),
-      created: false
+  const fileExt = path.extname(filePath).slice(1).toLowerCase();
+  const result = {
+    updatedKeys: Object.keys(translations),
+    created: false
+  };
+
+  if (fileExt === 'json') {
+    const jsonResult = await updateJsonFile(filePath, translations, languageCode);
+    return {
+      updatedKeys: result.updatedKeys,
+      created: jsonResult.created
     };
-
-    if (fileExt === 'json') {
-      const jsonResult = await updateJsonFile(filePath, translations, languageCode);
-      return {
-        updatedKeys: result.updatedKeys,
-        created: jsonResult.created
-      };
-    }
-
-    let existingContent = '';
-    let yamlDoc;
-
-    try {
-      existingContent = await fs.readFile(filePath, 'utf8');
-      yamlDoc = yaml.parseDocument(existingContent);
-    } catch (error) {
-      console.warn(`Creating new file: ${filePath}`);
-      result.created = true;
-      yamlDoc = new yaml.Document();
-      yamlDoc.contents = yamlDoc.createNode({});
-    }
-
-    // Get the root node, create language node if needed
-    if (!yamlDoc.contents) {
-      yamlDoc.contents = yamlDoc.createNode({});
-    }
-
-    let rootNode = yamlDoc.contents;
-    if (!rootNode.has(languageCode)) {
-      rootNode.set(languageCode, yamlDoc.createNode({}));
-    }
-
-    let langNode = rootNode.get(languageCode);
-
-    // Update each translation key
-    for (const [keyPath, newValue] of Object.entries(translations)) {
-      const keys = keyPath.split('.');
-      let current = langNode;
-
-      // Navigate to the parent node, creating intermediate nodes as needed
-      for (let i = 0; i < keys.length - 1; i++) {
-        const key = keys[i];
-        if (!current.has(key)) {
-          current.set(key, yamlDoc.createNode({}));
-        }
-        current = current.get(key);
-      }
-
-      // Set the final value
-      const lastKey = keys[keys.length - 1];
-
-      // Handle arrays
-      if (Array.isArray(newValue)) {
-        const arrayNode = new yaml.YAMLSeq();
-        processArrayItems(newValue, yamlDoc).forEach(item => arrayNode.add(item));
-        current.set(lastKey, arrayNode);
-        continue;
-      }
-
-      // Handle potential JSON array strings
-      const array = tryParseJsonArray(newValue);
-      if (array) {
-        const arrayNode = new yaml.YAMLSeq();
-        processArrayItems(array, yamlDoc).forEach(item => arrayNode.add(item));
-        current.set(lastKey, arrayNode);
-        continue;
-      }
-
-      // Handle multiline strings
-      if (typeof newValue === 'string' && newValue.includes('\n')) {
-        const scalar = new yaml.Scalar(newValue);
-        scalar.type = 'BLOCK_LITERAL';
-        current.set(lastKey, scalar);
-        continue;
-      }
-
-      // Handle regular values
-      const node = yamlDoc.createNode(newValue);
-      if (typeof newValue === 'string' && (newValue.includes(INTERPOLATION) || SPECIAL_CHARS_REGEX.test(newValue))) {
-        node.type = 'QUOTE_DOUBLE';
-      }
-      current.set(lastKey, node);
-    }
-
-    const dir = path.dirname(filePath);
-    await fs.mkdir(dir, { recursive: true });
-
-    // Configure the document options for consistent formatting
-    yamlDoc.options.indent = 2;
-    yamlDoc.options.indentSeq = true;
-
-    // Use Document.toString() to preserve comments and structure
-    await fs.writeFile(filePath, yamlDoc.toString());
-    return result;
-
-  } catch (error) {
-    throw new Error(`Failed to update translation file ${filePath}: ${error.message}`);
   }
+
+  await ensureDirectoryExists(filePath);
+  const { doc: yamlDoc, created, options } = await createYamlDocument(filePath);
+  result.created = created;
+
+  await updateYamlTranslations(yamlDoc, translations, languageCode);
+
+  yamlDoc.options.indent = options.indent;
+  yamlDoc.options.indentSeq = options.indentSeq;
+
+  await fs.writeFile(filePath, yamlDoc.toString());
+  return result;
 }
 
 export async function deleteKeysFromTranslationFile(filePath, keysToDelete, languageCode = 'en') {
-  try {
-    const fileExt = path.extname(filePath).slice(1).toLowerCase();
-    try {
-      await fs.access(filePath);
-    } catch {
-      return [];
-    }
-
-    if (fileExt === 'json') {
-      return await deleteKeysFromJsonFile(filePath, keysToDelete, languageCode);
-    } else {
-      return await deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
-    }
-  } catch (error) {
-    throw new Error(`Failed to delete keys from file ${filePath}: ${error.message}`);
+  const exists = await fileExists(filePath);
+  if (!exists) {
+    return [];
   }
+
+  const fileExt = path.extname(filePath).slice(1).toLowerCase();
+  return fileExt === 'json'
+    ? deleteKeysFromJsonFile(filePath, keysToDelete, languageCode)
+    : deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
 }
 
 async function deleteKeysFromJsonFile(filePath, keysToDelete, languageCode) {
