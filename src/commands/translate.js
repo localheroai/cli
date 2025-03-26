@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { configService } from '../utils/config.js';
 import { findTranslationFiles, parseFile, flattenTranslations } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus } from '../api/translations.js';
-import { updateTranslationFile } from '../utils/translation-updater.js';
+import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
 import { findMissingTranslations, batchKeysWithMissing, processLocaleTranslations } from '../utils/translation-utils.js';
 import { syncService } from '../utils/sync-service.js';

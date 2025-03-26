@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { configService } from './config.js';
 import { getUpdates } from '../api/translations.js';
-import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater.js';
+import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater/index.js';
 import { findTranslationFiles } from './files.js';
 
 const MAX_PAGES = 20;

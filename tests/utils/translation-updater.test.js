@@ -2,7 +2,7 @@ import { jest } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { updateTranslationFile, deleteKeysFromTranslationFile } from '../../src/utils/translation-updater.js';
+import { updateTranslationFile, deleteKeysFromTranslationFile } from '../../src/utils/translation-updater/index.js';
 
 describe('translation-updater', () => {
   let tempDir;
