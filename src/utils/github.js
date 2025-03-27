@@ -34,7 +34,13 @@ export const githubService = {
 on:
   pull_request:
     paths:
-      ${translationPaths.map(p => `- "${p}"`).join('\n      ')}
+      ${translationPaths.map(p => {
+      // Check if path already contains a file pattern (*, ?, or {})
+      const hasPattern = /[\*\?\{\}]/.test(p);
+      // If it has a pattern, use it as is; otherwise, append /**
+      const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
+      return `- "${formattedPath}"`;
+    }).join('\n      ')}
 
 jobs:
   translate:
@@ -53,7 +59,7 @@ jobs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: 18
+        node-version: 22
 
     - name: Run LocalHero CLI
       env:
