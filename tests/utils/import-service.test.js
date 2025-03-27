@@ -193,8 +193,13 @@ describe('importService', () => {
       });
 
       mockImportsApi.createImport.mockResolvedValue({
-        status: 'completed',
-        id: 'import-123'
+        import: {
+          status: 'completed',
+          id: 'import-123',
+          statistics: { total_keys: 1, languages: [] },
+          warnings: [],
+          translations_url: 'http://example.com'
+        }
       });
 
       const result = await importService.importTranslations(testConfig, TEST_BASE_PATH);
@@ -251,24 +256,32 @@ describe('importService', () => {
       ];
 
       mockGlob.mockResolvedValue(files);
-      const testContent = '{"test":"content"}';
-      mockFs.promises.readFile.mockResolvedValue(testContent);
+      mockFs.promises.readFile.mockResolvedValue('{"hello":"Hello"}');
 
       mockImportsApi.createImport.mockResolvedValue({
-        status: 'processing',
-        id: 'import-123',
-        poll_interval: 0
+        import: {
+          status: 'processing',
+          id: 'import-123',
+          poll_interval: 1
+        }
       });
 
       mockImportsApi.checkImportStatus
         .mockResolvedValueOnce({
-          status: 'processing',
-          id: 'import-123',
-          poll_interval: 0
+          import: {
+            status: 'processing',
+            id: 'import-123',
+            poll_interval: 1
+          }
         })
         .mockResolvedValueOnce({
-          status: 'completed',
-          id: 'import-123'
+          import: {
+            status: 'completed',
+            id: 'import-123',
+            statistics: { total_keys: 1, languages: [] },
+            warnings: [],
+            translations_url: 'http://example.com'
+          }
         });
 
       const result = await importService.importTranslations(testConfig, TEST_BASE_PATH);
@@ -282,7 +295,7 @@ describe('importService', () => {
             language: 'en',
             format: 'json',
             filename: 'locales/en.json',
-            content: Buffer.from('{"test":"content"}').toString('base64')
+            content: Buffer.from('{"hello":"Hello"}').toString('base64')
           }
         ]
       });
@@ -290,38 +303,24 @@ describe('importService', () => {
 
     it('handles warnings in import response', async () => {
       const files = [
-        path.join(TEST_BASE_PATH, 'locales/en.json'),
-        path.join(TEST_BASE_PATH, 'locales/sv.json')
+        path.join(TEST_BASE_PATH, 'locales/en.json')
       ];
 
       mockGlob.mockResolvedValue(files);
-      mockFs.promises.readFile.mockImplementation((filePath) => {
-        if (filePath.endsWith('en.json')) {
-          return Promise.resolve('{"hello":"Hello"}');
-        }
-        if (filePath.endsWith('sv.json')) {
-          return Promise.resolve('{"hello":"Hej", "extra.key":"Extra"}');
-        }
-        return Promise.reject(new Error(`Unexpected file: ${filePath}`));
-      });
+      mockFs.promises.readFile.mockResolvedValue('{"hello":"Hello"}');
 
       mockImportsApi.createImport.mockResolvedValue({
-        status: 'completed',
-        id: 'import-123',
-        warnings: [
-          {
-            language: 'sv',
-            filename: 'locales/sv.json',
-            key: 'extra.key',
-            message: 'Key not found in source language'
-          }
-        ],
-        statistics: {
-          total_keys: 1,
-          languages: [
-            { code: 'en', translated: 1, missing: 0 },
-            { code: 'sv', translated: 1, missing: 0 }
-          ]
+        import: {
+          status: 'completed',
+          id: 'import-123',
+          statistics: { total_keys: 1, languages: [] },
+          warnings: [
+            {
+              language: 'sv',
+              message: 'Missing translations'
+            }
+          ],
+          translations_url: 'http://example.com'
         }
       });
 
@@ -331,9 +330,7 @@ describe('importService', () => {
       expect(result.warnings).toEqual([
         {
           language: 'sv',
-          filename: 'locales/sv.json',
-          key: 'extra.key',
-          message: 'Key not found in source language'
+          message: 'Missing translations'
         }
       ]);
       expect(result.statistics).toBeDefined();

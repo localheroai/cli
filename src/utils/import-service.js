@@ -95,28 +95,27 @@ export const importService = {
       translations: allTranslations
     });
 
-    if (importResult.status === 'failed') {
+    if (importResult.import?.status === 'failed') {
       return {
-        ...importResult,
+        ...importResult.import,
         files: importedFiles
       };
     }
 
     let finalImportResult = importResult;
-    while (finalImportResult.status === 'processing') {
-      await new Promise(resolve => setTimeout(resolve, finalImportResult.poll_interval * 1000));
-      finalImportResult = await checkImportStatus(config.projectId, finalImportResult.id);
+    while (finalImportResult.import?.status === 'processing') {
+      await new Promise(resolve => setTimeout(resolve, finalImportResult.import.poll_interval * 1000));
+      finalImportResult = await checkImportStatus(config.projectId, finalImportResult.import.id);
 
-      if (finalImportResult.status === 'failed') {
+      if (finalImportResult.import?.status === 'failed') {
         return {
-          ...finalImportResult,
+          ...finalImportResult.import,
           files: importedFiles
         };
       }
     }
 
-    // Ensure we pass through all relevant fields from the API response
-    const { status, statistics, warnings, translations_url, sourceImport } = finalImportResult;
+    const { import: { status, statistics, warnings, translations_url, sourceImport } = {} } = finalImportResult;
     return {
       status,
       statistics,
