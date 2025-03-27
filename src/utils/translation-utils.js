@@ -155,11 +155,53 @@ export function batchKeysWithMissing(sourceFiles, missingByLocale, batchSize = 1
 }
 
 export function findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale) {
-  return targetFiles.find(f =>
+  // First try exact directory matching (existing logic)
+  let found = targetFiles.find(f =>
     f.locale === targetLocale &&
-    (path.dirname(f.path) === path.dirname(sourceFile.path) ||
-      path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale))
+    path.dirname(f.path) === path.dirname(sourceFile.path) &&
+    path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale)
   );
+
+  if (found) return found;
+
+  // Then try filename-based matching regardless of directory (existing logic)
+  found = targetFiles.find(f =>
+    f.locale === targetLocale &&
+    path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale)
+  );
+
+  if (found) return found;
+
+  const sourceDirParts = path.dirname(sourceFile.path).split(path.sep);
+  const sourceFileBaseName = path.basename(sourceFile.path, path.extname(sourceFile.path));
+
+  // Check for corresponding file in subdirectories or parent directories
+  return targetFiles.find(f => {
+    if (f.locale !== targetLocale) return false;
+
+    // Handle cases where files are in different subdirectories
+    const targetDirParts = path.dirname(f.path).split(path.sep);
+    const targetFileBaseName = path.basename(f.path, path.extname(f.path));
+
+    if (
+      sourceFileBaseName === sourceLocale &&
+      targetFileBaseName === targetLocale &&
+      sourceDirParts.length === targetDirParts.length
+    ) {
+      return true;
+    }
+
+    // Nested directory structure
+    if (sourceDirParts.includes(sourceLocale) && targetDirParts.includes(targetLocale)) {
+      const sourceBasePath = sourceDirParts.slice(0, sourceDirParts.indexOf(sourceLocale)).join(path.sep);
+      const targetBasePath = targetDirParts.slice(0, targetDirParts.indexOf(targetLocale)).join(path.sep);
+
+      return sourceBasePath === targetBasePath &&
+        sourceFileBaseName === targetFileBaseName;
+    }
+
+    return false;
+  });
 }
 
 export function generateTargetPath(sourceFile, targetLocale, sourceLocale) {
@@ -195,7 +237,6 @@ export function generateTargetPath(sourceFile, targetLocale, sourceLocale) {
   // construct the target path by replacing the locale in the filename only
   const dirPath = path.dirname(sourceFile.path);
   const fileName = path.basename(sourceFile.path);
-  // Use regex to match the exact locale string to avoid partial matches
   const localeRegex = new RegExp(`\\b${sourceLocale}\\b`, 'g');
   const newFileName = fileName.replace(localeRegex, targetLocale);
   return path.join(dirPath, newFileName);
