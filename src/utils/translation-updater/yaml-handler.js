@@ -32,15 +32,6 @@ function detectYamlOptions(content) {
   return options;
 }
 
-function detectQuoteStyleFromNode(node) {
-  if (node && typeof node.value === 'string') {
-    return node.type === 'QUOTE_DOUBLE' ? 'QUOTE_DOUBLE' :
-      node.type === 'QUOTE_SINGLE' ? 'QUOTE_SINGLE' :
-        null;
-  }
-  return null;
-}
-
 function needsQuotes(str) {
   if (typeof str !== 'string') return false;
 

@@ -36,7 +36,7 @@ on:
     paths:
       ${translationPaths.map(p => {
       // Check if path already contains a file pattern (*, ?, or {})
-      const hasPattern = /[\*\?\{\}]/.test(p);
+      const hasPattern = /[*?{}]/.test(p);
       // If it has a pattern, use it as is; otherwise, append /**
       const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
       return `- "${formattedPath}"`;
