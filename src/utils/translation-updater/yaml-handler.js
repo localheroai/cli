@@ -2,8 +2,8 @@ import { promises as fs } from 'fs';
 import yaml from 'yaml';
 import { SPECIAL_CHARS_REGEX, INTERPOLATION, fileExists, tryParseJsonArray } from './common.js';
 
-// Characters that typically require quotes in YAML
 const NEEDS_QUOTES_REGEX = /[:,%{}[\]|><!&*?-]/;
+const LINE_WIDTH = 80;
 
 function detectYamlOptions(content) {
   const lines = content
@@ -41,49 +41,22 @@ function detectQuoteStyleFromNode(node) {
   return null;
 }
 
-function detectArrayQuoteStyle(yamlDoc, parentNode, key) {
-  if (parentNode && parentNode.has(key)) {
-    const existingNode = parentNode.get(key);
-    if (existingNode && existingNode.items && existingNode.items.length > 0) {
-      for (const item of existingNode.items) {
-        const style = detectQuoteStyleFromNode(item);
-        if (style) return style;
-      }
-    }
-  }
-  return null;
-}
-
-/**
- * Determines if a string needs quotes based on YAML syntax rules
- * @param {string} str - The string to check
- * @returns {boolean} - Whether the string needs quotes
- */
 function needsQuotes(str) {
   if (typeof str !== 'string') return false;
 
   return (
-    // Special characters from common.js
     SPECIAL_CHARS_REGEX.test(str) ||
-    // Interpolation variables
     str.includes(INTERPOLATION) ||
-    // YAML syntax special characters
     NEEDS_QUOTES_REGEX.test(str) ||
-    // Strings with spaces AND additional problematic characters
     (str.includes(' ') && /[:"']/g.test(str))
   );
 }
 
-/**
- * Special case handling for quoting logic that matches test expectations
- * @param {string} str - The string to check
- * @returns {boolean} - Whether to force quotes
- */
 function shouldForceQuotes(str) {
   if (typeof str !== 'string') return false;
 
   // Special case: strings containing quotes but no interpolation
-  // don't need outer quotes in test expectations
+  // don't need outer quotes
   if (str.includes('"') && !str.includes(INTERPOLATION)) {
     return false;
   }
@@ -107,13 +80,15 @@ async function createYamlDocument(filePath) {
     console.warn(`Creating new file: ${filePath}`);
     const doc = new yaml.Document();
     doc.contents = doc.createNode({});
-    return { doc, created: true, options: { indent: 2, indentSeq: true } };
+    return { doc, created: true, options: { indent: 2, indentSeq: true, lineWidth: LINE_WIDTH } };
   }
 
   const content = await fs.readFile(filePath, 'utf8');
   const options = detectYamlOptions(content);
+  const doc = yaml.parseDocument(content);
+  doc.options.lineWidth = LINE_WIDTH;
   return {
-    doc: yaml.parseDocument(content),
+    doc,
     created: false,
     options
   };
@@ -182,6 +157,7 @@ export async function updateYamlFile(filePath, translations, languageCode) {
 
   yamlDoc.options.indent = options.indent;
   yamlDoc.options.indentSeq = options.indentSeq;
+  yamlDoc.options.lineWidth = LINE_WIDTH;
 
   await fs.writeFile(filePath, yamlDoc.toString());
   return {
