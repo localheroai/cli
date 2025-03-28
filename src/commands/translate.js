@@ -76,6 +76,11 @@ export async function translate(options = {}, deps = defaultDeps) {
 
   if (sourceFiles.length === 0) {
     console.error(chalk.red(`\n✖ No source files found for locale ${config.sourceLocale}\n`));
+    console.error(chalk.yellow(`This could be due to one of the following issues:`));
+    console.error(chalk.yellow(`  1. No translation files with the source locale "${config.sourceLocale}" exist in the configured paths`));
+    console.error(chalk.yellow(`  2. The locale identifiers in your filenames don't match the expected pattern`));
+    console.error(chalk.yellow(`  3. There was an error parsing one or more files (check for syntax errors in YAML or JSON)\n`));
+    console.error(chalk.yellow(`Try running with the --verbose flag for more detailed information.\n`));
     process.exit(1);
   }
 

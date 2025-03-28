@@ -5,14 +5,22 @@ import path from 'path';
 import yaml from 'yaml';
 import { promises as fs } from 'fs';
 
-export function parseFile(content, format) {
+export function parseFile(content, format, filePath = '') {
   try {
     if (format === 'json') {
-      return JSON.parse(content);
+      try {
+        return JSON.parse(content);
+      } catch (jsonError) {
+        const errorInfo = jsonError.message.match(/at position (\d+)/)
+          ? jsonError.message
+          : `${jsonError.message} (check for missing commas, quotes, or brackets)`;
+        throw new Error(errorInfo);
+      }
     }
     return yaml.parse(content);
   } catch (error) {
-    throw new Error(`Failed to parse ${format} file: ${error.message}`);
+    const location = filePath ? ` in ${filePath}` : '';
+    throw new Error(`Failed to parse ${format} file${location}: ${error.message}`);
   }
 }
 
@@ -270,7 +278,7 @@ export async function findTranslationFiles(config, options = {}) {
 
         if (parseContent) {
           const content = await readFile(filePath, 'utf8');
-          const parsedContent = parseFile(content, format);
+          const parsedContent = parseFile(content, format, filePath);
 
           if (includeContent) {
             result.content = Buffer.from(content).toString('base64');
@@ -291,7 +299,18 @@ export async function findTranslationFiles(config, options = {}) {
 
         processedFiles.push(result);
       } catch (error) {
-        if (verbose) {
+        if (error.message.includes('Failed to parse') ||
+          error.message.includes('JSON') ||
+          error.message.includes('Unexpected token') ||
+          error.message.includes('Missing closing')) {
+          console.warn(chalk.yellow(`\nWarning: ${error.message}`));
+
+          if (format === 'json') {
+            console.warn(chalk.gray('  Tip: Check for missing commas, quotes, or brackets in your JSON file.'));
+          } else if (format === 'yml' || format === 'yaml') {
+            console.warn(chalk.gray('  Tip: Check for proper indentation and quote matching in your YAML file.'));
+          }
+        } else if (verbose) {
           console.warn(chalk.yellow(`Warning: ${error.message}`));
         }
       }
