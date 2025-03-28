@@ -305,6 +305,7 @@ export async function findTranslationFiles(config, options = {}) {
           error.message.includes('Missing closing')) {
           console.warn(chalk.yellow(`\nWarning: ${error.message}`));
 
+          const format = path.extname(file).slice(1);
           if (format === 'json') {
             console.warn(chalk.gray('  Tip: Check for missing commas, quotes, or brackets in your JSON file.'));
           } else if (format === 'yml' || format === 'yaml') {
