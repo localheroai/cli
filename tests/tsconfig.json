@@ -1,0 +1,17 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "strict": false,
+    "noImplicitAny": false,
+    "isolatedModules": true,
+    "rootDir": "..",
+    "types": ["jest", "node"]
+  },
+  "include": [
+    "**/*.ts",
+    "jest.d.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

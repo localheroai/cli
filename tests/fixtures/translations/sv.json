@@ -1,0 +1,23 @@
+{
+  "common": {
+    "buttons": {
+      "submit": "Skicka",
+      "cancel": "Avbryt",
+      "save": "Spara"
+    },
+    "messages": {
+      "success": "Operationen lyckades",
+      "error": "Ett fel uppstod"
+    }
+  },
+  "auth": {
+    "login": "Logga in",
+    "signup": "Registrera dig"
+  },
+  "dashboard": {
+    "welcome": "Välkommen tillbaka",
+    "stats": {
+      "projects": "Projekt"
+    }
+  }
+}

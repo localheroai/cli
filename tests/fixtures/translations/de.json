@@ -1,0 +1,13 @@
+{
+  "de": {
+    "common.buttons.submit": "Senden",
+    "common.buttons.cancel": "Abbrechen",
+    "common.buttons.save": "Speichern",
+    "common.messages.success": "Operation erfolgreich",
+    "common.messages.error": "Ein Fehler ist aufgetreten",
+    "auth.login": "Anmelden",
+    "auth.signup": "Registrieren",
+    "dashboard.welcome": "Willkommen zurück",
+    "dashboard.stats.projects": "Projekte"
+  }
+}

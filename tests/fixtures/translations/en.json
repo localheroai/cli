@@ -1,0 +1,25 @@
+{
+  "common": {
+    "buttons": {
+      "submit": "Submit",
+      "cancel": "Cancel",
+      "save": "Save"
+    },
+    "messages": {
+      "success": "Operation successful",
+      "error": "An error occurred"
+    }
+  },
+  "auth": {
+    "login": "Log in",
+    "signup": "Sign up",
+    "forgotPassword": "Forgot password?"
+  },
+  "dashboard": {
+    "welcome": "Welcome back",
+    "stats": {
+      "projects": "Projects",
+      "translations": "Translations"
+    }
+  }
+}
