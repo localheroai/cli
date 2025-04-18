@@ -13,9 +13,9 @@ LocalHero.ai is an AI-powered I18n translation service that seamlessly integrate
 
 ## Getting Started 🏁
 
-1. Sign up for a free trial at [localhero.ai](https://localhero.ai/) (currently closed beta, get in touch if you are interested in trying it out)
+1. Sign up for a free trial at [localhero.ai](https://localhero.ai/).
 2. Get your API key from [localhero.ai/api-keys](https://localhero.ai/api-keys)
-3. Run the init command in your project:
+3. Run the init command in your project to setup the configuration:
    ```bash
    npx @localheroai/cli init
    ```
@@ -29,6 +29,7 @@ npx @localheroai/cli init
 ```
 
 The init command helps you set up your project with LocalHero.ai. It will:
+- Setup your API key if it hasn't been done already
 - Detect your project type (Rails, React, or generic)
 - Link to an existing LocalHero.ai project
 - Configure translation paths and file patterns
@@ -49,7 +50,9 @@ The configuration file is used by the tool to interact with your translations an
 npx @localheroai/cli login
 ```
 
-Authenticate with your LocalHero.ai account. Use this when:
+Authenticate with the API using your API key.  This will save your API key to `.localhero_key` and add the file to .gitignore if needed.
+
+Use this when:
 - Setting up a new development environment
 - Updating your API key
 - Verifying your authentication status
@@ -63,9 +66,25 @@ npx @localheroai/cli translate
 Translating your missing keys:
 - Automatically detects missing translations and sends them to the Localhero.ai translation API for translation
 - Updates translation files with any new or update translations
-- It's run manually or by GitHub Actions
+- It's run manually or by GitHub Actions. When run as a GitHub action any new translations are automatically committed to git.
+
+### Pull / push
+
+```bash
+npx @localheroai/cli pull
+```
+
+Pull the latest translation updates from LocalHero.ai to your local files. This command will download any new or modified translations from the service to your local files.
+
+```bash
+npx @localheroai/cli push
+```
+
+Push updates from your local translation files to LocalHero.ai. This command will upload any new or modified translations from your local files to the service.
 
 ## Environment Variables ⚙️
+
+Typically you don't need to set these. The cli will use `LOCALHERO_API_KEY` if it's set, otherwise it will check the file `.localhero_key` for a API key.
 
 Configure the CLI behavior with these environment variables:
 
@@ -84,14 +103,13 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
    - Add your API key as the value
 
 2. The workflow will:
-   - Run on push to your main branch
-   - Check for missing translations
-   - Create a pull request with new translations
+   - Run on push to pull requests
+   - Check for missing translations and add new/updated translations to the repo.
 
 ## Support 💬
 
-- Documentation: [localhero.ai/docs](https://docs.localhero.ai/docs)
-- Email: support@localhero.ai
+- Documentation: [localhero.ai/docs](https://localhero.ai/docs)
+- Email: hi@localhero.ai
 
 ## License 📄
 
