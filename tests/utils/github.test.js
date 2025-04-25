@@ -57,7 +57,7 @@ describe('github module', () => {
       // Verify file content
       expect(mockFs.writeFile).toHaveBeenCalledTimes(1);
       const fileContent = mockFs.writeFile.mock.calls[0][1];
-      expect(fileContent).toContain('name: Localhero.ai - I18n translation');
+      expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
       expect(fileContent).toContain('run: npx -y @localheroai/cli translate');
