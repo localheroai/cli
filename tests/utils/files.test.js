@@ -962,6 +962,44 @@ en:
 
       expect(unflattenTranslations(flat)).toEqual(expected);
     });
+
+    it('handles empty YAML files and null/undefined values correctly', () => {
+      const emptyYamlContent = { nb: null };
+      expect(flattenTranslations(emptyYamlContent)).toEqual({ nb: null });
+
+      const contentWithUndefined = {
+        messages: {
+          greeting: undefined,
+          nested: {
+            value: undefined
+          }
+        }
+      };
+      expect(flattenTranslations(contentWithUndefined)).toEqual({
+        'messages.greeting': undefined,
+        'messages.nested.value': undefined
+      });
+
+      expect(flattenTranslations(null)).toEqual({});
+      expect(flattenTranslations(undefined)).toEqual({});
+
+      const mixedContent = {
+        title: 'Hello',
+        subtitle: null,
+        meta: {
+          author: undefined,
+          tags: ['a', 'b'],
+          details: null
+        }
+      };
+      expect(flattenTranslations(mixedContent)).toEqual({
+        'title': 'Hello',
+        'subtitle': null,
+        'meta.author': undefined,
+        'meta.tags': ['a', 'b'],
+        'meta.details': null
+      });
+    });
   });
 
   describe('preserveJsonStructure', () => {
