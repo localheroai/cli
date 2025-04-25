@@ -76,7 +76,7 @@ export const githubService = {
 
     await fs.mkdir(workflowDir, { recursive: true });
 
-    const actionContent = `name: Localhero.ai - I18n translation
+    const actionContent = `name: Localhero.ai - Automatic I18n translation
 
 on:
   pull_request:
