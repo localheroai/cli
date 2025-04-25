@@ -73,7 +73,7 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
     data = await response.json();
   } catch (error) {
     const parseError = error as Error;
-    const message = 'Failed to parse API response';
+    const message = 'Failed to parse API response. Error: ' + error ;
     parseError.message = message;
     (parseError as any).cliErrorMessage = message;
     throw parseError;
