@@ -484,6 +484,55 @@ describe('translation-utils', () => {
       expect(content.keys.object.value).toBe('test');
       expect(content.keys.complex.value).toBe('{"nested":{"deep":"value"}}');
     });
+
+    it('splits large batches into chunks of max 100 items', async () => {
+      const sourceFiles = [
+        {
+          path: 'locales/en.json',
+          format: 'json'
+        }
+      ];
+
+      const missingKeys = {};
+      for (let i = 1; i <= 250; i++) {
+        missingKeys[`key${i}`] = `Value ${i}`;
+      }
+
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: missingKeys
+        }
+      };
+
+      const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale);
+
+      expect(errors).toEqual([]);
+      expect(batches).toHaveLength(3);
+
+      const batchSizes = batches.map(batch =>
+        Object.keys(JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString()).keys).length
+      );
+      expect(batchSizes[0]).toBe(100);
+      expect(batchSizes[1]).toBe(100);
+      expect(batchSizes[2]).toBe(50);
+
+      batches.forEach(batch => {
+        expect(batch.sourceFilePath).toBe('locales/en.json');
+        expect(batch.sourceFile.format).toBe('json');
+        expect(batch.locales).toEqual(['fr']);
+        expect(batch.localeEntries).toEqual(['fr:locales/en.json']);
+      });
+
+      const allKeys = new Set();
+      batches.forEach(batch => {
+        const content = JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString());
+        Object.keys(content.keys).forEach(key => allKeys.add(key));
+      });
+      expect(allKeys.size).toBe(250);
+    });
   });
 
   describe('generateTargetPath', () => {

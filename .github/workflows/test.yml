@@ -15,20 +15,32 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Use Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-    
-    - name: Install dependencies
-      run: npm ci
-      
+
+    - name: Install dependencies (skip scripts)
+      run: npm ci --ignore-scripts
+
+    - name: Build
+      run: npm run build
+
+    - name: Fix permissions
+      run: chmod +x dist/cli.js
+
+    - name: Verify output
+      run: |
+        echo "Testing CLI output:"
+        node dist/cli.js --version
+        node dist/cli.js --help
+
     - name: Run linter
       run: npm run lint
-      
+
     - name: Run tests
       run: npm test
       env:
-        LOCALHERO_API_KEY: ${{ secrets.LOCALHERO_API_KEY }} 
+        LOCALHERO_API_KEY: ${{ secrets.LOCALHERO_API_KEY }}

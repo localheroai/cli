@@ -189,6 +189,7 @@ export function batchKeysWithMissing(
   sourceFiles: TranslationFile[],
   missingByLocale: Record<string, MissingLocaleEntry>
 ): BatchResult {
+  const MAX_BATCH_SIZE = 100;
   const batches: TranslationBatch[] = [];
   const errors: BatchError[] = [];
 
@@ -200,6 +201,7 @@ export function batchKeysWithMissing(
 
   const entriesBySourceFile: Record<string, SourceFileData> = {};
 
+  // Group entries by source file
   for (const [localeSourceKey, entry] of Object.entries(missingByLocale)) {
     const { path: sourceFilePath } = entry;
 
@@ -222,6 +224,7 @@ export function batchKeysWithMissing(
     }
   }
 
+  // Process each source file
   for (const [sourceFilePath, data] of Object.entries(entriesBySourceFile)) {
     const sourceFile = sourceFiles.find(f => f.path === sourceFilePath);
 
@@ -234,42 +237,52 @@ export function batchKeysWithMissing(
       continue;
     }
 
-    const contentObj = { keys: {} };
-    for (const [key, translations] of Object.entries(data.keys)) {
-      const value = Object.values(translations)[0];
-      let extractedValue: any;
+    const allKeys = Object.entries(data.keys);
+    const chunkedKeys: Array<Array<[string, Record<string, any>]>> = [];
 
-      if (Array.isArray(value)) {
-        extractedValue = value;
-      } else if (typeof value === 'boolean') {
-        extractedValue = value;
-      } else if (typeof value === 'string') {
-        extractedValue = value;
-      } else if (typeof value === 'object' && value !== null) {
-        if ('value' in value) {
-          extractedValue = value.value;
-        } else {
-          extractedValue = JSON.stringify(value);
-        }
-      } else {
-        extractedValue = String(value);
-      }
-
-      contentObj.keys[key] = {
-        value: extractedValue
-      };
+    for (let i = 0; i < allKeys.length; i += MAX_BATCH_SIZE) {
+      chunkedKeys.push(allKeys.slice(i, i + MAX_BATCH_SIZE));
     }
 
-    batches.push({
-      sourceFilePath,
-      sourceFile: {
-        path: sourceFile.path,
-        format: sourceFile.format,
-        content: Buffer.from(JSON.stringify(contentObj)).toString('base64')
-      },
-      localeEntries: data.localeEntries,
-      locales: Array.from(data.locales)
-    });
+    for (const keyChunk of chunkedKeys) {
+      const contentObj = { keys: {} };
+
+      for (const [key, translations] of keyChunk) {
+        const value = Object.values(translations)[0];
+        let extractedValue: any;
+
+        if (Array.isArray(value)) {
+          extractedValue = value;
+        } else if (typeof value === 'boolean') {
+          extractedValue = value;
+        } else if (typeof value === 'string') {
+          extractedValue = value;
+        } else if (typeof value === 'object' && value !== null) {
+          if ('value' in value) {
+            extractedValue = value.value;
+          } else {
+            extractedValue = JSON.stringify(value);
+          }
+        } else {
+          extractedValue = String(value);
+        }
+
+        contentObj.keys[key] = {
+          value: extractedValue
+        };
+      }
+
+      batches.push({
+        sourceFilePath,
+        sourceFile: {
+          path: sourceFile.path,
+          format: sourceFile.format,
+          content: Buffer.from(JSON.stringify(contentObj)).toString('base64')
+        },
+        localeEntries: data.localeEntries,
+        locales: Array.from(data.locales)
+      });
+    }
   }
 
   return { batches, errors };

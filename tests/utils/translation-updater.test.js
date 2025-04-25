@@ -486,6 +486,70 @@ en:
         expect(hasSubmitButtonComment || hasGreetingComment || hasCancelButtonComment).toBe(true);
       });
     });
+
+    describe('handling malformed YAML files', () => {
+      it('handles files with only language code', async () => {
+        const filePath = path.join(tempDir, 'nb.yml');
+        fs.writeFileSync(filePath, 'nb:');
+
+        const translations = {
+          'greeting': 'Hei',
+          'message': 'Velkommen'
+        };
+
+        const result = await updateTranslationFile(filePath, translations, 'nb');
+
+        expect(result).toEqual({
+          updatedKeys: ['greeting', 'message'],
+          created: false
+        });
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('nb:');
+        expect(content).toContain('greeting: Hei');
+        expect(content).toContain('message: Velkommen');
+      });
+
+      it('handles files with undefined language node', async () => {
+        const filePath = path.join(tempDir, 'nb.yml');
+        fs.writeFileSync(filePath, 'nb:  # Empty language node');
+
+        const translations = {
+          'greeting': 'Hei'
+        };
+
+        const result = await updateTranslationFile(filePath, translations, 'nb');
+
+        expect(result).toEqual({
+          updatedKeys: ['greeting'],
+          created: false
+        });
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('nb:');
+        expect(content).toContain('greeting: Hei');
+      });
+
+      it('handles files with null language node', async () => {
+        const filePath = path.join(tempDir, 'nb.yml');
+        fs.writeFileSync(filePath, 'nb: null');
+
+        const translations = {
+          'greeting': 'Hei'
+        };
+
+        const result = await updateTranslationFile(filePath, translations, 'nb');
+
+        expect(result).toEqual({
+          updatedKeys: ['greeting'],
+          created: false
+        });
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('nb:');
+        expect(content).toContain('greeting: Hei');
+      });
+    });
   });
 
   describe('deleteKeysFromTranslationFile', () => {

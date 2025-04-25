@@ -240,16 +240,23 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
   } catch (error) {
     if (error instanceof ApiResponseError) {
-      console.error(chalk.red(`\n✖ Error processing translation jobs: ${error.cliErrorMessage || error.message}`));
+      console.error(chalk.red(`\n✖ API error processing translation jobs: ${error.cliErrorMessage || error.message}`));
       if (error.details) {
         console.error(chalk.red(`  ${error.details}`));
       }
     } else {
       // Handle any other type of error
       const err = error as Error;
-      console.error(chalk.red(`\n✖ Error processing translation jobs: ${err.message}\n`));
-      if (err.stack && process.env.DEBUG) {
-        console.error(chalk.dim(err.stack));
+      console.error(chalk.red(`\n✖ Error processing translation jobs: ${err.message}`));
+      if (err.stack) {
+        const stackLines = err.stack.split('\n').slice(1);
+        console.error(chalk.dim('\nStack trace:'));
+        stackLines.forEach(line => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith(' at ')) {
+            console.error(chalk.dim(trimmed));
+          }
+        });
       }
     }
     process.exit(1);

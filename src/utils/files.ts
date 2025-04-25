@@ -88,14 +88,21 @@ export function isValidLocale(locale: string): boolean {
 
 /**
  * Flatten a nested object into dot notation
+ * Handles null/undefined values by returning an empty object
  */
-export function flattenTranslations(obj: Record<string, any>, parentKey: string = ''): Record<string, any> {
+export function flattenTranslations(obj: Record<string, any> | null | undefined, parentKey: string = ''): Record<string, any> {
   const result: Record<string, any> = {};
+
+  if (!obj) {
+    return result;
+  }
 
   for (const [key, value] of Object.entries(obj)) {
     const newKey = parentKey ? `${parentKey}.${key}` : key;
 
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (value === null || value === undefined) {
+      result[newKey] = value;
+    } else if (typeof value === 'object' && !Array.isArray(value)) {
       Object.assign(result, flattenTranslations(value, newKey));
     } else {
       result[newKey] = value;
@@ -332,9 +339,9 @@ export async function findTranslationFiles(
           }
 
           if (extractKeys) {
-            const hasLanguageWrapper = parsedContent[locale] !== undefined;
+            const hasLanguageWrapper = parsedContent && parsedContent[locale] !== undefined;
             result.hasLanguageWrapper = hasLanguageWrapper;
-            const translationData = hasLanguageWrapper ? parsedContent[locale] : parsedContent;
+            const translationData = hasLanguageWrapper ? (parsedContent[locale] || {}) : (parsedContent || {});
             result.translations = translationData;
             const flattened = flattenTranslations(translationData);
             // @ts-expect-error - Keep original behavior for test compatibility
@@ -362,6 +369,7 @@ export async function findTranslationFiles(
           }
         } else if (verbose) {
           console.warn(chalk.yellow(`Warning: ${error.message}`));
+          console.error(chalk.dim(error.stack));
         }
       }
     }

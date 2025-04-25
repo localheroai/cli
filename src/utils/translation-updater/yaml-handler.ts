@@ -119,22 +119,35 @@ async function updateYamlTranslations(
   }
 
   const rootNode = yamlDoc.contents as YamlMap;
-  if (!rootNode.has(languageCode)) {
-    rootNode.set(languageCode, yamlDoc.createNode({}));
+  if (!yaml.isMap(rootNode)) {
+    throw new Error('Invalid YAML structure: root node must be a mapping');
   }
 
-  const langNode = rootNode.get(languageCode) as YamlMap;
+  let langNode = rootNode.get(languageCode) as YamlMap;
+
+  if (!langNode || !yaml.isMap(langNode)) {
+    langNode = yamlDoc.createNode({}) as YamlMap;
+    rootNode.set(languageCode, langNode);
+  }
 
   for (const [keyPath, newValue] of Object.entries(translations)) {
     const keys = keyPath.split('.');
-    let current = langNode as YamlMap;
+    let current = langNode;
 
     for (let i = 0; i < keys.length - 1; i++) {
       const key = keys[i];
       if (!current.has(key)) {
         current.set(key, yamlDoc.createNode({}));
       }
-      current = current.get(key) as YamlMap;
+      const nextNode = current.get(key);
+      if (!yaml.isMap(nextNode)) {
+        // If the existing node is not a mapping, replace it with an empty mapping
+        const newNode = yamlDoc.createNode({}) as YamlMap;
+        current.set(key, newNode);
+        current = newNode;
+      } else {
+        current = nextNode as YamlMap;
+      }
     }
 
     const lastKey = keys[keys.length - 1];
