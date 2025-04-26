@@ -77,7 +77,8 @@ export function findMissingTranslations(
     }
 
     if (typeof details === 'boolean') {
-      if (!targetKeys[key]) {
+      const targetValue = targetKeys[key];
+      if (targetValue === undefined || (typeof targetValue === 'object' && !('value' in targetValue))) {
         missingKeys[key] = {
           value: details,
           sourceKey: key

@@ -30,10 +30,14 @@ describe('translation-utils', () => {
       const sourceKeys = {
         'app.utils.show_wizard': true,
         'app.utils.skip_wizard': false,
-        'app.utils.display_help': { value: true }
+        'app.utils.display_help': { value: true },
+        'app.utils.hide_help': { value: false }
       };
 
-      const targetKeys = {};
+      const targetKeys = {
+        'app.utils.skip_wizard': false,
+        'app.utils.hide_help': { value: false }
+      };
 
       const result = findMissingTranslations(sourceKeys, targetKeys);
 
@@ -42,16 +46,14 @@ describe('translation-utils', () => {
           value: true,
           sourceKey: 'app.utils.show_wizard'
         },
-        'app.utils.skip_wizard': {
-          value: false,
-          sourceKey: 'app.utils.skip_wizard'
-        },
         'app.utils.display_help': {
           value: true,
           sourceKey: 'app.utils.display_help'
         }
       });
       expect(result.skippedKeys).toEqual({});
+      expect(result.missingKeys['app.utils.skip_wizard']).toBeUndefined();
+      expect(result.missingKeys['app.utils.hide_help']).toBeUndefined();
     });
 
     it('should skip WIP keys with wip_ prefix', () => {
