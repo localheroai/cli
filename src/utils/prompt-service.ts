@@ -2,6 +2,10 @@ import { createPrompt, useState, useKeypress, usePrefix, isEnterKey } from '@inq
 import chalk from 'chalk';
 
 /**
+ * Prompt service for handling CLI interactions with the user
+ */
+
+/**
  * Options for select prompts
  */
 export interface SelectOptions {
@@ -20,6 +24,7 @@ export interface InputOptions {
   message: string;
   default?: string;
   hint?: string;
+  transformer?: (input: string, answers?: any, flags?: any) => string;
 }
 
 /**
@@ -160,7 +165,16 @@ export function createPromptService(deps: PromptServiceDependencies = {}) {
      */
     async input(options: InputOptions): Promise<string> {
       if (!inquirer) return '';
-      return inquirer.input(options);
+
+      if (!options.hint) {
+        return inquirer.input(options);
+      }
+
+      return inputWithHint({
+        message: options.message,
+        hint: options.hint,
+        default: options.default
+      });
     },
 
     /**
