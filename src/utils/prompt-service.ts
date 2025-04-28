@@ -1,6 +1,5 @@
-/**
- * Prompt service for handling CLI interactions with the user
- */
+import { createPrompt, useState, useKeypress, usePrefix, isEnterKey } from '@inquirer/core';
+import chalk from 'chalk';
 
 /**
  * Options for select prompts
@@ -73,6 +72,33 @@ export interface PromptServiceDependencies {
     confirm: (options: ConfirmOptions) => Promise<boolean>;
   } | null;
 }
+
+/**
+ * Custom input prompt with hint support
+ */
+const inputWithHint = createPrompt<string, { message: string; hint?: string; default?: string }>((config, done) => {
+  const [value, setValue] = useState(config.default || '');
+  const [status, setStatus] = useState<'pending' | 'done'>('pending');
+  const prefix = usePrefix({ status });
+
+  useKeypress(async (key, rl) => {
+    if (isEnterKey(key)) {
+      const finalValue = value || config.default || '';
+      setStatus('done');
+      done(finalValue);
+    } else {
+      setValue(rl.line);
+    }
+  });
+
+  const message = chalk.bold(config.message);
+  const hint = config.hint ? `${chalk.dim(config.hint)}` : '';
+
+  return [
+    `${prefix} ${message} ${value}`,
+    hint ? `${hint}` : ''
+  ];
+});
 
 /**
  * Creates a prompt service for handling CLI interactions

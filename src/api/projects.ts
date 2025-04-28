@@ -11,6 +11,7 @@ export interface ProjectDetails {
   target_languages: string[];
   created_at: string;
   updated_at: string;
+  url: string;
 }
 
 /**

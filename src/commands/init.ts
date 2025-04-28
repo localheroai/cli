@@ -66,6 +66,7 @@ interface InitAnswers {
   filePattern?: string;
   ignorePaths?: string[];
   newProject?: boolean;
+  url?: string | null;
 }
 
 const PROJECT_TYPES: ProjectTypes = {
@@ -257,7 +258,8 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
           type,
           defaults: {
             ...config.defaults,
-            translationPath: `${translationPath}/`
+            translationPath: `${translationPath}/`,
+            commonPaths: config.commonPaths
           }
         };
       }
@@ -300,6 +302,7 @@ async function promptForConfig(
   }
   let projectId = projectChoice;
   let newProject: ProjectDetails | null = null;
+  let projectUrl: string | null = null;
   let config = await promptService.getProjectSetup();
 
   if (!existingProject) {
@@ -309,27 +312,15 @@ async function promptForConfig(
         default: path.basename(process.cwd()),
       }),
       sourceLocale: await promptService.input({
-        message: 'Source language - the language that we will translate from:',
+        message: 'Source language locale:',
         default: 'en',
-        hint: 'Examples: "en" for en.json/en.yml, "en-US" for en-US.json, or directory name like "en" in /locales/en/common.json'
+        hint: '\nThis is the language we will translate FROM. Enter the locale code as it appears in your I18n files. Examples:\n\n  Framework    File Structure                   Enter\n  -----------  --------------------------------  --------\n  Rails        config/locales/en.yml             en\n  React        locales/en_GB.json                en_GB\n  Next.js      public/locales/en-US/common.json  en-US\n'
       }),
       outputLocales: (await promptService.input({
-        message: 'Target languages (comma-separated):',
-        hint: 'Must match your file names or directory names exactly. Examples: en.json → "en", fr-CA.json → "fr-CA", /locales/de/ → "de"'
+        message: 'Target language locales (comma-separated):',
+        hint: '\nThese are the languages we will translate TO. Enter locale codes as they appear in your files:\n\n  Pattern Type        Target Files                      Enter\n  ------------------  --------------------------------  --------------------\n  Basic               de.json, fr.json, es.json          de,fr,es\n  Region-specific     fr-CA.json, es-MX.json, de-AT.json fr-CA,es-MX,de-AT\n  Directory-based     /locales/ja/, /locales/zh/         ja,zh\n'
       })).split(',').map(lang => lang.trim()).filter(Boolean)
     };
-
-    try {
-      newProject = await projectService.createProject({
-        name: config.projectName,
-        sourceLocale: config.sourceLocale,
-        targetLocales: config.outputLocales
-      });
-      projectId = newProject.id;
-    } catch (error: any) {
-      console.log(chalk.red(`\n✗ Failed to create project: ${error.message}`));
-      return null;
-    }
   } else {
     config = {
       projectName: existingProject.name,
@@ -338,7 +329,7 @@ async function promptForConfig(
     };
   }
 
-  const commonPaths = projectDefaults.defaults.commonPaths || PROJECT_TYPES.generic.commonPaths || [];
+  const commonPaths = projectDefaults.defaults.commonPaths || [];
   const existingDirs: string[] = [];
 
   for (const dir of commonPaths) {
@@ -347,11 +338,12 @@ async function promptForConfig(
     }
   }
 
-  let dirHint = `Directory containing your translation files for ${projectDefaults.type || 'your'} project`;
+  let dirHint = `\nEnter the directory containing the I18n translation files for your ${projectDefaults.type} project.`;
+
   if (existingDirs.length > 0) {
-    dirHint += `. Found existing directories: ${existingDirs.map(d => `"${d}/"`).join(', ')}`;
+    dirHint += `\n  Found existing directories:\n  • ${existingDirs.map(d => `${d}/`).join('\n  • ')}\n`;
   } else {
-    dirHint += `. Common paths: ${commonPaths.slice(0, 3).map(d => `"${d}/"`).join(', ')}`;
+    dirHint += `\n  Common paths:\n  • ${commonPaths.slice(0, 3).map(d => `${d}/`).join('\n  • ')}\n`;
   }
 
   const translationPath = await promptService.input({
@@ -375,8 +367,26 @@ async function promptForConfig(
 
   const ignorePaths = await promptService.input({
     message: 'Paths to ignore (comma-separated, leave empty for none):',
-    hint: 'Example: "locales/ignored,locales/temp"'
+    hint: '  Example: locales/ignored,locales/temp'
   });
+
+  if (!existingProject) {
+    try {
+      newProject = await projectService.createProject({
+        name: config.projectName,
+        sourceLocale: config.sourceLocale,
+        targetLocales: config.outputLocales
+      });
+      projectId = newProject.id;
+      projectUrl = newProject.url;
+    } catch (error: any) {
+      console.log(chalk.red(`\n✗ Failed to create project: ${error.message}`));
+      return null;
+    }
+  } else {
+    projectId = existingProject.id;
+    projectUrl = existingProject.url;
+  }
 
   return {
     projectId,
@@ -385,7 +395,8 @@ async function promptForConfig(
     translationPath,
     filePattern,
     ignorePaths: ignorePaths.split(',').map(p => p.trim()).filter(Boolean),
-    newProject: !existingProject
+    newProject: !existingProject,
+    url: projectUrl
   };
 }
 
@@ -400,7 +411,6 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     projectApi = { createProject, listProjects },
     login: loginFn = login
   } = deps;
-
   const existingConfig = await configUtils.getProjectConfig(basePath);
   if (existingConfig) {
     console.log(chalk.yellow('Existing configuration found in localhero.json. Skipping initialization.'));
@@ -426,7 +436,6 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
 
   const projectDefaults = await detectProjectType();
   const answers: InitAnswers | null = await promptForConfig(projectDefaults, projectApi, promptService, console);
-
   if (!answers) {
     return;
   }
@@ -448,12 +457,8 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
   console.log(chalk.green('\n✓ Created localhero.json'));
 
   if (answers.newProject) {
-    console.log(chalk.green(`✓ Project created, view it at: https://localhero.ai/projects/${answers.projectId}`));
+    console.log(chalk.green(`✓ Project created, view it at: ${answers.url}`));
   }
-
-  console.log('Configuration:');
-  console.log(JSON.stringify(config, null, 2));
-  console.log(' ');
 
   if (!workflowExists(basePath)) {
     const shouldSetupGitHubAction = await promptService.confirm({

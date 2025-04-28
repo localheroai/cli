@@ -24,7 +24,7 @@ describe('init command', () => {
   }
 
   beforeEach(() => {
-    mockConsole = { log: jest.fn() };
+    mockConsole = { log: jest.fn(), warn: console.warn };
     configUtils = {
       getProjectConfig: jest.fn(),
       saveProjectConfig: jest.fn().mockResolvedValue(true),
@@ -98,7 +98,8 @@ describe('init command', () => {
       .mockResolvedValueOnce('');
     projectApi.createProject.mockResolvedValue({
       id: 'proj_123',
-      name: 'test-project'
+      name: 'test-project',
+      url: 'https://localhero.ai/organizations/123'
     });
     promptService.confirm
       .mockResolvedValueOnce(false)
@@ -120,7 +121,7 @@ describe('init command', () => {
 
     const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
     expect(allConsoleOutput).toContain('✓ Created localhero.json');
-    expect(allConsoleOutput).toContain('https://localhero.ai/projects/proj_123');
+    expect(allConsoleOutput).toContain('https://localhero.ai/organizations/123');
   });
 
   it('handles project creation failure gracefully', async () => {
