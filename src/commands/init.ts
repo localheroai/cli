@@ -457,7 +457,7 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
   console.log(chalk.green('\n✓ Created localhero.json'));
 
   if (answers.newProject) {
-    console.log(chalk.green(`✓ Project created, view it at: ${answers.url}`));
+    console.log(chalk.green(`✓ Project created, view it at: ${answers.url}\n`));
   }
 
   if (!workflowExists(basePath)) {

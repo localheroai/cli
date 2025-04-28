@@ -82,15 +82,23 @@ export interface PromptServiceDependencies {
  * Custom input prompt with hint support
  */
 const inputWithHint = createPrompt<string, { message: string; hint?: string; default?: string }>((config, done) => {
-  const [value, setValue] = useState(config.default || '');
+  const [value, setValue] = useState('');
+  const [defaultValue, setDefaultValue] = useState(config.default);
   const [status, setStatus] = useState<'pending' | 'done'>('pending');
   const prefix = usePrefix({ status });
 
   useKeypress(async (key, rl) => {
     if (isEnterKey(key)) {
-      const finalValue = value || config.default || '';
+      const finalValue = value || defaultValue || '';
       setStatus('done');
       done(finalValue);
+    } else if (key.name === 'backspace' && !value) {
+      setDefaultValue(undefined);
+    } else if (key.name === 'tab' && !value && defaultValue) {
+      setDefaultValue(undefined);
+      rl.clearLine(0);
+      rl.write(defaultValue);
+      setValue(defaultValue);
     } else {
       setValue(rl.line);
     }
@@ -99,8 +107,13 @@ const inputWithHint = createPrompt<string, { message: string; hint?: string; def
   const message = chalk.bold(config.message);
   const hint = config.hint ? `${chalk.dim(config.hint)}` : '';
 
+  let defaultStr;
+  if (defaultValue && status === 'pending' && !value) {
+    defaultStr = chalk.dim(`(${defaultValue})`);
+  }
+
   return [
-    `${prefix} ${message} ${value}`,
+    [prefix, message, defaultStr, value].filter(Boolean).join(' '),
     hint ? `${hint}` : ''
   ];
 });
