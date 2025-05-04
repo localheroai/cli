@@ -57,11 +57,14 @@ program
   .version(getVersion())
   .option('--debug', 'Show debug information when errors occur')
   .action(() => {
-    console.log('LocalHero.ai is automatic I18n translations service that easily integrates with your dev workflow.');
+    console.log('LocalHero.ai is an automatic I18n translation service that easily integrates with your dev workflow.');
     console.log(`\nVersion: ${getVersion()}`);
-    console.log('\n🔗 Visit https://localhero.ai for more information');
-    console.log('👏 Set up your project with `npx @localheroai/cli init`');
+    console.log('\n👏 Set up your project with `npx @localheroai/cli init`');
     console.log('💡 Use --help to see available commands');
+    console.log('🔗 Visit https://localhero.ai for more information');
+    console.log('\nWe´re LocalHero.ai, a small, bootstrapped company working to make');
+    console.log('i18n simpler for developers like you. If you have any questions or');
+    console.log('feedback, just reach out to us at hi@localhero.ai. Thanks 🙌');
   });
 
 program
