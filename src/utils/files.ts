@@ -293,9 +293,25 @@ export async function findTranslationFiles(
 
   const processedFiles: TranslationFile[] = [];
 
+  // Adjustment to handle single-item braces, common mistake to use {json} instead of *.json, its not supported by glob
+  const adjustPattern = (originalPattern: string): string => {
+    if (!originalPattern.includes(',')) {
+      const singleItemBraceRegex = /\.\{([^{},]+)\}/g;
+      const newPattern = originalPattern.replace(singleItemBraceRegex, '.$1');
+      if (newPattern !== originalPattern && verbose) {
+        console.log(chalk.blue(`ℹ Adjusted glob pattern from "${originalPattern}" to "${newPattern}" to handle single-item brace notation.`));
+      }
+      return newPattern;
+    }
+
+    return originalPattern;
+  };
+
+  const adjustedPattern = adjustPattern(pattern);
+
   for (const translationPath of paths) {
     const fullPath = path.join(basePath, translationPath);
-    const globPattern = path.join(fullPath, pattern);
+    const globPattern = path.join(fullPath, adjustedPattern);
 
     if (verbose) {
       console.log(chalk.blue(`Searching for translation files in ${globPattern}`));
@@ -305,7 +321,8 @@ export async function findTranslationFiles(
     try {
       files = await glob(globPattern, {
         ignore: ignore.map(i => path.join(basePath, i)),
-        absolute: false
+        absolute: false,
+        follow: true
       });
 
       if (verbose) {
