@@ -79,6 +79,8 @@ export interface TranslationResult {
   uniqueKeysTranslated: Set<string>;
 }
 
+export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 15;
+
 /**
  * Creates a job request object for a batch of translations
  *
@@ -283,11 +285,24 @@ async function processBatch(
   allJobIds.push(...batchJobIds);
 
   const jobSourceMapping = createJobSourceMapping(jobs, sourceFilePath);
+  const jobTries: Record<string, number> = {};
 
   const pendingJobs = new Set(batchJobIds);
   while (pendingJobs.size > 0) {
     const jobPromises = Array.from(pendingJobs).map(async jobId => {
+      jobTries[jobId] = jobTries[jobId] || 0;
+      jobTries[jobId]++;
+
+      if (jobTries[jobId] > MAX_JOB_STATUS_CHECK_ATTEMPTS) {
+        if (verbose) {
+          console.warn(chalk.yellow(`  Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be marked as failed.`));
+        }
+        pendingJobs.delete(jobId);
+        return { jobId, status: 'failed' };
+      }
+
       const jobStatus = await monitorJobStatus(jobId, verbose, translationUtils, console);
+
 
       if (jobStatus.status === 'completed') {
         await applyTranslations(
