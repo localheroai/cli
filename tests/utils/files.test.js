@@ -1157,4 +1157,79 @@ en:
       expect(mockFs.readdir).toHaveBeenCalledWith('/invalid/dir');
     });
   });
+
+  describe('findTranslationFiles', () => {
+    describe('pattern adjustment for single-item braces', () => {
+      beforeEach(() => {
+        mockGlob.mockImplementation((pattern) => {
+          if (pattern.includes('/*.{json}')) {
+            return Promise.resolve([]);
+          }
+          return Promise.resolve([
+            'config/locales/en.json',
+            'config/locales/sv.json'
+          ]);
+        });
+        mockReadFile.mockResolvedValue('{"hello": "Hello"}');
+      });
+
+      it('automatically adjusts single-item brace patterns', async () => {
+        const config = {
+          translationFiles: {
+            paths: ['config/locales/'],
+            pattern: '**/*.{json}',
+          }
+        };
+
+        const result = await findTranslationFiles(config, { verbose: true });
+
+        expect(result).toHaveLength(2);
+        expect(console.log).toHaveBeenCalledWith(
+          expect.stringContaining('Adjusted glob pattern')
+        );
+      });
+
+      it('does not adjust patterns with multiple items in braces', async () => {
+        const config = {
+          translationFiles: {
+            paths: ['config/locales/'],
+            pattern: '**/*.{json,yml}',
+          }
+        };
+
+        await findTranslationFiles(config, { verbose: true });
+
+        expect(console.log).not.toHaveBeenCalledWith(
+          expect.stringContaining('Adjusted glob pattern')
+        );
+      });
+
+      it('handles various single-item brace patterns', async () => {
+        const testCases = [
+          { input: '**/*.{json}', expected: '**/*.json' },
+          { input: '**/*.{yml}', expected: '**/*.yml' },
+          { input: '**/test.{js}', expected: '**/test.js' },
+          { input: '**/*.{json,yml}', expected: '**/*.{json,yml}' },
+          { input: '**/*.json', expected: '**/*.json' },
+        ];
+
+        for (const { input, expected } of testCases) {
+          const config = {
+            translationFiles: {
+              paths: ['config/locales/'],
+              pattern: input,
+            }
+          };
+
+          await findTranslationFiles(config, { verbose: true });
+
+          const globCall = mockGlob.mock.calls.find(call =>
+            call[0].endsWith(expected)
+          );
+          expect(globCall).toBeTruthy();
+          mockGlob.mockClear();
+        }
+      });
+    });
+  });
 });
