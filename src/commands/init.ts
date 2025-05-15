@@ -190,9 +190,10 @@ const PROJECT_TYPES: ProjectTypes = {
       filePattern: '**/*.{json,yml,yaml}'
     },
     commonPaths: [
-      'locales',
       'src/locales',
       'public/locales',
+      'config/locales',
+      'locales',
       'src/i18n',
       'src/translations',
       'src/lang',
@@ -275,6 +276,7 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
       return {
         type: 'detected',
         defaults: {
+          commonPaths: commonPaths,
           translationPath: `${translationPath}/`,
           filePattern: contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0
             ? '**/*.json'
@@ -286,7 +288,10 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
 
   return {
     type: 'generic',
-    defaults: PROJECT_TYPES.generic.defaults
+    defaults: {
+      ...PROJECT_TYPES.generic.defaults,
+      commonPaths: commonPaths
+    }
   };
 }
 
@@ -338,7 +343,8 @@ async function promptForConfig(
     }
   }
 
-  let dirHint = `\nEnter the directory containing the I18n translation files for your ${projectDefaults.type} project.`;
+  const projectTypeName = projectDefaults.type == "generic" ? "project" : `${projectDefaults.type} project`;
+  let dirHint = `\nEnter the directory containing the I18n translation files for your ${projectTypeName}.`;
 
   if (existingDirs.length > 0) {
     dirHint += `\n  Found existing directories:\n  • ${existingDirs.map(d => `${d}/`).join('\n  • ')}\n`;
