@@ -488,6 +488,8 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     default: true
   });
 
+  let hasErrors = false;
+
   if (shouldImport) {
     console.log('\nSearching for translation files in:');
     console.log(`${config.translationFiles.paths.join(', ')}`);
@@ -536,12 +538,16 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
       } else if (importResult.status === 'failed' || importResult.status === 'error') {
         console.log(chalk.red('✗ Failed to import translations'));
         console.log(chalk.red(`Error: ${importResult.error || 'Import failed'}`));
+        hasErrors = true;
       }
     } catch (error: any) {
       console.log(chalk.red('✗ Failed to import translations'));
       console.log(chalk.red(`Error: ${error.message || 'Import failed'}`));
+      hasErrors = true;
     }
   }
 
-  console.log('\n🚀 Done! Start translating with: npx @localheroai/cli translate');
+  if (!hasErrors) {
+    console.log('\n🚀 Done! Start translating with: npx @localheroai/cli translate');
+  }
 }
