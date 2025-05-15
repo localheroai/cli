@@ -367,7 +367,12 @@ export async function findTranslationFiles(
           }
 
           if (extractKeys) {
-            const hasLanguageWrapper = parsedContent && parsedContent[locale] !== undefined;
+            const localeValue = parsedContent && parsedContent[locale];
+            const hasLanguageWrapper =
+              localeValue !== undefined &&
+              typeof localeValue === 'object' &&
+              !Array.isArray(localeValue);
+
             result.hasLanguageWrapper = hasLanguageWrapper;
             const translationData = hasLanguageWrapper ? (parsedContent[locale] || {}) : (parsedContent || {});
             result.translations = translationData;

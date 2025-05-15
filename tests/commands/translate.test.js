@@ -601,6 +601,90 @@ describe('translate command', () => {
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
+  it('correctly handles locale name as a key, not a wrapper', async () => {
+    const sourceFilePath = 'locales/en/common.json';
+
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [{
+        path: sourceFilePath,
+        format: 'json',
+        locale: 'en',
+        content: Buffer.from(JSON.stringify({
+          'language': 'Language',
+          'en': 'en',
+          'someOtherKey': 'Some value'
+        })).toString('base64')
+      }],
+      targetFilesByLocale: {
+        fr: [{
+          path: 'locales/fr/common.json',
+          format: 'json',
+          locale: 'fr',
+          content: Buffer.from(JSON.stringify({
+            'language': 'Langue',
+            'someOtherKey': 'Une valeur'
+          })).toString('base64')
+        }]
+      },
+      allFiles: [
+        { path: sourceFilePath, locale: 'en' },
+        { path: 'locales/fr/common.json', locale: 'fr' }
+      ]
+    });
+
+    translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+      'fr:locales/en/common.json': {
+        locale: 'fr',
+        path: sourceFilePath,
+        targetPath: 'locales/fr/common.json',
+        keys: { 'en': { value: 'en', sourceKey: 'en' } },
+        keyCount: 1
+      }
+    });
+
+    translationUtils.batchKeysWithMissing.mockReturnValue({
+      batches: [{
+        sourceFilePath,
+        sourceFile: {
+          path: sourceFilePath,
+          format: 'json',
+          content: Buffer.from(JSON.stringify({
+            keys: {
+              'en': { value: 'en' }
+            }
+          })).toString('base64')
+        },
+        localeEntries: ['fr:locales/en/common.json'],
+        locales: ['fr']
+      }],
+      errors: []
+    });
+
+    translationUtils.createTranslationJob.mockResolvedValue({
+      jobs: [{ id: 'job-123', language: { code: 'fr' } }]
+    });
+
+    translationUtils.checkJobStatus.mockResolvedValue({
+      status: 'completed',
+      translations: {
+        data: { 'en': 'fr' }
+      },
+      language: { code: 'fr' }
+    });
+
+    await translate({ verbose: true }, createTranslateDeps());
+
+    const jobCall = translationUtils.createTranslationJob.mock.calls[0][0];
+    expect(jobCall.sourceFiles[0].path).toBe(sourceFilePath);
+
+    expect(translationUtils.updateTranslationFile).toHaveBeenCalledWith(
+      'locales/fr/common.json',
+      { 'en': 'fr' },
+      'fr',
+      sourceFilePath
+    );
+  });
+
   it('filters targetPaths to only include locales in the current batch', async () => {
     const sourceFilePath = 'locales/en.json';
 
