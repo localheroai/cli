@@ -255,6 +255,29 @@ en:
           }
         });
       });
+
+      it('filters out null values before updating', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const translations = {
+          'greeting': 'Hello',
+          'message': null,
+          'buttonText': 'Click me',
+          'alert': null
+        };
+
+        const result = await updateTranslationFile(filePath, translations);
+
+        expect(result).toEqual({
+          updatedKeys: ['greeting', 'buttonText'],
+          created: true
+        });
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(content).toContain('greeting: Hello');
+        expect(content).toContain('buttonText: Click me');
+        expect(content).not.toContain('message:');
+        expect(content).not.toContain('alert:');
+      });
     });
 
     describe('multiline string handling', () => {
