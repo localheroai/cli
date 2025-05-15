@@ -27,6 +27,7 @@ function getVersion(): string {
 interface CliError extends Error {
   cliErrorMessage?: string;
   cause?: Error;
+  details?: string;
 }
 
 function handleApiError(error: CliError): never {
@@ -35,8 +36,12 @@ function handleApiError(error: CliError): never {
   if (program.opts().debug) {
     console.error(chalk.dim(error.stack || error));
 
+    if (error.details) {
+      console.error('Details:', chalk.dim(JSON.stringify(error.details, null, 2)));
+    }
+
     if (error.cause) {
-      console.error(chalk.dim(error.cause.stack || error.cause));
+      console.error('Cause:', chalk.dim(error.cause.stack || error.cause));
     }
   } else {
     console.error(chalk.dim('\nRun with --debug for more information'));
