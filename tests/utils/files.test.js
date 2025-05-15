@@ -657,13 +657,14 @@ en:
   it('handles case-insensitive locale detection', async () => {
     mockGlob.mockResolvedValue([
       'apps/project-widget/public/locales/SV/translation.json',
-      'apps/project-widget/public/locales/En/translation.json'
+      'apps/project-widget/public/locales/En/translation.json',
+      'apps/project-widget/public/locales/pt-BR/translation.json'
     ]);
     mockReadFile.mockImplementation(() => Promise.resolve('{"hello": "Hello"}'));
 
     const config = {
       sourceLocale: 'sv',
-      outputLocales: ['en'],
+      outputLocales: ['en', 'pt-BR'],
       translationFiles: {
         paths: ['apps/project-widget/public/locales/']
       }
@@ -677,6 +678,8 @@ en:
     expect(result.sourceFiles[0].locale).toBe('sv');
     expect(result.targetFilesByLocale.en).toHaveLength(1);
     expect(result.targetFilesByLocale.en[0].locale).toBe('en');
+    expect(result.targetFilesByLocale['pt-BR']).toHaveLength(1);
+    expect(result.targetFilesByLocale['pt-BR'][0].locale).toBe('pt-BR');
   });
 
   it('handles both directory-based and filename-based locale detection', async () => {
