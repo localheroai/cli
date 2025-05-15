@@ -6,7 +6,7 @@ import { findTranslationFiles } from './files.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult } from '../types/index.js';
 
-const MAX_PAGES = 20;
+const MAX_PAGES = 50;
 
 interface LanguageUpdate {
   code: string;
