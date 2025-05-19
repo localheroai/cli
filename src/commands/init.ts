@@ -343,7 +343,7 @@ async function promptForConfig(
     }
   }
 
-  const projectTypeName = projectDefaults.type == "generic" ? "project" : `${projectDefaults.type} project`;
+  const projectTypeName = projectDefaults.type == 'generic' ? 'project' : `${projectDefaults.type} project`;
   let dirHint = `\nEnter the directory containing the I18n translation files for your ${projectTypeName}.`;
 
   if (existingDirs.length > 0) {
