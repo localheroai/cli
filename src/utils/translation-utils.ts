@@ -195,7 +195,7 @@ export function batchKeysWithMissing(
   sourceFiles: TranslationFile[],
   missingByLocale: Record<string, MissingLocaleEntry>
 ): BatchResult {
-  const MAX_BATCH_SIZE = 100;
+  const MAX_BATCH_SIZE = 200;
   const batches: TranslationBatch[] = [];
   const errors: BatchError[] = [];
 

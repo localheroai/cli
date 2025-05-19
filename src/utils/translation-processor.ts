@@ -79,7 +79,7 @@ export interface TranslationResult {
   uniqueKeysTranslated: Set<string>;
 }
 
-export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 15;
+export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 25;
 
 /**
  * Creates a job request object for a batch of translations

@@ -496,7 +496,7 @@ describe('translation-utils', () => {
       ];
 
       const missingKeys = {};
-      for (let i = 1; i <= 250; i++) {
+      for (let i = 1; i <= 450; i++) {
         missingKeys[`key${i}`] = `Value ${i}`;
       }
 
@@ -517,8 +517,8 @@ describe('translation-utils', () => {
       const batchSizes = batches.map(batch =>
         Object.keys(JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString()).keys).length
       );
-      expect(batchSizes[0]).toBe(100);
-      expect(batchSizes[1]).toBe(100);
+      expect(batchSizes[0]).toBe(200);
+      expect(batchSizes[1]).toBe(200);
       expect(batchSizes[2]).toBe(50);
 
       batches.forEach(batch => {
@@ -533,7 +533,7 @@ describe('translation-utils', () => {
         const content = JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString());
         Object.keys(content.keys).forEach(key => allKeys.add(key));
       });
-      expect(allKeys.size).toBe(250);
+      expect(allKeys.size).toBe(450);
     });
   });
 
