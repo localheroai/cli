@@ -252,13 +252,15 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       console.error(chalk.red(`\n✖ Error processing translation jobs: ${err.message}`));
       if (err.stack) {
         const stackLines = err.stack.split('\n').slice(1);
-        console.error(chalk.dim('\nStack trace:'));
-        stackLines.forEach(line => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith(' at ')) {
-            console.error(chalk.dim(trimmed));
-          }
-        });
+        if (stackLines && stackLines.length > 0) {
+          console.error(chalk.dim('\nStack trace:'));
+          stackLines.forEach(line => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith(' at ')) {
+              console.error(chalk.dim(trimmed));
+            }
+          });
+        }
       }
     }
     process.exit(1);
