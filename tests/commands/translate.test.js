@@ -53,7 +53,7 @@ describe('translate command', () => {
     translationUtils = {
       createTranslationJob: jest.fn(),
       checkJobStatus: jest.fn(),
-      updateTranslationFile: jest.fn().mockResolvedValue(true),
+      updateTranslationFile: jest.fn().mockResolvedValue({ updatedKeys: ['farewell'] }),
       findMissingTranslations: jest.fn().mockReturnValue({
         missingKeys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
         skippedKeys: {}
@@ -203,6 +203,14 @@ describe('translate command', () => {
   });
 
   it('handles multiple source files', async () => {
+    translationUtils.updateTranslationFile
+      .mockImplementationOnce((targetPath, translations) => {
+        return Promise.resolve({ updatedKeys: ['farewell'], created: false });
+      })
+      .mockImplementationOnce((targetPath, translations) => {
+        return Promise.resolve({ updatedKeys: ['welcome'], created: false });
+      });
+
     const sourceFiles = [
       {
         path: 'locales/en/common.json',

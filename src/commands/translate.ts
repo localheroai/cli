@@ -223,7 +223,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     await configUtils.updateLastSyncedAt();
 
     console.log(chalk.green('✓ Translations complete!'));
-    console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+    if (translationResult.uniqueKeysTranslated.size > 0) {
+      console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+    }
 
     if (translationResult.uniqueKeysTranslated.size > 0) {
       try {
@@ -234,7 +236,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
 
-    if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
+    if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0 && translationResult.uniqueKeysTranslated.size) {
       const jobIdsParam = translationResult.allJobIds.join(',');
       console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
     }
