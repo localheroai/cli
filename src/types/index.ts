@@ -64,14 +64,18 @@ export class ApiResponseError extends Error {
   details: any | null;
   data: any;
 
-  constructor(message: string) {
+  constructor(message: string, options?: {
+    code?: string;
+    details?: any;
+    data?: any;
+    cliErrorMessage?: string;
+  }) {
     super(message);
     this.name = 'ApiResponseError';
-    // These need to be initialized in the constructor
-    this.cliErrorMessage = message;
-    this.code = 'API_ERROR';
-    this.details = null;
-    this.data = null;
+    this.cliErrorMessage = options?.cliErrorMessage || message;
+    this.code = options?.code || 'API_ERROR';
+    this.details = options?.details || null;
+    this.data = options?.data || null;
   }
 }
 

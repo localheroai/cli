@@ -73,7 +73,7 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
     data = await response.json();
   } catch (error) {
     const parseError = error as Error;
-    const message = 'Failed to parse API response. Error: ' + error ;
+    const message = 'Failed to parse API response. Error: ' + error;
     parseError.message = message;
     (parseError as any).cliErrorMessage = message;
     throw parseError;
@@ -82,21 +82,35 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
   if (!response.ok) {
     if (response.status === 401 && data?.error?.code === 'invalid_api_key') {
       const message = 'Your API key is invalid or has been revoked. Please run `npx @localheroai/cli login` to update your API key.';
-      const error = new ApiResponseError(message);
-      error.cliErrorMessage = message;
-      error.code = 'invalid_api_key';
-      error.data = data;
-      error.details = null;
+      const error = new ApiResponseError(message, {
+        code: 'invalid_api_key',
+        data,
+      });
       throw error;
     }
+
+    if (response.status === 429 && data?.error?.code === 'rate_limit_exceeded') {
+      const message = data?.error?.message || 'Rate limit exceeded. Please try again later.';
+      const error = new ApiResponseError(message, {
+        code: 'rate_limit_exceeded',
+        data,
+        details: {
+          retry_after: data?.error?.retry_after || 60,
+          limit: data?.error?.limit,
+          window: data?.error?.window
+        },
+      });
+      throw error;
+    }
+
     const message = Array.isArray(data?.errors)
       ? data.errors.map((err: any) => typeof err === 'string' ? err : err.message).join(', ')
       : data?.error?.message || 'API request failed';
-    const error = new ApiResponseError(message);
-    error.cliErrorMessage = message;
-    error.code = data?.error?.code || 'API_ERROR';
-    error.details = data?.error?.details || null;
-    error.data = data;
+    const error = new ApiResponseError(message, {
+      code: data?.error?.code || 'API_ERROR',
+      details: data?.error?.details || null,
+      data
+    });
     throw error;
   }
 

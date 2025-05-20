@@ -39,37 +39,48 @@ export function parseFile(content: string, format: string, filePath: string = ''
  */
 function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
   if (knownLocales && knownLocales.length > 0) {
-    const basename = path.basename(filePath, path.extname(filePath));
-    const foundLocaleInFilename = knownLocales.find(locale =>
-      locale && basename.toLowerCase() === locale.toLowerCase()
+    const basenameOriginal = path.basename(filePath, path.extname(filePath));
+    const isBasenameAKnownLocale = knownLocales.some(
+      (kl) => kl && basenameOriginal.toLowerCase() === kl.toLowerCase()
     );
-    if (foundLocaleInFilename) {
-      return foundLocaleInFilename.toLowerCase();
+    if (isBasenameAKnownLocale) {
+      if (isValidLocale(basenameOriginal)) {
+        if (basenameOriginal.length === 2) {
+          return basenameOriginal.toLowerCase();
+        }
+        return basenameOriginal;
+      }
     }
 
-    // Then try to match in the path
-    const pathParts = filePath.toLowerCase().split(path.sep);
-    const foundLocaleInPath = knownLocales.find(locale =>
-      locale && pathParts.includes(locale.toLowerCase())
-    );
-    if (foundLocaleInPath) {
-      return foundLocaleInPath.toLowerCase();
+    const originalPathParts = filePath.split(path.sep);
+    for (const part of originalPathParts) {
+      const isPartAKnownLocale = knownLocales.some(
+        (kl) => kl && part.toLowerCase() === kl.toLowerCase()
+      );
+      if (isPartAKnownLocale) {
+        if (isValidLocale(part)) {
+          if (part.length === 2) {
+            return part.toLowerCase();
+          }
+          return part;
+        }
+      }
     }
   }
 
-  const dirName = path.basename(path.dirname(filePath));
-  if (dirName && isValidLocale(dirName)) {
-    return dirName.toLowerCase();
+  const dirNameOriginal = path.basename(path.dirname(filePath));
+  if (dirNameOriginal && isValidLocale(dirNameOriginal)) {
+    return dirNameOriginal;
   }
 
   if (localeRegex) {
-    const filename = path.basename(filePath);
+    const filenameOriginal = path.basename(filePath);
     const regexPattern = new RegExp(localeRegex);
-    const regexMatch = filename.match(regexPattern);
+    const regexMatch = filenameOriginal.match(regexPattern);
     if (regexMatch && regexMatch[1]) {
-      const locale = regexMatch[1].toLowerCase();
-      if (isValidLocale(locale)) {
-        return locale;
+      const capturedLocale = regexMatch[1];
+      if (isValidLocale(capturedLocale)) {
+        return capturedLocale;
       }
     }
   }
@@ -356,7 +367,12 @@ export async function findTranslationFiles(
           }
 
           if (extractKeys) {
-            const hasLanguageWrapper = parsedContent && parsedContent[locale] !== undefined;
+            const localeValue = parsedContent && parsedContent[locale];
+            const hasLanguageWrapper =
+              localeValue !== undefined &&
+              typeof localeValue === 'object' &&
+              !Array.isArray(localeValue);
+
             result.hasLanguageWrapper = hasLanguageWrapper;
             const translationData = hasLanguageWrapper ? (parsedContent[locale] || {}) : (parsedContent || {});
             result.translations = translationData;
@@ -397,11 +413,16 @@ export async function findTranslationFiles(
   }
 
   const allFiles = processedFiles;
-  const sourceFiles = allFiles.filter(file => file.locale === sourceLocale);
+  const sourceLocaleLower = sourceLocale ? sourceLocale.toLowerCase() : '';
+  const sourceFiles = allFiles.filter(file => file.locale.toLowerCase() === sourceLocaleLower);
+
   const targetFilesByLocale: Record<string, TranslationFile[]> = {};
 
-  for (const locale of targetLocales) {
-    targetFilesByLocale[locale] = allFiles.filter(file => file.locale === locale);
+  for (const targetConfigLocale of targetLocales) {
+    const targetConfigLocaleLower = targetConfigLocale ? targetConfigLocale.toLowerCase() : '';
+    targetFilesByLocale[targetConfigLocale] = allFiles.filter(
+      file => file.locale.toLowerCase() === targetConfigLocaleLower
+    );
   }
 
   return {

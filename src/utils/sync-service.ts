@@ -6,7 +6,7 @@ import { findTranslationFiles } from './files.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult } from '../types/index.js';
 
-const MAX_PAGES = 20;
+const MAX_PAGES = 50;
 
 interface LanguageUpdate {
   code: string;
@@ -173,7 +173,7 @@ export const syncService: SyncService = {
         for (const translation of lang.translations) {
           translations[translation.key] = translation.value;
           if (verbose) {
-            const displayValue = translation.value.length > 100 ? `${translation.value.slice(0, 100)}…` : translation.value;
+            const displayValue = translation.value?.length > 100 ? `${translation.value.slice(0, 100)}…` : translation.value;
             console.log(chalk.gray(` ${translation.key} = ${displayValue}`));
           }
         }

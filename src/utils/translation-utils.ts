@@ -141,7 +141,12 @@ export function findMissingTranslationsByLocale(
 
     const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
     const sourceContent = parseFile(sourceContentRaw, sourceFile.format, sourceFile.path);
-    const sourceKeys = flattenTranslations(sourceContent[config.sourceLocale] || sourceContent);
+    const sourceWrapper = sourceContent[config.sourceLocale];
+    const sourceKeys = flattenTranslations(
+      sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
+        ? sourceWrapper
+        : sourceContent
+    );
 
     for (const targetLocale of config.outputLocales) {
       const targetFiles = targetFilesByLocale[targetLocale] || [];
@@ -190,7 +195,7 @@ export function batchKeysWithMissing(
   sourceFiles: TranslationFile[],
   missingByLocale: Record<string, MissingLocaleEntry>
 ): BatchResult {
-  const MAX_BATCH_SIZE = 100;
+  const MAX_BATCH_SIZE = 200;
   const batches: TranslationBatch[] = [];
   const errors: BatchError[] = [];
 

@@ -18,7 +18,10 @@ describe('translation-processor', () => {
     mockTranslationUtils = {
       createTranslationJob: jest.fn(),
       checkJobStatus: jest.fn(),
-      updateTranslationFile: jest.fn().mockResolvedValue({ updatedKeys: ['welcome'], created: false })
+      updateTranslationFile: jest.fn().mockImplementation((targetPath, translations) => {
+        const keys = Object.keys(translations);
+        return Promise.resolve({ updatedKeys: keys, created: false });
+      })
     };
   });
 

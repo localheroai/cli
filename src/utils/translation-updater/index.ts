@@ -34,15 +34,20 @@ export async function updateTranslationFile(
 
   await ensureDirectoryExists(filePath);
 
+  // Filter out any null values
+  const filteredTranslations = Object.fromEntries(
+    Object.entries(translations).filter(([_, value]) => value !== null)
+  );
+
   if (fileExt === 'json') {
-    const jsonResult = await updateJsonFile(filePath, translations, languageCode, sourceFilePath);
+    const jsonResult = await updateJsonFile(filePath, filteredTranslations, languageCode, sourceFilePath);
     return {
       updatedKeys: result.updatedKeys,
       created: jsonResult.created
     };
   }
 
-  return updateYamlFile(filePath, translations, languageCode);
+  return updateYamlFile(filePath, filteredTranslations, languageCode);
 }
 
 /**
