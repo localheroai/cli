@@ -234,14 +234,14 @@ async function applyTranslations(
     console.log(chalk.blue(`  Updating translations for ${languageCode} in ${targetPath}`));
   }
 
-  await translationUtils.updateTranslationFile(
+  const result = await translationUtils.updateTranslationFile(
     targetPath,
     data.translations.data,
     languageCode,
     entry.path
   );
 
-  Object.keys(entry.keys).forEach(key => uniqueKeysTranslated.add(key));
+  result.updatedKeys.forEach(key => uniqueKeysTranslated.add(key));
 
   if (!processedEntries.has(`locale:${languageCode}`)) {
     stats.totalLanguages++;
