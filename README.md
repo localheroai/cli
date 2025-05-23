@@ -82,6 +82,17 @@ npx @localheroai/cli push
 
 Push updates from your local translation files to LocalHero.ai. This command will upload any new or modified translations from your local files to the service.
 
+### Clone
+
+```bash
+npx @localheroai/cli clone
+```
+
+Download all translation files from LocalHero.ai to your local project directory. This command is useful when your translation files aren't checked into version control. For example when:
+
+- Setting up a new workspace
+- Fetching latest translation files during deploy
+
 ## Environment Variables ⚙️
 
 Typically you don't need to set these. The cli will use `LOCALHERO_API_KEY` if it's set, otherwise it will check the file `.localhero_key` for a API key.
