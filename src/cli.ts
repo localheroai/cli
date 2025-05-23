@@ -10,6 +10,7 @@ import { pull } from './commands/pull.js';
 import { push } from './commands/push.js';
 import { init } from './commands/init.js';
 import { translate, TranslationOptions } from './commands/translate.js';
+import { clone } from './commands/clone.js';
 import { configService } from './utils/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -104,5 +105,11 @@ program
     const config = await configService.getValidProjectConfig();
     return push(config, options);
   }));
+
+program
+  .command('clone')
+  .description('Clone all translations from LocalHero.ai to your local files')
+  .option('-v, --verbose', 'Show detailed progress information')
+  .action(wrapCommandAction((options: { verbose?: boolean }) => clone(options)));
 
 program.parse();
