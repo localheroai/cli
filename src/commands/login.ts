@@ -88,6 +88,8 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
     console.log(chalk.white('\n  npx @localheroai/cli init\n'));
   } else if (!isCalledFromInit) {
     console.log('\nYou\'re ready to start translating!');
-    console.log('Try running: npx @localheroai/cli translate');
+    console.log('\nTry running: ');
+    console.log(chalk.white('  npx @localheroai/cli clone - to download existing translations'));
+    console.log(chalk.white('  npx @localheroai/cli translate - to start translating'));
   }
 }
