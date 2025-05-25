@@ -72,7 +72,7 @@ describe('cloneService', () => {
             mockCloneApi.requestClone.mockResolvedValue(mockResponse);
             mockCloneApi.downloadFile.mockResolvedValue(undefined);
 
-            const result = await cloneService.cloneProject(true);
+            const result = await cloneService.cloneProject(true, false);
 
             expect(mockCloneApi.requestClone).toHaveBeenCalledWith('test-project');
             expect(mockCloneApi.downloadFile).toHaveBeenCalledTimes(2);
@@ -86,7 +86,7 @@ describe('cloneService', () => {
         it('handles project not initialized error', async () => {
             mockConfigService.getValidProjectConfig.mockResolvedValue({});
 
-            await expect(cloneService.cloneProject())
+            await expect(cloneService.cloneProject(false, false))
                 .rejects
                 .toThrow('Project not initialized. Please run `localhero init` first.');
         });
@@ -95,7 +95,7 @@ describe('cloneService', () => {
             mockConfigService.getValidProjectConfig.mockResolvedValue(testConfig);
             mockCloneApi.requestClone.mockRejectedValue(new Error('API Error'));
 
-            await expect(cloneService.cloneProject())
+            await expect(cloneService.cloneProject(false, false))
                 .rejects
                 .toThrow('API Error');
         });
@@ -235,7 +235,7 @@ describe('cloneService', () => {
 
             mockCloneApi.downloadFile.mockResolvedValue(undefined);
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(mockCloneApi.downloadFile).toHaveBeenCalledTimes(2);
             expect(result).toEqual({
@@ -258,7 +258,7 @@ describe('cloneService', () => {
                 }
             };
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(mockCloneApi.downloadFile).not.toHaveBeenCalled();
             expect(result).toEqual({
@@ -281,7 +281,7 @@ describe('cloneService', () => {
                 }
             };
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(mockCloneApi.downloadFile).not.toHaveBeenCalled();
             expect(result).toEqual({
@@ -313,7 +313,7 @@ describe('cloneService', () => {
             const originalSetTimeout = global.setTimeout;
             global.setTimeout = jest.fn((callback) => callback());
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(mockCloneApi.downloadFile).toHaveBeenCalledTimes(3);
             expect(result).toEqual({
@@ -360,7 +360,7 @@ describe('cloneService', () => {
             const originalSetTimeout = global.setTimeout;
             global.setTimeout = jest.fn((callback) => callback());
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(result.totalFiles).toBe(3);
             expect(result.downloadedFiles).toBe(1);
@@ -384,7 +384,7 @@ describe('cloneService', () => {
                 }
             };
 
-            const result = await cloneService.downloadFiles(response, true);
+            const result = await cloneService.downloadFiles(response, true, false);
 
             expect(mockCloneApi.downloadFile).not.toHaveBeenCalled();
             expect(result).toEqual({
@@ -392,6 +392,39 @@ describe('cloneService', () => {
                 downloadedFiles: 0,
                 failedFiles: ['public/locales/common.json']
             });
+        });
+
+        it('handles force flag to overwrite existing files', async () => {
+            const response = {
+                files: {
+                    'public/locales/common.json': {
+                        url: 'https://s3.amazonaws.com/bucket/file1.json',
+                        language: 'en',
+                        format: 'json',
+                        last_updated_at: '2025-01-22T14:30:00Z',
+                        status: 'completed'
+                    }
+                }
+            };
+
+            // Mock fs.access to simulate file exists
+            const mockFs = await import('fs/promises');
+            const originalAccess = mockFs.default.access;
+            mockFs.default.access = jest.fn().mockResolvedValue(undefined);
+
+            mockCloneApi.downloadFile.mockResolvedValue(undefined);
+
+            const result = await cloneService.downloadFiles(response, true, true);
+
+            expect(mockCloneApi.downloadFile).toHaveBeenCalledTimes(1);
+            expect(result).toEqual({
+                totalFiles: 1,
+                downloadedFiles: 1,
+                failedFiles: []
+            });
+
+            // Restore original fs.access
+            mockFs.default.access = originalAccess;
         });
     });
 });

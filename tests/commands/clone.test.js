@@ -30,7 +30,7 @@ describe('clone command', () => {
 
     const result = await clone({}, createCloneDeps());
 
-    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(false);
+    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(false, false);
     expect(result).toEqual({
       totalFiles: 3,
       downloadedFiles: 3,
@@ -83,7 +83,37 @@ describe('clone command', () => {
 
     await clone({ verbose: true }, createCloneDeps());
 
-    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(true);
+    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(true, false);
+    expect(global.console.log).toHaveBeenCalledWith(expect.stringContaining('Starting clone'));
+  });
+
+  it('supports force flag', async () => {
+    mockCloneService.cloneProject.mockResolvedValue({
+      totalFiles: 2,
+      downloadedFiles: 2,
+      failedFiles: []
+    });
+
+    const result = await clone({ force: true }, createCloneDeps());
+
+    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(false, true);
+    expect(result).toEqual({
+      totalFiles: 2,
+      downloadedFiles: 2,
+      failedFiles: []
+    });
+  });
+
+  it('supports both verbose and force flags', async () => {
+    mockCloneService.cloneProject.mockResolvedValue({
+      totalFiles: 1,
+      downloadedFiles: 1,
+      failedFiles: []
+    });
+
+    await clone({ verbose: true, force: true }, createCloneDeps());
+
+    expect(mockCloneService.cloneProject).toHaveBeenCalledWith(true, true);
     expect(global.console.log).toHaveBeenCalledWith(expect.stringContaining('Starting clone'));
   });
 

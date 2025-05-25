@@ -3,7 +3,7 @@ import chalk from 'chalk';
 
 interface CloneDependencies {
   cloneService: {
-    cloneProject: (verbose?: boolean) => Promise<{
+    cloneProject: (verbose?: boolean, force?: boolean) => Promise<{
       totalFiles: number;
       downloadedFiles: number;
       failedFiles: string[];
@@ -13,6 +13,7 @@ interface CloneDependencies {
 
 interface CloneOptions {
   verbose?: boolean;
+  force?: boolean;
 }
 
 interface CloneResult {
@@ -25,14 +26,14 @@ export async function clone(
   options: CloneOptions = {},
   deps: CloneDependencies = { cloneService: defaultCloneService }
 ): Promise<CloneResult | void> {
-  const { verbose = false } = options;
+  const { verbose = false, force = false } = options;
   const { cloneService } = deps;
 
   if (verbose) {
     console.log(chalk.blue('Starting clone...'));
   }
 
-  const result = await cloneService.cloneProject(verbose);
+  const result = await cloneService.cloneProject(verbose, force);
 
   if (!verbose) {
     if (result.failedFiles.length > 0) {

@@ -12,9 +12,9 @@ export interface CloneResult {
 
 // Clone service interface
 export interface CloneService {
-  cloneProject(verbose?: boolean): Promise<CloneResult>;
+  cloneProject(verbose?: boolean, force?: boolean): Promise<CloneResult>;
   pollForCompletion(response: ParsedCloneResponse, verbose?: boolean): Promise<ParsedCloneResponse>;
-  downloadFiles(response: ParsedCloneResponse, verbose?: boolean): Promise<CloneResult>;
+  downloadFiles(response: ParsedCloneResponse, verbose?: boolean, force?: boolean): Promise<CloneResult>;
 }
 
 // Default polling configuration
@@ -73,9 +73,10 @@ export const cloneService: CloneService = {
   /**
    * Clone all translations for a project
    * @param verbose Whether to show verbose output
+   * @param force Whether to overwrite existing files
    * @returns Result with download statistics
    */
-  async cloneProject(verbose = false): Promise<CloneResult> {
+  async cloneProject(verbose = false, force = false): Promise<CloneResult> {
     const config = await configService.getValidProjectConfig();
 
     if (!config.projectId) {
@@ -98,7 +99,7 @@ export const cloneService: CloneService = {
     const completedResponse = await this.pollForCompletion(response, verbose);
 
     // Download all completed files
-    return await this.downloadFiles(completedResponse, verbose);
+    return await this.downloadFiles(completedResponse, verbose, force);
   },
 
   /**
@@ -157,9 +158,10 @@ export const cloneService: CloneService = {
    * Download all completed files from the response
    * @param response Clone response with file URLs
    * @param verbose Whether to show verbose output
+   * @param force Whether to overwrite existing files
    * @returns Result with download statistics
    */
-  async downloadFiles(response: ParsedCloneResponse, verbose = false): Promise<CloneResult> {
+  async downloadFiles(response: ParsedCloneResponse, verbose = false, force = false): Promise<CloneResult> {
     const files = Object.entries(response.files);
     const totalFiles = files.length;
     let downloadedFiles = 0;
@@ -172,10 +174,8 @@ export const cloneService: CloneService = {
     const downloadPromises = files.map(async ([filePath, fileStatus]) => {
       if (fileStatus.status === 'completed') {
         const fileExists = await fs.access(filePath).then(() => true).catch(() => false);
-        if (fileExists) {
-          if (verbose) {
-            console.log(chalk.gray(`  File already exists, skipping: ${filePath} (${fileStatus.language})`));
-          }
+        if (fileExists && !force) {
+          console.log(chalk.gray(`File already exists, skipping: ${filePath} (${fileStatus.language})`));
           return;
         }
 
@@ -183,6 +183,9 @@ export const cloneService: CloneService = {
           const success = await downloadFileWithRetry(filePath, fileStatus, 3, verbose);
           if (success) {
             downloadedFiles++;
+            if (fileExists && force && verbose) {
+              console.log(chalk.blue(`  Overwritten existing file: ${filePath} (${fileStatus.language})`));
+            }
           } else {
             failedFiles.push(filePath);
           }
@@ -207,7 +210,7 @@ export const cloneService: CloneService = {
 
     await Promise.all(downloadPromises);
 
-    if (downloadedFiles > 0) {
+    if (downloadedFiles > 0 && verbose) {
       console.log(chalk.green(`✓ Downloaded ${downloadedFiles} files`));
     }
 
@@ -218,10 +221,6 @@ export const cloneService: CloneService = {
           console.log(chalk.gray(`   - ${filePath}`));
         }
       }
-    }
-
-    if (downloadedFiles === totalFiles) {
-      console.log(chalk.green(`✓ Clone completed - ${downloadedFiles} files downloaded`));
     }
 
     return {

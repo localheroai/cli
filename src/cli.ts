@@ -110,6 +110,7 @@ program
   .command('clone')
   .description('Clone all translations from LocalHero.ai to your local files')
   .option('-v, --verbose', 'Show detailed progress information')
-  .action(wrapCommandAction((options: { verbose?: boolean }) => clone(options)));
+  .option('-f, --force', 'Force, override existing files')
+  .action(wrapCommandAction((options: { verbose?: boolean; force?: boolean }) => clone(options)));
 
 program.parse();
