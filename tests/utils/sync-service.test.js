@@ -148,7 +148,7 @@ describe('syncService', () => {
 
       await syncService.checkForUpdates({ verbose: true });
 
-      expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(50);
+      expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(100);
     });
 
     it('includes deleted keys in the updates', async () => {
