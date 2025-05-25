@@ -11,7 +11,6 @@ import {
   BatchResult,
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
-import { syncService, type SyncService } from '../utils/sync-service.js';
 import { autoCommitChanges } from '../utils/github.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
 import type {
@@ -80,7 +79,6 @@ interface TranslationDependencies {
       logger?: { log: (message?: any, ...optionalParams: any[]) => void }
     ) => Record<string, MissingLocaleEntry>;
   };
-  syncService: SyncService;
   gitUtils: {
     autoCommitChanges: (paths: string) => void;
   };
@@ -99,12 +97,11 @@ const defaultDeps: TranslationDependencies = {
     batchKeysWithMissing,
     findMissingTranslationsByLocale
   },
-  syncService,
   gitUtils: { autoCommitChanges }
 };
 
 export async function translate(options: TranslationOptions = {}, deps: TranslationDependencies = defaultDeps): Promise<void> {
-  const { console, configUtils, authUtils, fileUtils, translationUtils, syncService, gitUtils } = deps;
+  const { console, configUtils, authUtils, fileUtils, translationUtils, gitUtils } = deps;
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
