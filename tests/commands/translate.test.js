@@ -184,8 +184,6 @@ describe('translate command', () => {
       sourceFilePath
     );
 
-    expect(syncService.checkForUpdates).toHaveBeenCalledWith(true);
-    expect(syncService.applyUpdates).not.toHaveBeenCalled();
     expect(gitUtils.autoCommitChanges).toHaveBeenCalledWith('locales/');
 
     // Verify console output indicates success
@@ -357,78 +355,6 @@ describe('translate command', () => {
     expect(consoleOutput).toContain('Found 4 translation files');
     expect(consoleOutput).toContain('Found 2 source files for locale en');
     expect(consoleOutput).toContain('Updated 2 keys in 1 languages');
-  });
-
-  it('applies updates before translating if available', async () => {
-    syncService.checkForUpdates.mockResolvedValue({
-      hasUpdates: true,
-      updates: { someKey: 'someValue' }
-    });
-
-    const sourceFilePath = 'locales/en.json';
-
-    // Configure missing translations for this test
-    translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: 'locales/fr.json',
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
-    });
-
-    fileUtils.findTranslationFiles.mockResolvedValue({
-      sourceFiles: [{
-        path: sourceFilePath,
-        format: 'json',
-        content: Buffer.from(JSON.stringify({
-          en: { farewell: 'Goodbye' }
-        })).toString('base64')
-      }],
-      targetFilesByLocale: { fr: [] },
-      allFiles: [
-        { path: sourceFilePath, locale: 'en' }
-      ]
-    });
-
-    translationUtils.batchKeysWithMissing.mockReturnValue({
-      batches: [{
-        sourceFilePath,
-        sourceFile: {
-          path: sourceFilePath,
-          format: 'json',
-          content: Buffer.from(JSON.stringify({
-            keys: {
-              farewell: { value: 'Goodbye' }
-            }
-          })).toString('base64')
-        },
-        localeEntries: [`fr:${sourceFilePath}`],
-        locales: ['fr']
-      }],
-      errors: []
-    });
-
-    translationUtils.createTranslationJob.mockResolvedValue({
-      jobs: [{ id: 'job-123', language: { code: 'fr' } }]
-    });
-
-    translationUtils.checkJobStatus.mockResolvedValue({
-      status: 'completed',
-      translations: {
-        data: { farewell: 'Au revoir' }
-      },
-      language: { code: 'fr' }
-    });
-
-    await translate({ verbose: true }, createTranslateDeps());
-
-    expect(syncService.checkForUpdates).toHaveBeenCalledWith(true);
-    expect(syncService.applyUpdates).toHaveBeenCalledWith(
-      { someKey: 'someValue' },
-      true
-    );
   });
 
   it('handles authentication failure', async () => {

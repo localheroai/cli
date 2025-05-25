@@ -111,6 +111,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   if (!isAuthenticated) {
     console.error(chalk.red('\n✖ Your API key is invalid. Please run `npx @localheroai/cli login` to authenticate.\n'));
     process.exit(1);
+    return;
   }
 
   const config = await configUtils.getProjectConfig();
@@ -124,11 +125,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.error(chalk.red('\n✖ Invalid configuration: missing translationFiles.paths. Please run `npx @localheroai/cli init` to set up your configuration.\n'));
     process.exit(1);
     return;
-  }
-
-  const { hasUpdates, updates } = await syncService.checkForUpdates(verbose);
-  if (hasUpdates && updates) {
-    await syncService.applyUpdates(updates, verbose);
   }
 
   if (verbose) {
@@ -145,6 +141,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   if (!allFiles || allFiles.length === 0) {
     console.error(chalk.red('\n✖ No translation files found in the specified paths.\n'));
     process.exit(1);
+    return;
   }
 
   if (verbose) {
@@ -159,6 +156,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.error(chalk.yellow('  3. There was an error parsing one or more files (check for syntax errors in YAML or JSON)\n'));
     console.error(chalk.yellow('Try running with the --verbose flag for more detailed information.\n'));
     process.exit(1);
+    return;
   }
 
   if (verbose) {
@@ -209,6 +207,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       console.error(chalk.red(`  ${error.message}`));
     }
     process.exit(1);
+    return;
   }
 
   try {
@@ -264,5 +263,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
     process.exit(1);
+    return;
   }
 }
