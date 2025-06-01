@@ -6,6 +6,7 @@ import { ProjectConfig } from '../types/index.js';
  */
 export interface TranslationStats {
   totalLanguages: number;
+  languages: Set<string>;
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
 }
@@ -79,6 +80,7 @@ export interface TranslationDependencies {
 
 export interface TranslationResult {
   totalLanguages: number;
+  languages: string[];
   allJobIds: string[];
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
@@ -258,6 +260,7 @@ async function applyTranslations(
 
   if (!processedEntries.has(`locale:${languageCode}`)) {
     stats.totalLanguages++;
+    stats.languages.add(languageCode);
     processedEntries.add(`locale:${languageCode}`);
   }
   processedEntries.add(localeSourceKey);
@@ -376,6 +379,7 @@ export async function processTranslationBatches(
 ): Promise<TranslationResult> {
   const stats: TranslationStats = {
     totalLanguages: 0,
+    languages: new Set<string>(),
     resultsBaseUrl: null,
     jobGroupShortUrl: null
   };
@@ -400,6 +404,7 @@ export async function processTranslationBatches(
 
   return {
     totalLanguages: stats.totalLanguages,
+    languages: Array.from(stats.languages),
     allJobIds,
     resultsBaseUrl: stats.resultsBaseUrl,
     jobGroupShortUrl: stats.jobGroupShortUrl,

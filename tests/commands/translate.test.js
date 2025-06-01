@@ -184,7 +184,10 @@ describe('translate command', () => {
       sourceFilePath
     );
 
-    expect(gitUtils.autoCommitChanges).toHaveBeenCalledWith('locales/');
+    expect(gitUtils.autoCommitChanges).toHaveBeenCalledWith('locales/', expect.objectContaining({
+      keysTranslated: expect.any(Number),
+      languages: expect.any(Array)
+    }));
 
     // Verify console output indicates success
     const consoleOutput = mockConsole.log.mock.calls

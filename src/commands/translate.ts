@@ -81,7 +81,11 @@ interface TranslationDependencies {
     ) => Record<string, MissingLocaleEntry>;
   };
   gitUtils: {
-    autoCommitChanges: (paths: string) => void;
+    autoCommitChanges: (paths: string, translationSummary?: {
+      keysTranslated: number;
+      languages: string[];
+      viewUrl?: string;
+    }) => void;
   };
 }
 
@@ -230,7 +234,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     if (translationResult.uniqueKeysTranslated.size > 0) {
       try {
-        gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '));
+        gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
+          keysTranslated: translationResult.uniqueKeysTranslated.size,
+          languages: translationResult.languages,
+          viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
+        });
       } catch (error) {
         const err = error as Error;
         console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));

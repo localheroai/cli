@@ -120,8 +120,13 @@ jobs:
   /**
    * Automatically commit and push changes when running in GitHub Actions
    * @param filesPath Path pattern for files to commit
+   * @param translationSummary Optional summary of translation results
    */
-  autoCommitChanges(filesPath: string): void {
+  autoCommitChanges(filesPath: string, translationSummary?: {
+    keysTranslated: number;
+    languages: string[];
+    viewUrl?: string;
+  }): void {
     const { exec, env } = this.deps;
 
     if (!this.isGitHubAction()) return;
@@ -144,7 +149,24 @@ jobs:
         return;
       }
 
-      exec('git commit -m "Update translations"', { stdio: 'inherit' });
+      let commitMessage = 'Update translations';
+
+      if (translationSummary && translationSummary.keysTranslated > 0) {
+        const { keysTranslated, languages, viewUrl } = translationSummary;
+        const languageList = languages.join(', ');
+
+        if (keysTranslated > 1) {
+          commitMessage += `\n\nTranslated ${keysTranslated} keys in ${languageList}`;
+        } else {
+          commitMessage += `\n\nTranslated ${keysTranslated} key in ${languageList}`;
+        }
+
+        if (viewUrl) {
+          commitMessage += `\nView results at ${viewUrl}`;
+        }
+      }
+
+      exec(`git commit -m "${commitMessage}"`, { stdio: 'inherit' });
 
       const token = env.GITHUB_TOKEN;
       if (!token) {
@@ -188,7 +210,12 @@ export function workflowExists(basePath: string): boolean {
 /**
  * Automatically commit and push changes when running in GitHub Actions
  * @param filesPath Path pattern for files to commit
+ * @param translationSummary Optional summary of translation results
  */
-export function autoCommitChanges(filesPath: string): void {
-  return githubService.autoCommitChanges(filesPath);
+export function autoCommitChanges(filesPath: string, translationSummary?: {
+  keysTranslated: number;
+  languages: string[];
+  viewUrl?: string;
+}): void {
+  return githubService.autoCommitChanges(filesPath, translationSummary);
 }
