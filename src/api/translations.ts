@@ -15,6 +15,7 @@ export interface CreateTranslationJobParams {
   targetLocales: string[];
   projectId: string;
   targetPaths?: Record<string, string>;
+  jobGroupId?: string;
 }
 
 // Translation job response
@@ -29,6 +30,10 @@ export interface TranslationJob {
 export interface TranslationJobsResponse {
   jobs: TranslationJob[];
   totalJobs: number;
+  job_group?: {
+    id: string;
+    short_url: string;
+  };
 }
 
 /**
@@ -50,7 +55,8 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
         format: file.format,
         target_paths: params.targetPaths
       })),
-      ...(branch && { branch })
+      ...(branch && { branch }),
+      ...(params.jobGroupId && { job_group_id: params.jobGroupId })
     },
     apiKey
   });
@@ -61,7 +67,8 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
 
   return {
     jobs: response.jobs,
-    totalJobs: response.jobs.length
+    totalJobs: response.jobs.length,
+    ...(response.job_group && { job_group: response.job_group })
   };
 }
 

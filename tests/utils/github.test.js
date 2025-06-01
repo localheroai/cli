@@ -152,6 +152,31 @@ describe('github module', () => {
       expect(console.log).toHaveBeenCalledWith("Changes committed and pushed successfully.");
     });
 
+    it('commits with enhanced message when translation summary is provided', () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        return Buffer.from('');
+      });
+
+      const translationSummary = {
+        keysTranslated: 15,
+        languages: ['German', 'French', 'Spanish'],
+        viewUrl: 'https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ'
+      };
+
+      autoCommitChanges('locales/**/*.json', translationSummary);
+
+      const expectedMessage = 'Update translations\n\nTranslated 15 keys in German, French, Spanish\nView results at https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m "${expectedMessage}"`, { stdio: "inherit" });
+    });
+
     it('does not commit when there are no changes', () => {
       // Setup GitHub environment
       mockEnv.GITHUB_ACTIONS = 'true';

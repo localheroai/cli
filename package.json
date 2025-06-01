@@ -37,6 +37,7 @@
     "commander": "^12.0.0",
     "glob": "^10.3.10",
     "inquirer": "^12.0.1",
+    "nanoid": "^5.1.5",
     "yaml": "^2.3.4"
   },
   "devDependencies": {

@@ -101,6 +101,7 @@ describe('translation-processor', () => {
       expect(result.totalLanguages).toBe(1);
       expect(result.allJobIds).toEqual(['job-123']);
       expect(result.resultsBaseUrl).toBe('https://localhero.ai/projects/test-project/translations');
+      expect(result.jobGroupShortUrl).toBeNull();
       expect(result.uniqueKeysTranslated.size).toBe(1);
       expect(result.uniqueKeysTranslated.has('welcome')).toBe(true);
     });
@@ -176,6 +177,131 @@ describe('translation-processor', () => {
       );
       expect(result.totalLanguages).toBe(1);
       expect(result.uniqueKeysTranslated.size).toBe(1);
+    });
+
+    it('captures job group short URL when present in response', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ welcome: 'Welcome' })).toString('base64')
+          },
+          localeEntries: ['fr:locales/en.json'],
+          locales: ['fr']
+        }
+      ];
+
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      const config = {
+        projectId: 'test-project'
+      };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-123', language: { code: 'fr' } }],
+        job_group: {
+          id: 'test-group-123',
+          short_url: 'https://app.localhero.dev/r/test-group-123'
+        }
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { welcome: 'Bienvenue' }
+        },
+        language: { code: 'fr' },
+        results_url: 'https://localhero.ai/projects/test-project/translations?job_id=job-123'
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(result.totalLanguages).toBe(1);
+      expect(result.allJobIds).toEqual(['job-123']);
+      expect(result.resultsBaseUrl).toBe('https://localhero.ai/projects/test-project/translations');
+      expect(result.jobGroupShortUrl).toBe('https://app.localhero.dev/r/test-group-123');
+      expect(result.uniqueKeysTranslated.size).toBe(1);
+    });
+
+    it('sends job group ID when provided', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ welcome: 'Welcome' })).toString('base64')
+          },
+          localeEntries: ['fr:locales/en.json'],
+          locales: ['fr']
+        }
+      ];
+
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      const config = {
+        projectId: 'test-project'
+      };
+
+      const testJobGroupId = 'test-group-abc123';
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-123', language: { code: 'fr' } }],
+        job_group: {
+          id: testJobGroupId,
+          short_url: `https://app.localhero.dev/r/${testJobGroupId}`
+        }
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { welcome: 'Bienvenue' }
+        },
+        language: { code: 'fr' }
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils },
+        testJobGroupId
+      );
+
+      // Verify that createTranslationJob was called with the job group ID
+      expect(mockTranslationUtils.createTranslationJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          jobGroupId: testJobGroupId
+        })
+      );
+
+      expect(result.jobGroupShortUrl).toBe(`https://app.localhero.dev/r/${testJobGroupId}`);
     });
 
     it('processes multiple batches and jobs', async () => {
@@ -376,6 +502,7 @@ describe('translation-processor', () => {
         expect(result.allJobIds).toEqual([testJobId]);
         expect(result.uniqueKeysTranslated.size).toBe(0);
         expect(result.resultsBaseUrl).toBeNull();
+        expect(result.jobGroupShortUrl).toBeNull();
 
       } finally {
         global.setTimeout = originalSetTimeout;
