@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import { nanoid } from 'nanoid';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus } from '../api/translations.js';
@@ -208,12 +209,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   try {
+    // Generate a id to group the jobs with
+    const jobGroupId = nanoid();
+
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
       missingByLocale as any,
       config,
       !!verbose,
-      { console, translationUtils }
+      { console, translationUtils },
+      jobGroupId
     );
 
     await configUtils.updateLastSyncedAt();
@@ -232,9 +237,13 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
 
-    if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0 && translationResult.uniqueKeysTranslated.size) {
-      const jobIdsParam = translationResult.allJobIds.join(',');
-      console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
+    if (translationResult.uniqueKeysTranslated.size > 0) {
+      if (translationResult.jobGroupShortUrl) {
+        console.log(`» View results at: ${translationResult.jobGroupShortUrl}`);
+      } else if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
+        const jobIdsParam = translationResult.allJobIds.join(',');
+        console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
+      }
     }
   } catch (error) {
     if (error instanceof ApiResponseError) {

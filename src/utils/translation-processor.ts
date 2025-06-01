@@ -7,6 +7,7 @@ import { ProjectConfig } from '../types/index.js';
 export interface TranslationStats {
   totalLanguages: number;
   resultsBaseUrl: string | null;
+  jobGroupShortUrl: string | null;
 }
 
 export interface TranslationJob {
@@ -18,6 +19,10 @@ export interface TranslationJob {
 
 export interface TranslationJobResponse {
   jobs: TranslationJob[];
+  job_group?: {
+    id: string;
+    short_url: string;
+  };
 }
 
 export interface JobSourceInfo {
@@ -76,6 +81,7 @@ export interface TranslationResult {
   totalLanguages: number;
   allJobIds: string[];
   resultsBaseUrl: string | null;
+  jobGroupShortUrl: string | null;
   uniqueKeysTranslated: Set<string>;
 }
 
@@ -92,7 +98,8 @@ export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 25;
 function createJobRequest(
   batch: TranslationBatch,
   missingByLocale: MissingByLocale,
-  config: ProjectConfig
+  config: ProjectConfig,
+  jobGroupId?: string
 ): any {
   const targetPaths: Record<string, string> = {};
   batch.localeEntries.forEach(localeSourceKey => {
@@ -100,12 +107,18 @@ function createJobRequest(
     targetPaths[entry.locale] = entry.targetPath;
   });
 
-  return {
+  const request: any = {
     projectId: config.projectId,
     sourceFiles: [batch.sourceFile],
     targetLocales: batch.locales,
     targetPaths
   };
+
+  if (jobGroupId) {
+    request.jobGroupId = jobGroupId;
+  }
+
+  return request;
 }
 
 /**
@@ -274,15 +287,21 @@ async function processBatch(
   processedEntries: Set<string>,
   uniqueKeysTranslated: Set<string>,
   allJobIds: string[],
-  stats: TranslationStats
+  stats: TranslationStats,
+  jobGroupId?: string
 ): Promise<void> {
   const { console, translationUtils } = deps;
   const sourceFilePath = batch.sourceFilePath;
-  const jobRequest = createJobRequest(batch, missingByLocale, config);
+  const jobRequest = createJobRequest(batch, missingByLocale, config, jobGroupId);
   const response = await translationUtils.createTranslationJob(jobRequest);
   const { jobs } = response;
   const batchJobIds = jobs.map(job => job.id);
   allJobIds.push(...batchJobIds);
+
+  // Capture job group short URL if present in the response
+  if (response.job_group?.short_url && !stats.jobGroupShortUrl) {
+    stats.jobGroupShortUrl = response.job_group.short_url;
+  }
 
   const jobSourceMapping = createJobSourceMapping(jobs, sourceFilePath);
   const jobTries: Record<string, number> = {};
@@ -352,11 +371,13 @@ export async function processTranslationBatches(
   missingByLocale: MissingByLocale,
   config: ProjectConfig,
   verbose: boolean,
-  deps: TranslationDependencies
+  deps: TranslationDependencies,
+  jobGroupId?: string
 ): Promise<TranslationResult> {
   const stats: TranslationStats = {
     totalLanguages: 0,
-    resultsBaseUrl: null
+    resultsBaseUrl: null,
+    jobGroupShortUrl: null
   };
   const processedEntries = new Set<string>();
   const allJobIds: string[] = [];
@@ -372,7 +393,8 @@ export async function processTranslationBatches(
       processedEntries,
       uniqueKeysTranslated,
       allJobIds,
-      stats
+      stats,
+      jobGroupId
     );
   }
 
@@ -380,6 +402,7 @@ export async function processTranslationBatches(
     totalLanguages: stats.totalLanguages,
     allJobIds,
     resultsBaseUrl: stats.resultsBaseUrl,
+    jobGroupShortUrl: stats.jobGroupShortUrl,
     uniqueKeysTranslated
   };
 }
