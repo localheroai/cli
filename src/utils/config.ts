@@ -104,10 +104,6 @@ export const configService: ConfigService = {
       const content = await fs.readFile(configPath, 'utf8');
       const config = JSON.parse(content) as ProjectConfig;
 
-      if (config.schemaVersion !== DEFAULT_PROJECT_CONFIG.schemaVersion) {
-        throw new Error(`Unsupported config schema version: ${config.schemaVersion}`);
-      }
-
       return config;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
