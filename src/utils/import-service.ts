@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations } from '../api/imports.js';
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
+import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import {
   ProjectConfig,
   TranslationFile,
@@ -11,7 +12,7 @@ import {
 /**
  * File format supported by the import service
  */
-export type FileFormat = 'json' | 'yaml' | null;
+export type FileFormat = 'json' | 'yaml' | 'po' | null;
 
 /**
  * File details for import operations
@@ -63,6 +64,7 @@ function getFileFormat(filePath: string): FileFormat {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.json') return 'json';
   if (ext === '.yml' || ext === '.yaml') return 'yaml';
+  if (ext === '.po') return 'po';
   return null;
 }
 
@@ -81,6 +83,17 @@ async function readFileContent(filePath: string): Promise<string> {
       const flattened = flattenTranslations(jsonContent);
 
       return Buffer.from(JSON.stringify(flattened)).toString('base64');
+    } catch {
+      return Buffer.from(content).toString('base64');
+    }
+  }
+
+  if (format === 'po') {
+    try {
+      const parsed = parsePoFile(content);
+      const apiFormat = poEntriesToApiFormat(parsed.entries);
+      
+      return Buffer.from(JSON.stringify(apiFormat)).toString('base64');
     } catch {
       return Buffer.from(content).toString('base64');
     }

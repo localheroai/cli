@@ -4,6 +4,7 @@ import {
   TranslationFile,
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
+import { findMissingPoTranslations, createUniqueKey } from './po-utils.js';
 
 export interface MissingLocaleEntry {
   path: string;
@@ -462,7 +463,34 @@ export function processLocaleTranslations(
       targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
     }
 
-    const { missingKeys, skippedKeys } = findMissingTranslations(sourceKeys, targetKeys);
+    // Use .po-specific missing detection for .po files
+    const isPoFile = sourceFile.path.endsWith('.po') || targetPath.endsWith('.po');
+    let missingKeys: Record<string, SourceKeyDetails> = {};
+    let skippedKeys: Record<string, SkippedKeyDetails> = {};
+
+    if (isPoFile && sourceFile.content && targetFile?.content) {
+      const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
+      const targetContentRaw = Buffer.from(targetFile.content, 'base64').toString();
+
+      const missingPoTranslations = findMissingPoTranslations(sourceContentRaw, targetContentRaw);
+
+      // Convert the .po missing results to the expected format
+      missingPoTranslations.forEach(missing => {
+        const key = missing.context ? createUniqueKey(missing.key, missing.context) : missing.key;
+        missingKeys[key] = {
+          value: missing.value,
+          sourceKey: key,
+          context: missing.context,
+          isPlural: missing.isPlural,
+          pluralForm: missing.pluralForm
+        };
+      });
+    } else {
+      // For other file types (yml, json), use the generic missing detection
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+      missingKeys = result.missingKeys;
+      skippedKeys = result.skippedKeys;
+    }
 
     return {
       targetPath,

@@ -1,4 +1,5 @@
 import { cloneService as defaultCloneService } from '../utils/clone-service.js';
+import { configService } from '../utils/config.js';
 import chalk from 'chalk';
 
 interface CloneDependencies {
@@ -28,6 +29,20 @@ export async function clone(
 ): Promise<CloneResult | void> {
   const { verbose = false, force = false } = options;
   const { cloneService } = deps;
+  const { findTranslationFiles } = await import('../utils/files.js');
+  const config = await configService.getProjectConfig();
+
+  // Check if project uses .po files, we don't support cloning them yet
+  if (config?.translationFiles?.pattern?.includes('.po')) {
+    const files = await findTranslationFiles(config, { parseContent: false, includeContent: false, extractKeys: false });
+    const hasPoFiles = Array.isArray(files) ? files.some(file => file.path.endsWith('.po')) : false;
+
+    if (hasPoFiles) {
+      console.log(chalk.yellow('⚠️  Clone command is not yet supported for .po (gettext) files.'));
+      console.log(chalk.gray('   Use the translate and pull commands instead.'));
+      return;
+    }
+  }
 
   if (verbose) {
     console.log(chalk.blue('Starting clone...'));

@@ -183,11 +183,23 @@ const PROJECT_TYPES: ProjectTypes = {
       'locales'
     ]
   },
+  django: {
+    directIndicators: ['manage.py'],
+    defaults: {
+      translationPath: 'translations/',
+      filePattern: '**/*.po'
+    },
+    commonPaths: [
+      'translations',
+      'locale',
+      'locales'
+    ]
+  },
   generic: {
     directIndicators: [],
     defaults: {
       translationPath: 'locales/',
-      filePattern: '**/*.{json,yml,yaml}'
+      filePattern: '**/*.{json,yml,yaml,po}'
     },
     commonPaths: [
       'src/locales',
@@ -265,7 +277,13 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         };
       }
     }
-    return { type, defaults: config.defaults };
+    return { 
+      type, 
+      defaults: {
+        ...config.defaults,
+        commonPaths: config.commonPaths
+      }
+    };
   }
 
   const commonPaths = PROJECT_TYPES.generic.commonPaths || [];
@@ -278,9 +296,16 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         defaults: {
           commonPaths: commonPaths,
           translationPath: `${translationPath}/`,
-          filePattern: contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0
-            ? '**/*.json'
-            : '**/*.{json,yml,yaml}'
+          filePattern: (() => {
+            const formats: string[] = [];
+            if (contents.jsonFiles.length > 0) formats.push('json');
+            if (contents.yamlFiles.length > 0) formats.push('yml', 'yaml');
+            if (contents.poFiles.length > 0) formats.push('po');
+
+            return formats.length === 1 && formats[0] !== 'yml'
+              ? `**/*.${formats[0]}`
+              : `**/*.{${formats.join(',')}}`;
+          })()
         }
       };
     }
@@ -358,18 +383,7 @@ async function promptForConfig(
     hint: dirHint
   });
 
-  let filePattern = projectDefaults.defaults.filePattern;
-  const contents = await getDirectoryContents(translationPath);
-
-  if (contents) {
-    if (contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0) {
-      filePattern = '**/*.json';
-    } else if (contents.jsonFiles.length === 0 && contents.yamlFiles.length > 0) {
-      filePattern = '**/*.{yml,yaml}';
-    } else if (contents.jsonFiles.length > 0 && contents.yamlFiles.length > 0) {
-      filePattern = '**/*.{json,yml,yaml}';
-    }
-  }
+  const filePattern = projectDefaults.defaults.filePattern;
 
   const ignorePaths = await promptService.input({
     message: 'Paths to ignore (comma-separated, leave empty for none):',
@@ -453,7 +467,7 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     outputLocales: answers.outputLocales,
     translationFiles: {
       paths: answers.translationPath ? [answers.translationPath] : [],
-      pattern: answers.filePattern || '**/*.{json,yml,yaml}',
+      pattern: answers.filePattern || '**/*.{json,yml,yaml,po}',
       ignore: answers.ignorePaths || []
     },
     lastSyncedAt: null

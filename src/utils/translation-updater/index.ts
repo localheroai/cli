@@ -2,6 +2,7 @@ import path from 'path';
 import { fileExists, ensureDirectoryExists } from './common.js';
 import { updateYamlFile, deleteKeysFromYamlFile } from './yaml-handler.js';
 import { updateJsonFile, deleteKeysFromJsonFile } from './json-handler.js';
+import { updatePoFile, deleteKeysFromPoFile } from './po-handler.js';
 
 /**
  * Result of updating a translation file
@@ -47,6 +48,14 @@ export async function updateTranslationFile(
     };
   }
 
+  if (fileExt === 'po') {
+    const poResult = await updatePoFile(filePath, filteredTranslations, languageCode, sourceFilePath);
+    return {
+      updatedKeys: result.updatedKeys,
+      created: poResult.created
+    };
+  }
+
   return updateYamlFile(filePath, filteredTranslations, languageCode);
 }
 
@@ -69,7 +78,15 @@ export async function deleteKeysFromTranslationFile(
   }
 
   const fileExt = path.extname(filePath).slice(1).toLowerCase();
-  return fileExt === 'json'
-    ? deleteKeysFromJsonFile(filePath, keysToDelete, languageCode)
-    : deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
+  
+  if (fileExt === 'json') {
+    return deleteKeysFromJsonFile(filePath, keysToDelete, languageCode);
+  }
+  
+  if (fileExt === 'po') {
+    await deleteKeysFromPoFile(filePath, keysToDelete);
+    return keysToDelete; // Po handler doesn't return which were actually deleted
+  }
+  
+  return deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
 }
