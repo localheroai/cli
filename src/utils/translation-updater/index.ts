@@ -120,3 +120,18 @@ export async function deleteKeysFromTranslationFile(
 
   return deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
 }
+
+async function updateDjangoSourcesFile(
+  targetPath: string,
+  translations: Record<string, unknown>,
+  languageCode: string,
+  sourceFilePath: string | null,
+  sourceLanguage?: string
+): Promise<void> {
+  const sourcePath = getDjangoSourcePath(targetPath);
+
+  const exists = await fileExists(sourcePath);
+  if (exists) {
+    await updatePoFile(sourcePath, translations, languageCode, sourceFilePath, sourceLanguage);
+  }
+}

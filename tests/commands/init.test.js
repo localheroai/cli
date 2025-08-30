@@ -246,4 +246,45 @@ describe('init command', () => {
     expect(allConsoleOutput).toContain('✓ Successfully imported translations');
     expect(allConsoleOutput).toContain('View your translations at: https://localhero.ai/projects/proj_123/translations');
   });
+
+  it('configures Django workflow for Django projects', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('django-project')
+      .mockResolvedValueOnce('sv')
+      .mockResolvedValueOnce('en,da,no')
+      .mockResolvedValueOnce('translations/')
+      .mockResolvedValueOnce('**/sources/**');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_django',
+      name: 'django-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) => {
+      if (path === 'manage.py') {
+        return Promise.resolve({ isFile: () => true });
+      }
+      return originalStat(path);
+    });
+
+    await init(createInitDeps());
+
+    const saveConfigCall = configUtils.saveProjectConfig.mock.calls[0];
+    const savedConfig = saveConfigCall[0];
+
+    expect(savedConfig.translationFiles.workflow).toBe('django');
+    expect(savedConfig.translationFiles.ignore).toContain('**/sources/**');
+    expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+
+    // Restore original stat function
+    fs.promises.stat = originalStat;
+  });
 });

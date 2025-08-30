@@ -2,9 +2,21 @@ import path from 'path';
 import { flattenTranslations, parseFile } from './files.js';
 import {
   TranslationFile,
+  ProjectConfig,
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
 import { findMissingPoTranslations, createUniqueKey } from './po-utils.js';
+
+export function isDjangoWorkflow(config: ProjectConfig): boolean {
+  return config.translationFiles?.workflow === 'django';
+}
+
+export function getDjangoSourcePath(targetPath: string): string {
+  return targetPath.replace(
+    /\/LC_MESSAGES\/([^/]+)\.po$/,
+    '/LC_MESSAGES/sources/$1-generated.po'
+  );
+}
 
 export interface MissingLocaleEntry {
   path: string;

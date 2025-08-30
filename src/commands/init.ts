@@ -23,6 +23,7 @@ interface ProjectTypeConfig {
     filePattern: string;
     commonPaths?: string[];
     ignorePaths?: string[];
+    workflow?: string;
   };
   commonPaths?: string[];
 }
@@ -40,6 +41,7 @@ interface ProjectDetectionResult {
     filePattern: string;
     commonPaths?: string[];
     ignorePaths?: string[];
+    workflow?: string;
   };
 }
 
@@ -77,7 +79,8 @@ const PROJECT_TYPES: ProjectTypes = {
     defaults: {
       translationPath: 'translations/',
       filePattern: '**/*.po',
-      ignorePaths: ['**/sources/**']
+      ignorePaths: ['**/sources/**'],
+      workflow: 'django'
     },
     commonPaths: [
       'translations',
@@ -280,8 +283,8 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         };
       }
     }
-    return { 
-      type, 
+    return {
+      type,
       defaults: {
         ...config.defaults,
         commonPaths: config.commonPaths
@@ -473,7 +476,8 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     translationFiles: {
       paths: answers.translationPath ? [answers.translationPath] : [],
       pattern: answers.filePattern || '**/*.{json,yml,yaml,po}',
-      ignore: answers.ignorePaths || []
+      ignore: answers.ignorePaths || [],
+      ...(projectDefaults.defaults.workflow && { workflow: projectDefaults.defaults.workflow as 'default' | 'django' })
     },
     lastSyncedAt: null
   };
