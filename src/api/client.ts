@@ -6,6 +6,10 @@ export function getApiHost(): string {
   return process.env.LOCALHERO_API_HOST || DEFAULT_API_HOST;
 }
 
+function sleep(seconds: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, seconds * 1000));
+}
+
 interface ApiRequestOptions {
   method?: string;
   headers?: Record<string, string>;
@@ -90,12 +94,17 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
     }
 
     if (response.status === 429 && data?.error?.code === 'rate_limit_exceeded') {
+      const retryAfter = data?.error?.retry_after || 60;
       const message = data?.error?.message || 'Rate limit exceeded. Please try again later.';
+
+      console.log(`Rate limit exceeded. Waiting ${retryAfter} seconds before retrying...`);
+      await sleep(retryAfter);
+
       const error = new ApiResponseError(message, {
         code: 'rate_limit_exceeded',
         data,
         details: {
-          retry_after: data?.error?.retry_after || 60,
+          retry_after: retryAfter,
           limit: data?.error?.limit,
           window: data?.error?.window
         },
@@ -106,10 +115,19 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
     const message = Array.isArray(data?.errors)
       ? data.errors.map((err: any) => typeof err === 'string' ? err : err.message).join(', ')
       : data?.error?.message || 'API request failed';
+
+    let cliErrorMessage = message;
+    if (data?.error?.code === 'job_creation_failed') {
+      cliErrorMessage = message;
+    } else if (response.status === 422) {
+      cliErrorMessage = `Server error: ${message}`;
+    }
+
     const error = new ApiResponseError(message, {
       code: data?.error?.code || 'API_ERROR',
       details: data?.error?.details || null,
-      data
+      data,
+      cliErrorMessage
     });
     throw error;
   }
