@@ -1,6 +1,7 @@
 import { readFile, writeFile } from 'fs/promises';
 import { fileExists } from './common.js';
-import { updatePoFile as updatePoContent, parseUniqueKey, parsePoFile, createPoFile } from '../po-utils.js';
+import { parseUniqueKey, parsePoFile, createPoFile } from '../po-utils.js';
+import { surgicalUpdatePoFile } from '../po-surgical.js';
 
 /**
  * Updates a .po file with new translations
@@ -9,8 +10,9 @@ export async function updatePoFile(
   filePath: string,
   translations: Record<string, unknown>,
   languageCode: string = 'en',
-  sourceFilePath: string | null = null
-): Promise<{ created: boolean }> {
+  sourceFilePath: string | null = null,
+  sourceLanguage?: string
+): Promise<{ created: boolean; updatedKeys: string[] }> {
   let created = false;
   const fileAlreadyExists = await fileExists(filePath);
   const stringTranslations = Object.fromEntries(
@@ -20,17 +22,43 @@ export async function updatePoFile(
     ])
   );
 
+  let updatedKeys: string[] = [];
+
   if (fileAlreadyExists) {
     const originalContent = await readFile(filePath, 'utf-8');
-    const updatedContent = updatePoContent(originalContent, stringTranslations);
-    await writeFile(filePath, updatedContent, 'utf-8');
+
+    // Get source content if available for proper msgid_plural lookup
+    let sourceContent: string | undefined;
+    if (sourceFilePath && await fileExists(sourceFilePath)) {
+      sourceContent = await readFile(sourceFilePath, 'utf-8');
+    }
+
+    const updatedContent = surgicalUpdatePoFile(originalContent, stringTranslations, {
+      sourceLanguage,
+      targetLanguage: languageCode,
+      sourceContent
+    });
+
+    // Check if content actually changed
+    if (updatedContent !== originalContent) {
+      // For .po files with surgical updates, if content changed, assume all provided keys were updated
+      // This is a simplified approach - could be made more precise by having surgicalUpdatePoFile return changed keys
+      updatedKeys = Object.keys(stringTranslations);
+      await writeFile(filePath, updatedContent, 'utf-8');
+    }
   } else {
     created = true;
+    // New file - all translations are "updates"
+    updatedKeys = Object.keys(stringTranslations);
 
     if (sourceFilePath && await fileExists(sourceFilePath)) {
       // Copy structure from source file preserving original headers
       const sourceContent = await readFile(sourceFilePath, 'utf-8');
-      const updatedContent = updatePoContent(sourceContent, stringTranslations);
+      const updatedContent = surgicalUpdatePoFile(sourceContent, stringTranslations, {
+        sourceLanguage,
+        targetLanguage: languageCode,
+        sourceContent
+      });
 
       await writeFile(filePath, updatedContent, 'utf-8');
     } else {
@@ -56,7 +84,7 @@ export async function updatePoFile(
     }
   }
 
-  return { created };
+  return { created, updatedKeys };
 }
 
 /**

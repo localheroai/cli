@@ -183,6 +183,200 @@ msgstr[1] "%(count)d items"
         metadata: 'hello_greeting'
       });
     });
+
+    it('should convert plural entries to two linked keys', () => {
+      const entries = [
+        {
+          msgid: '%(count)s mail',
+          msgstr: ['%(count)s e-post', '%(count)s e-poster'],
+          msgctxt: undefined,
+          msgid_plural: '%(count)s mails',
+          comments: undefined
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries);
+
+      // Should create two linked keys
+      expect(Object.keys(result)).toHaveLength(2);
+
+      // Singular form
+      expect(result['%(count)s mail']).toEqual({
+        value: '%(count)s e-post',
+        metadata: {
+          po_plural: true,
+          msgid_plural: '%(count)s mails',
+          plural_index: 0
+        }
+      });
+
+      // Plural form with special suffix
+      expect(result['%(count)s mail__plural_1']).toEqual({
+        value: '%(count)s e-poster',
+        metadata: {
+          po_plural: true,
+          msgid: '%(count)s mail',
+          plural_index: 1
+        }
+      });
+    });
+
+    it('should convert plural entries with context to two linked keys', () => {
+      const entries = [
+        {
+          msgid: '%(count)s page',
+          msgstr: ['%(count)s sida', '%(count)s sidor'],
+          msgctxt: 'navigation',
+          msgid_plural: '%(count)s pages',
+          comments: undefined
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries);
+
+      // Should create two linked keys with context
+      expect(result['navigation|%(count)s page']).toEqual({
+        value: '%(count)s sida',
+        context: 'navigation',
+        metadata: {
+          po_plural: true,
+          msgid_plural: '%(count)s pages',
+          plural_index: 0
+        }
+      });
+
+      expect(result['navigation|%(count)s page__plural_1']).toEqual({
+        value: '%(count)s sidor',
+        context: 'navigation',
+        metadata: {
+          po_plural: true,
+          msgid: '%(count)s page',
+          plural_index: 1
+        }
+      });
+    });
+
+    it('should convert plural entries with empty translations in source language', () => {
+      const entries = [
+        {
+          msgid: '%(count)s item',
+          msgstr: ['', ''],
+          msgctxt: undefined,
+          msgid_plural: '%(count)s items',
+          comments: undefined
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries, {
+        sourceLanguage: 'sv',
+        currentLanguage: 'sv'
+      });
+
+      // Source language should use msgid/msgid_plural as fallback values
+      expect(result['%(count)s item']).toEqual({
+        value: '%(count)s item',
+        metadata: {
+          po_plural: true,
+          msgid_plural: '%(count)s items',
+          plural_index: 0
+        }
+      });
+
+      expect(result['%(count)s item__plural_1']).toEqual({
+        value: '%(count)s items',
+        metadata: {
+          po_plural: true,
+          msgid: '%(count)s item',
+          plural_index: 1
+        }
+      });
+    });
+
+    it('should convert plural entries with empty translations in target language', () => {
+      const entries = [
+        {
+          msgid: '%(count)s item',
+          msgstr: ['', ''],
+          msgctxt: undefined,
+          msgid_plural: '%(count)s items',
+          comments: undefined
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries, {
+        sourceLanguage: 'sv',
+        currentLanguage: 'en'
+      });
+
+      // Target language should return empty values for empty translations
+      expect(result['%(count)s item']).toEqual({
+        value: '',
+        metadata: {
+          po_plural: true,
+          msgid_plural: '%(count)s items',
+          plural_index: 0
+        }
+      });
+
+      expect(result['%(count)s item__plural_1']).toEqual({
+        value: '',
+        metadata: {
+          po_plural: true,
+          msgid: '%(count)s item',
+          plural_index: 1
+        }
+      });
+    });
+
+    it('should preserve existing metadata in plural entries', () => {
+      const entries = [
+        {
+          msgid: '%(count)s guide',
+          msgstr: ['%(count)s guide', '%(count)s guider'],
+          msgctxt: undefined,
+          msgid_plural: '%(count)s guides',
+          comments: {
+            extracted: 'Translators: Number of guides'
+          }
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries);
+
+      // Should preserve translator comments in both forms
+      expect(result['%(count)s guide'].metadata).toEqual({
+        po_plural: true,
+        msgid_plural: '%(count)s guides',
+        plural_index: 0,
+        translator_comments: 'Number of guides'
+      });
+
+      expect(result['%(count)s guide__plural_1'].metadata).toEqual({
+        po_plural: true,
+        msgid: '%(count)s guide',
+        plural_index: 1,
+        translator_comments: 'Number of guides'
+      });
+    });
+
+    it('should preserve translator comments in plural forms', () => {
+      const entries = [
+        {
+          msgid: '%(count)d item',
+          msgstr: ['%(count)d item', '%(count)d items'],
+          msgid_plural: '%(count)d items',
+          comments: {
+            extracted: ['Translators: Count of items in shopping cart']
+          }
+        }
+      ];
+
+      const result = poEntriesToApiFormat(entries);
+
+      // Both singular and plural should have translator comments
+      expect(result['%(count)d item'].metadata.translator_comments).toBe('Count of items in shopping cart');
+      expect(result['%(count)d item__plural_1'].metadata.translator_comments).toBe('Count of items in shopping cart');
+    });
   });
 
   describe('findMissingPoTranslations', () => {
@@ -254,31 +448,6 @@ msgstr ""
         isPlural: false,
         pluralForm: undefined
       });
-    });
-  });
-
-  describe('updatePoFile', () => {
-    it('should update translations in .po file', () => {
-      const originalContent = `msgid ""
-msgstr ""
-
-msgid "Hello"
-msgstr ""
-
-msgctxt "ShortenedMonths"
-msgid "May"
-msgstr ""
-`;
-
-      const translations = {
-        'Hello': 'Hej',
-        'ShortenedMonths|May': 'Maj'
-      };
-
-      const result = updatePoFile(originalContent, translations);
-
-      expect(result).toContain('msgstr "Hej"');
-      expect(result).toContain('msgstr "Maj"');
     });
   });
 });

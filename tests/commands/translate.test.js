@@ -9,6 +9,7 @@ describe('translate command', () => {
   let translationUtils;
   let syncService;
   let gitUtils;
+  let execUtils;
 
   function createTranslateDeps(overrides = {}) {
     return {
@@ -19,6 +20,7 @@ describe('translate command', () => {
       translationUtils,
       syncService,
       gitUtils,
+      execUtils,
       ...overrides
     };
   }
@@ -79,6 +81,10 @@ describe('translate command', () => {
 
     gitUtils = {
       autoCommitChanges: jest.fn()
+    };
+
+    execUtils = {
+      execSync: jest.fn()
     };
   });
 
@@ -181,7 +187,16 @@ describe('translate command', () => {
       targetFilePath,
       { farewell: 'Au revoir' },
       'fr',
-      sourceFilePath
+      sourceFilePath,
+      undefined,
+      {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: {
+          paths: ['locales/']
+        }
+      }
     );
 
     expect(gitUtils.autoCommitChanges).toHaveBeenCalledWith('locales/', expect.objectContaining({
@@ -341,14 +356,32 @@ describe('translate command', () => {
       'locales/fr/common.json',
       { farewell: 'Au revoir' },
       'fr',
-      'locales/en/common.json'
+      'locales/en/common.json',
+      undefined,
+      {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: {
+          paths: ['locales/']
+        }
+      }
     );
 
     expect(translationUtils.updateTranslationFile).toHaveBeenCalledWith(
       'locales/fr/home.json',
       { welcome: 'Bienvenue' },
       'fr',
-      'locales/en/home.json'
+      'locales/en/home.json',
+      undefined,
+      {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: {
+          paths: ['locales/']
+        }
+      }
     );
 
     const consoleOutput = mockConsole.log.mock.calls
@@ -618,7 +651,16 @@ describe('translate command', () => {
       'locales/fr/common.json',
       { 'en': 'fr' },
       'fr',
-      sourceFilePath
+      sourceFilePath,
+      undefined,
+      {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: {
+          paths: ['locales/']
+        }
+      }
     );
   });
 
@@ -739,7 +781,16 @@ describe('translate command', () => {
       'locales/nb.json',
       { farewell: 'Farvel' },
       'nb',
-      sourceFilePath
+      sourceFilePath,
+      undefined,
+      {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr', 'sv', 'nb'],
+        translationFiles: {
+          paths: ['locales/']
+        }
+      }
     );
 
     // French and Swedish shouldn't have been updated since they had no missing keys
@@ -748,5 +799,60 @@ describe('translate command', () => {
     const svCall = allCalls.find(call => call[0] === 'locales/sv.json');
     expect(frCall).toBeUndefined();
     expect(svCall).toBeUndefined();
+  });
+
+  it('executes postTranslateCommand when configured', async () => {
+    const mockExecSync = jest.fn();
+
+    configUtils.getProjectConfig.mockResolvedValue({
+      projectId: 'test-project',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['locales/'] },
+      postTranslateCommand: 'npm run build-translations'
+    });
+
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+      targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+      allFiles: [
+        { path: 'locales/en.json', locale: 'en' },
+        { path: 'locales/fr.json', locale: 'fr' }
+      ]
+    });
+
+    translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+      'fr:locales/en.json': {
+        locale: 'fr',
+        path: 'locales/en.json',
+        targetPath: 'locales/fr.json',
+        keys: { hello: { value: 'Hello', sourceKey: 'hello' } },
+        keyCount: 1
+      }
+    });
+
+    translationUtils.batchKeysWithMissing.mockReturnValue({
+      batches: [{
+        sourceFilePath: 'locales/en.json',
+        sourceFile: { path: 'locales/en.json', format: 'json', content: 'test' },
+        localeEntries: ['fr:locales/en.json'],
+        locales: ['fr']
+      }],
+      errors: []
+    });
+
+    translationUtils.createTranslationJob.mockResolvedValue({
+      jobs: [{ id: 'job-123', language: { code: 'fr' } }]
+    });
+
+    translationUtils.checkJobStatus.mockResolvedValue({
+      status: 'completed',
+      translations: { data: { hello: 'Bonjour' } },
+      language: { code: 'fr' }
+    });
+
+    await translate({}, createTranslateDeps({ execUtils: { execSync: mockExecSync } }));
+
+    expect(mockExecSync).toHaveBeenCalledWith('npm run build-translations', { stdio: 'inherit' });
   });
 });

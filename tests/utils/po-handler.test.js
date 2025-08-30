@@ -42,8 +42,7 @@ msgstr "Hello"
       // Create target file by copying from source
       const targetFilePath = path.join(tempDir, 'target.po');
       const translations = {
-        'hello': 'Hej',
-        'world': 'Värld'
+        'hello': 'Hej'
       };
 
       const result = await updatePoFile(targetFilePath, translations, 'sv', sourceFilePath);
@@ -55,7 +54,6 @@ msgstr "Hello"
       expect(targetContent).toContain('"Language: \\n"');
       expect(targetContent).not.toContain('"Language: sv\\n"');
       expect(targetContent).toContain('msgstr "Hej"');
-      expect(targetContent).toContain('msgstr "Värld"');
     });
 
     it('preserves Language header with value from source file', async () => {

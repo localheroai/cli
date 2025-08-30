@@ -71,9 +71,13 @@ function getFileFormat(filePath: string): FileFormat {
 /**
  * Read file content and convert to base64
  * @param filePath Path to the file
+ * @param options Language context for proper handling
  * @returns Base64 encoded content
  */
-async function readFileContent(filePath: string): Promise<string> {
+async function readFileContent(
+  filePath: string,
+  options?: { sourceLanguage?: string; currentLanguage?: string }
+): Promise<string> {
   const content = await fs.readFile(filePath, 'utf8');
   const format = getFileFormat(filePath);
 
@@ -91,7 +95,7 @@ async function readFileContent(filePath: string): Promise<string> {
   if (format === 'po') {
     try {
       const parsed = parsePoFile(content);
-      const apiFormat = poEntriesToApiFormat(parsed.entries);
+      const apiFormat = poEntriesToApiFormat(parsed.entries, options);
       
       return Buffer.from(JSON.stringify(apiFormat)).toString('base64');
     } catch {
@@ -171,7 +175,10 @@ export const importService = {
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 
@@ -181,7 +188,10 @@ export const importService = {
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 
@@ -247,15 +257,33 @@ export const importService = {
       return { status: 'no_files' };
     }
 
+    const sourceFiles = files.filter(file => file.language === config.sourceLocale);
+    const targetFiles = files.filter(file => file.language !== config.sourceLocale);
     const allTranslations: TranslationRecord[] = [];
 
-    for (const file of files) {
+    for (const file of sourceFiles) {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
+      });
+    }
+
+    for (const file of targetFiles) {
+      const fullPath = path.join(basePath, file.path);
+      allTranslations.push({
+        language: file.language,
+        format: file.format === 'yml' ? 'yaml' : file.format,
+        filename: file.path,
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 

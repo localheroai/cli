@@ -22,6 +22,7 @@ interface ProjectTypeConfig {
     translationPath: string;
     filePattern: string;
     commonPaths?: string[];
+    ignorePaths?: string[];
   };
   commonPaths?: string[];
 }
@@ -38,6 +39,7 @@ interface ProjectDetectionResult {
     translationPath: string;
     filePattern: string;
     commonPaths?: string[];
+    ignorePaths?: string[];
   };
 }
 
@@ -70,6 +72,19 @@ interface InitAnswers {
 }
 
 const PROJECT_TYPES: ProjectTypes = {
+  django: {
+    directIndicators: ['manage.py'],
+    defaults: {
+      translationPath: 'translations/',
+      filePattern: '**/*.po',
+      ignorePaths: ['**/sources/**']
+    },
+    commonPaths: [
+      'translations',
+      'locale',
+      'locales'
+    ]
+  },
   rails: {
     directIndicators: ['config/application.rb', 'Gemfile'],
     defaults: {
@@ -180,18 +195,6 @@ const PROJECT_TYPES: ProjectTypes = {
       'src/translations',
       'src/lang',
       'assets/i18n',
-      'locales'
-    ]
-  },
-  django: {
-    directIndicators: ['manage.py'],
-    defaults: {
-      translationPath: 'translations/',
-      filePattern: '**/*.po'
-    },
-    commonPaths: [
-      'translations',
-      'locale',
       'locales'
     ]
   },
@@ -385,9 +388,11 @@ async function promptForConfig(
 
   const filePattern = projectDefaults.defaults.filePattern;
 
+  const defaultIgnorePaths = projectDefaults.defaults.ignorePaths || [];
   const ignorePaths = await promptService.input({
     message: 'Paths to ignore (comma-separated, leave empty for none):',
-    hint: '  Example: locales/ignored,locales/temp'
+    hint: '  Example: locales/ignored,locales/temp',
+    default: defaultIgnorePaths.join(', ')
   });
 
   if (!existingProject) {

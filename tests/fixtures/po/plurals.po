@@ -1,0 +1,26 @@
+# Plural forms test file
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: helpers.py
+#, python-format
+msgid "%(count)d item"
+msgid_plural "%(count)d items"
+msgstr[0] "%(count)d objekt"
+msgstr[1] "%(count)d objekt"
+
+#: views.py
+#, python-format
+msgid "%(count)s mail"
+msgid_plural "%(count)s mail"
+msgstr[0] "%(count)s e-post"
+msgstr[1] "%(count)s e-post"
+
+#: templates/dashboard.html
+#, python-format
+msgid "%(count)s conversation"
+msgid_plural "%(count)s conversations"
+msgstr[0] "%(count)s konversation"
+msgstr[1] "%(count)s konversationer"

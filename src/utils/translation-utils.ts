@@ -187,7 +187,7 @@ export function findMissingTranslationsByLocale(
 }
 
 /**
- * Batch missing keys by source file
+ * Batch missing keys by source file (optimized for unique key sets)
  * @param sourceFiles Array of source translation files
  * @param missingByLocale Record of missing keys by locale and source file
  * @returns Result containing batches and errors
@@ -208,7 +208,7 @@ export function batchKeysWithMissing(
 
   const entriesBySourceFile: Record<string, SourceFileData> = {};
 
-  // Group entries by source file
+  // Group entries by source file (back to original approach for predictable behavior)
   for (const [localeSourceKey, entry] of Object.entries(missingByLocale)) {
     const { path: sourceFilePath } = entry;
 

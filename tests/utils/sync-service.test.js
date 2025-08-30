@@ -56,7 +56,7 @@ describe('syncService', () => {
 
     await jest.unstable_mockModule('../../src/api/translations.js', () => mockTranslationsApi);
 
-    await jest.unstable_mockModule('../../src/utils/translation-updater.js', () => mockTranslationUpdater);
+    await jest.unstable_mockModule('../../src/utils/translation-updater/index.js', () => mockTranslationUpdater);
 
     await jest.unstable_mockModule('../../src/utils/files.js', () => ({
       findTranslationFiles: mockFilesUtils.findTranslationFiles
@@ -148,7 +148,7 @@ describe('syncService', () => {
 
       await syncService.checkForUpdates({ verbose: true });
 
-      expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(100);
+      expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(500);
     });
 
     it('includes deleted keys in the updates', async () => {
@@ -199,6 +199,12 @@ describe('syncService', () => {
     };
 
     it('applies updates successfully', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr']
+      });
+
       mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
         sourceFiles: [
           { path: 'locales/en.json', locale: 'en' }
@@ -207,7 +213,10 @@ describe('syncService', () => {
         targetFilesByLocale: {}
       });
 
-      mockTranslationUpdater.updateTranslationFile.mockResolvedValue();
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['greeting', 'farewell'],
+        created: false
+      });
       mockConfigService.updateLastSyncedAt.mockResolvedValue();
 
       const result = await syncService.applyUpdates(testUpdates, { verbose: true });
@@ -220,7 +229,13 @@ describe('syncService', () => {
           farewell: 'Goodbye'
         },
         'en',
-        'locales/en.json'
+        'locales/en.json',
+        'en',
+        {
+          projectId: 'test-project',
+          sourceLocale: 'en',
+          outputLocales: ['fr']
+        }
       );
       expect(mockConfigService.updateLastSyncedAt).toHaveBeenCalled();
     });
@@ -269,6 +284,12 @@ describe('syncService', () => {
     });
 
     it('handles long translation values in verbose mode', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr']
+      });
+
       mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
         sourceFiles: [
           { path: 'locales/en.json', locale: 'en' }
@@ -298,7 +319,10 @@ describe('syncService', () => {
         }
       };
 
-      mockTranslationUpdater.updateTranslationFile.mockResolvedValue();
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['long_text'],
+        created: false
+      });
       mockConfigService.updateLastSyncedAt.mockResolvedValue();
 
       await syncService.applyUpdates(longUpdates, { verbose: true });
@@ -307,7 +331,13 @@ describe('syncService', () => {
         'locales/en.json',
         { long_text: 'a'.repeat(200) },
         'en',
-        'locales/en.json'
+        'locales/en.json',
+        'en',
+        {
+          projectId: 'test-project',
+          sourceLocale: 'en',
+          outputLocales: ['fr']
+        }
       );
 
       const logCall = mockConsole.log.mock.calls.find(call =>

@@ -1,4 +1,7 @@
 import { po } from 'gettext-parser';
+import { surgicalUpdatePoFile } from './po-surgical.js';
+
+export const PLURAL_SUFFIX = '__plural_1';
 
 export interface PoEntry {
   msgid: string;
@@ -71,50 +74,73 @@ export function parseUniqueKey(key: string): { msgid: string; context?: string }
 /**
  * Convert .po entries to API compatible format
  */
-export function poEntriesToApiFormat(entries: PoEntry[]): Record<string, any> {
+export function poEntriesToApiFormat(
+  entries: PoEntry[],
+  options?: { sourceLanguage?: string; currentLanguage?: string }
+): Record<string, any> {
   const keys: Record<string, any> = {};
 
   entries.forEach(entry => {
     const uniqueKey = createUniqueKey(entry.msgid, entry.msgctxt);
 
-    let metadata: string | undefined;
+    let translatorComments: string | undefined;
     if (entry.comments?.extracted) {
       const extractedComments = Array.isArray(entry.comments.extracted)
         ? entry.comments.extracted
         : [entry.comments.extracted];
 
-      const translatorComments = extractedComments
+      const comments = extractedComments
         .filter((comment: string) => comment.startsWith('Translators:'))
         .map((comment: string) => comment.replace(/^Translators:\s*/, '').trim())
         .filter((comment: string) => comment.length > 0);
 
-      if (translatorComments.length > 0) {
-        metadata = translatorComments.join(', ');
+      if (comments.length > 0) {
+        translatorComments = comments.join(', ');
       }
     }
 
-    const keyData: any = {
-      value: (entry.msgstr && entry.msgstr[0]) || entry.msgid
-    };
-
-    if (metadata) {
-      keyData.metadata = metadata;
-    }
-
-    if (entry.msgctxt) {
-      keyData.context = entry.msgctxt;
-    }
-
-    keys[uniqueKey] = keyData;
-
     if (entry.msgid_plural) {
-      const pluralKey = createUniqueKey(entry.msgid_plural, entry.msgctxt);
-      const pluralKeyData: any = {
-        value: (entry.msgstr && entry.msgstr[1]) || entry.msgid_plural
+      const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
+        options.sourceLanguage === options.currentLanguage;
+      const singularValue = entry.msgstr && entry.msgstr[0] ? entry.msgstr[0] :
+        (isSourceLanguage ? entry.msgid : '');
+
+      const singularKeyData: any = {
+        value: singularValue,
+        metadata: {
+          po_plural: true,
+          msgid_plural: entry.msgid_plural,
+          plural_index: 0
+        }
       };
 
-      if (metadata) {
-        pluralKeyData.metadata = metadata;
+      if (translatorComments) {
+        singularKeyData.metadata.translator_comments = translatorComments;
+      }
+
+      if (entry.msgctxt) {
+        singularKeyData.context = entry.msgctxt;
+      }
+
+      keys[uniqueKey] = singularKeyData;
+
+      // Plural form with special suffix
+      const pluralKey = uniqueKey + PLURAL_SUFFIX;
+      const pluralValue = entry.msgstr && entry.msgstr[1] ? entry.msgstr[1] :
+        (isSourceLanguage ? entry.msgid_plural : '');
+
+      const pluralKeyData: any = {
+        value: pluralValue,
+        metadata: {
+          po_plural: true,
+          msgid: entry.msgid,
+          plural_index: 1
+        }
+      };
+
+      // Include translator comments in plural metadata
+      if (translatorComments) {
+        pluralKeyData.metadata.translator_comments = translatorComments;
       }
 
       if (entry.msgctxt) {
@@ -122,6 +148,26 @@ export function poEntriesToApiFormat(entries: PoEntry[]): Record<string, any> {
       }
 
       keys[pluralKey] = pluralKeyData;
+    } else {
+      // Handle regular (non-plural) entries
+      const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
+        options.sourceLanguage === options.currentLanguage;
+      const value = entry.msgstr && entry.msgstr[0] ? entry.msgstr[0] :
+        (isSourceLanguage ? entry.msgid : '');
+
+      const keyData: any = {
+        value: value
+      };
+
+      if (translatorComments) {
+        keyData.metadata = translatorComments;
+      }
+
+      if (entry.msgctxt) {
+        keyData.context = entry.msgctxt;
+      }
+
+      keys[uniqueKey] = keyData;
     }
   });
 
@@ -163,7 +209,8 @@ export function createPoFile(entries: PoEntry[], headers?: Record<string, string
     poData.translations[context][entry.msgid] = translationEntry;
   });
 
-  return po.compile(poData).toString();
+  // For new files, disable folding to avoid arbitrary line breaks
+  return po.compile(poData, { foldLength: 0 }).toString();
 }
 
 /**
@@ -196,20 +243,57 @@ export function findMissingPoTranslations(
     const key = createUniqueKey(entry.msgid, entry.msgctxt);
     const targetEntry = targetMap.get(key);
 
-    // Check if translation is missing or empty
-    const isEmpty = !targetEntry ||
-      !targetEntry.msgstr ||
-      !targetEntry.msgstr[0] ||
-      targetEntry.msgstr[0].trim() === '';
+    if (entry.msgid_plural) {
+      // Handle plural entries - check both singular and plural forms
 
-    if (isEmpty) {
-      missing.push({
-        key: entry.msgid,
-        context: entry.msgctxt,
-        value: entry.msgid,
-        isPlural: !!entry.msgid_plural,
-        pluralForm: entry.msgid_plural
-      });
+      // Check singular form (msgstr[0])
+      const singularEmpty = !targetEntry ||
+        !targetEntry.msgstr ||
+        !targetEntry.msgstr[0] ||
+        targetEntry.msgstr[0].trim() === '';
+
+      if (singularEmpty) {
+        missing.push({
+          key: entry.msgid,
+          context: entry.msgctxt,
+          value: entry.msgid,
+          isPlural: true,
+          pluralForm: entry.msgid_plural
+        });
+      }
+
+      // Check plural form (msgstr[1]) - use the __plural_1 suffix to match our key structure
+      const pluralEmpty = !targetEntry ||
+        !targetEntry.msgstr ||
+        !targetEntry.msgstr[1] ||
+        targetEntry.msgstr[1].trim() === '';
+
+      if (pluralEmpty) {
+        const pluralKey = key + PLURAL_SUFFIX;
+        missing.push({
+          key: pluralKey,
+          context: entry.msgctxt,
+          value: entry.msgid_plural,
+          isPlural: true,
+          pluralForm: entry.msgid_plural
+        });
+      }
+    } else {
+      // Handle regular (non-plural) entries
+      const isEmpty = !targetEntry ||
+        !targetEntry.msgstr ||
+        !targetEntry.msgstr[0] ||
+        targetEntry.msgstr[0].trim() === '';
+
+      if (isEmpty) {
+        missing.push({
+          key: entry.msgid,
+          context: entry.msgctxt,
+          value: entry.msgid,
+          isPlural: false,
+          pluralForm: entry.msgid_plural
+        });
+      }
     }
   });
 
@@ -217,62 +301,12 @@ export function findMissingPoTranslations(
 }
 
 /**
- * Update existing .po file with new translations
+ * Normalize a string value by joining multiline parts and trimming
+ * This handles cases where gettext line wrapping differs but content is identical
  */
-export function updatePoFile(
-  originalContent: string,
-  translations: Record<string, string>
-): string {
-  const parsed = po.parse(originalContent);
-  const updatedTranslations = new Set<string>();
-
-  // Update existing translations
-  Object.entries(parsed.translations).forEach(([context, entries]) => {
-    if (typeof entries === 'object' && entries !== null) {
-      Object.entries(entries).forEach(([msgid, entry]: [string, any]) => {
-        if (msgid === '') return; // Skip header
-
-        const uniqueKey = createUniqueKey(msgid, context !== '' ? context : undefined);
-
-        if (translations[uniqueKey]) {
-          if (entry.msgid_plural) {
-            // Handle plural forms
-            entry.msgstr[0] = translations[uniqueKey];
-            const pluralKey = createUniqueKey(entry.msgid_plural, context !== '' ? context : undefined);
-            if (translations[pluralKey]) {
-              entry.msgstr[1] = translations[pluralKey];
-            }
-          } else {
-            entry.msgstr = [translations[uniqueKey]];
-          }
-          updatedTranslations.add(uniqueKey);
-        }
-      });
-    }
-  });
-
-  // Add new translations that weren't found in existing entries
-  Object.entries(translations).forEach(([uniqueKey, value]) => {
-    if (!updatedTranslations.has(uniqueKey)) {
-      const { msgid, context } = parseUniqueKey(uniqueKey);
-      const contextKey = context || '';
-
-      // Skip if msgid is empty (this can happen with malformed keys)
-      if (!msgid || msgid.trim() === '') {
-        return;
-      }
-
-      // Initialize context if it doesn't exist
-      if (!parsed.translations[contextKey]) {
-        parsed.translations[contextKey] = {};
-      }
-
-      parsed.translations[contextKey][msgid] = {
-        msgid: msgid,
-        msgstr: [value]
-      };
-    }
-  });
-
-  return po.compile(parsed).toString();
+export function normalizeStringValue(value: string | string[]): string {
+  if (Array.isArray(value)) {
+    return value.join('').trim();
+  }
+  return (value || '').trim();
 }

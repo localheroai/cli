@@ -1,0 +1,28 @@
+# Edge cases test file
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+# Empty msgstr
+msgid "Empty translation"
+msgstr ""
+
+# Escaped quotes
+msgid "He said \"Hello\" to me"
+msgstr "Han sa \"Hej\" till mig"
+
+# Multiline with quotes
+msgid ""
+"This message contains \"quotes\" and spans multiple lines to test how we "
+"handle complex escaping scenarios properly."
+msgstr ""
+"Detta meddelande innehåller \"citattecken\" och sträcker sig över flera "
+"rader för att testa hur vi hanterar komplexa escape-scenarier korrekt."
+
+# Special characters
+msgid "Special chars: åäö ñ € © ® ™"
+msgstr "Specialtecken: åäö ñ € © ® ™"
+
+# Very long single line
+msgid "This is a very long single-line message that might exceed typical line length limits used in gettext files and should not be wrapped by our surgical editing approach because it was originally formatted this way"
+msgstr "Detta är ett mycket långt enradigt meddelande som kan överstiga typiska radlängdsgränser som används i gettext-filer och bör inte brytas av vårt kirurgiska redigeringsmetod eftersom det ursprungligen formaterades på detta sätt"

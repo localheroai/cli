@@ -3,13 +3,15 @@ import { fileExists, ensureDirectoryExists } from './common.js';
 import { updateYamlFile, deleteKeysFromYamlFile } from './yaml-handler.js';
 import { updateJsonFile, deleteKeysFromJsonFile } from './json-handler.js';
 import { updatePoFile, deleteKeysFromPoFile } from './po-handler.js';
+import { isDjangoWorkflow, getDjangoSourcePath } from '../translation-utils.js';
+import type { ProjectConfig } from '../../types/index.js';
 
 /**
  * Result of updating a translation file
  */
 interface UpdateResult {
-    updatedKeys: string[];
-    created: boolean;
+  updatedKeys: string[];
+  created: boolean;
 }
 
 /**
@@ -24,14 +26,33 @@ interface UpdateResult {
 export async function updateTranslationFile(
   filePath: string,
   translations: Record<string, unknown>,
+  languageCode?: string,
+  sourceFilePath?: string | null,
+  sourceLanguage?: string,
+  config?: ProjectConfig
+): Promise<UpdateResult> {
+  const actualLanguageCode = languageCode || 'en';
+  const actualSourceFilePath = sourceFilePath || null;
+
+  return _updateTranslationFile(
+    filePath,
+    translations,
+    actualLanguageCode,
+    actualSourceFilePath,
+    sourceLanguage,
+    config
+  );
+}
+
+async function _updateTranslationFile(
+  filePath: string,
+  translations: Record<string, unknown>,
   languageCode: string = 'en',
-  sourceFilePath: string | null = null
+  sourceFilePath: string | null = null,
+  sourceLanguage?: string,
+  config?: ProjectConfig
 ): Promise<UpdateResult> {
   const fileExt = path.extname(filePath).slice(1).toLowerCase();
-  const result: UpdateResult = {
-    updatedKeys: Object.keys(translations),
-    created: false
-  };
 
   await ensureDirectoryExists(filePath);
 
@@ -43,20 +64,29 @@ export async function updateTranslationFile(
   if (fileExt === 'json') {
     const jsonResult = await updateJsonFile(filePath, filteredTranslations, languageCode, sourceFilePath);
     return {
-      updatedKeys: result.updatedKeys,
+      updatedKeys: jsonResult.updatedKeys || Object.keys(filteredTranslations),
       created: jsonResult.created
     };
   }
 
   if (fileExt === 'po') {
-    const poResult = await updatePoFile(filePath, filteredTranslations, languageCode, sourceFilePath);
+    const poResult = await updatePoFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);
+
+    if (config && isDjangoWorkflow(config) && Object.keys(filteredTranslations).length > 0) {
+      await updateDjangoSourcesFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);
+    }
+
     return {
-      updatedKeys: result.updatedKeys,
+      updatedKeys: poResult.updatedKeys,
       created: poResult.created
     };
   }
 
-  return updateYamlFile(filePath, filteredTranslations, languageCode);
+  const yamlResult = await updateYamlFile(filePath, filteredTranslations, languageCode);
+  return {
+    updatedKeys: yamlResult.updatedKeys || Object.keys(filteredTranslations),
+    created: yamlResult.created
+  };
 }
 
 /**
@@ -78,15 +108,15 @@ export async function deleteKeysFromTranslationFile(
   }
 
   const fileExt = path.extname(filePath).slice(1).toLowerCase();
-  
+
   if (fileExt === 'json') {
     return deleteKeysFromJsonFile(filePath, keysToDelete, languageCode);
   }
-  
+
   if (fileExt === 'po') {
     await deleteKeysFromPoFile(filePath, keysToDelete);
-    return keysToDelete; // Po handler doesn't return which were actually deleted
+    return keysToDelete;
   }
-  
+
   return deleteKeysFromYamlFile(filePath, keysToDelete, languageCode);
 }
