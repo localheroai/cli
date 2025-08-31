@@ -140,6 +140,30 @@ describe('po-surgical', () => {
       expect(result).toContain('%(count)s brev');
       expect(result).toContain('%(count)s e-post');
     });
+
+    test('should handle __plural_1 suffix keys correctly', () => {
+      const original = `# Test file for __plural_1 suffix handling
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#: test.py
+msgid "item"
+msgid_plural "items"
+msgstr[0] "objekt"
+msgstr[1] ""
+`;
+
+      const translations = {
+        'item__plural_1': 'objekts' // This should update msgstr[1]
+      };
+
+      const result = surgicalUpdatePoFile(original, translations);
+
+      expect(result).toContain('msgstr[1] "objekts"');
+      expect(result).toContain('msgstr[0] "objekt"');
+      expect(result).not.toContain('msgstr[1] ""');
+    });
   });
 
   describe('Context (msgctxt) Handling', () => {

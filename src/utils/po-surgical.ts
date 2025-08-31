@@ -42,8 +42,17 @@ export function surgicalUpdatePoFile(
 
         if (entry.msgid_plural) {
           const pluralKey = createUniqueKey(entry.msgid_plural, contextValue);
-          if (translations[pluralKey] && entry.msgid_plural !== msgid) {
-            const newPluralValue = translations[pluralKey];
+          const pluralSuffixKey = uniqueKey + PLURAL_SUFFIX;
+
+          // Check for __plural_1 suffix key first, then fallback to msgid_plural key
+          let newPluralValue = '';
+          if (translations[pluralSuffixKey]) {
+            newPluralValue = translations[pluralSuffixKey];
+          } else if (translations[pluralKey] && entry.msgid_plural !== msgid) {
+            newPluralValue = translations[pluralKey];
+          }
+
+          if (newPluralValue) {
             const currentPluralValue = normalizeStringValue(entry.msgstr[1] || '');
             const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
 
@@ -117,7 +126,7 @@ function isUsedAsPluralForm(uniqueKey: string, parsed: any): boolean {
   const { msgid } = parseUniqueKey(uniqueKey);
 
   // Check all contexts for entries that use this msgid as msgid_plural
-  for (const [context, entries] of Object.entries(parsed.translations)) {
+  for (const [, entries] of Object.entries(parsed.translations)) {
     if (typeof entries === 'object' && entries !== null) {
       for (const [entryMsgid, entry] of Object.entries(entries as any)) {
         if (entryMsgid !== '' && (entry as any).msgid_plural === msgid) {
@@ -241,14 +250,25 @@ function processLineByLine(
         // Handle plural forms
         if (entry.msgid_plural) {
           const pluralKey = createUniqueKey(entry.msgid_plural, contextValue);
-          // Only handle plural form if it's different from the singular msgid
-          if (translations[pluralKey] && entry.msgid_plural !== msgid) {
-            const newPluralValue = translations[pluralKey];
+          const pluralSuffixKey = uniqueKey + PLURAL_SUFFIX;
+
+          let pluralTranslationKey = '';
+          let newPluralValue = '';
+
+          if (translations[pluralSuffixKey]) {
+            pluralTranslationKey = pluralSuffixKey;
+            newPluralValue = translations[pluralSuffixKey];
+          } else if (translations[pluralKey] && entry.msgid_plural !== msgid) {
+            pluralTranslationKey = pluralKey;
+            newPluralValue = translations[pluralKey];
+          }
+
+          if (pluralTranslationKey && newPluralValue) {
             const currentPluralValue = normalizeStringValue(entry.msgstr[1] || '');
             const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
 
             if (currentPluralValue !== normalizedNewPluralValue) {
-              changesToMake.set(pluralKey, newPluralValue);
+              changesToMake.set(pluralTranslationKey, newPluralValue);
             }
           }
         }
@@ -394,11 +414,20 @@ function processLineByLine(
       if (pluralIndex === 0) {
         keyToCheck = createUniqueKey(currentEntry.msgid!, currentEntry.msgctxt);
       } else {
-        keyToCheck = createUniqueKey(currentEntry.msgid_plural!, currentEntry.msgctxt);
-        // For msgstr[1], only update if the msgid_plural is different from msgid
-        // Otherwise msgstr[1] would get the same translation as msgstr[0]
-        if (currentEntry.msgid_plural === currentEntry.msgid) {
-          keyToCheck = ''; // Use empty key to prevent match
+        // For plural forms, check for the __plural_1 suffix key first
+        const baseKey = createUniqueKey(currentEntry.msgid!, currentEntry.msgctxt);
+        const pluralSuffixKey = baseKey + PLURAL_SUFFIX;
+
+        // Try the __plural_1 key first, fall back to msgid_plural key
+        if (changesToMake.has(pluralSuffixKey)) {
+          keyToCheck = pluralSuffixKey;
+        } else {
+          keyToCheck = createUniqueKey(currentEntry.msgid_plural!, currentEntry.msgctxt);
+          // For msgstr[1], only update if the msgid_plural is different from msgid
+          // Otherwise msgstr[1] would get the same translation as msgstr[0]
+          if (currentEntry.msgid_plural === currentEntry.msgid) {
+            keyToCheck = ''; // Use empty key to prevent match
+          }
         }
       }
 
