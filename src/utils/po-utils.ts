@@ -1,5 +1,4 @@
 import { po } from 'gettext-parser';
-import { surgicalUpdatePoFile } from './po-surgical.js';
 
 export const PLURAL_SUFFIX = '__plural_1';
 
