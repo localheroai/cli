@@ -253,7 +253,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           const err = error as Error;
           console.warn(chalk.yellow(`\nℹ postTranslateCommand failed: ${err.message}`));
         }
-        console.log("");
+        console.log('');
       }
 
       try {
