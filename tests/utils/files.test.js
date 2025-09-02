@@ -750,6 +750,32 @@ en:
     expect(result.targetFilesByLocale.en).toHaveLength(0);
   });
 
+  it('detects locale from Django-style .po file paths without special po detection', async () => {
+    mockGlob.mockResolvedValue([
+      'translations/sv/LC_MESSAGES/django.po',
+      'translations/en/LC_MESSAGES/django.po'
+    ]);
+    mockReadFile.mockImplementation(() => Promise.resolve('msgid "hello"\nmsgstr ""'));
+
+    const config = {
+      sourceLocale: 'en',
+      outputLocales: ['sv'],
+      translationFiles: {
+        paths: ['translations/']
+      }
+    };
+
+    const result = await findTranslationFiles(config, {
+      returnFullResult: true
+    });
+
+    expect(result.sourceFiles).toHaveLength(1);
+    expect(result.sourceFiles[0].locale).toBe('en');
+    expect(result.targetFilesByLocale.sv).toHaveLength(1);
+    expect(result.targetFilesByLocale.sv[0].locale).toBe('sv');
+    expect(result.allFiles).toHaveLength(2);
+  });
+
   describe('detectJsonFormat', () => {
     it('detects flat format', () => {
       const obj = {
@@ -1147,7 +1173,8 @@ en:
       expect(result).toEqual({
         files: mockFiles,
         jsonFiles: ['file1.json'],
-        yamlFiles: ['file2.yml', 'file3.yaml']
+        yamlFiles: ['file2.yml', 'file3.yaml'],
+        poFiles: []
       });
       expect(mockFs.readdir).toHaveBeenCalledWith('/test/dir');
     });

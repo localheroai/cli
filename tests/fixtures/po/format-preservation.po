@@ -1,0 +1,40 @@
+# Format Preservation Test Cases
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: de\n"
+
+# Case 1: Single line that should remain single line when content unchanged
+#, python-format
+msgid "%(limited_access_editors_count)s användare har begränsad behörighet i Kundo."
+msgstr "%(limited_access_editors_count)s Nutzer haben eingeschränkte Zugriffsberechtigung in Kundo."
+
+# Case 2: Multiline with empty first line - should preserve this format
+#, python-format
+msgid "%(count)d users have full access."
+msgid_plural "%(count)d users have full access."
+msgstr[0] ""
+"%(limited_access_editors_count)s Nutzer haben eingeschränkte Zugriffsberechtigung in Kundo. Die eingeschränkten Zugriffsberechtigungen gelten für alle Kanäle, mit denen der Nutzer verbunden ist. Alle neu angelegten Nutzer verfügen über einen eingeschränkten Zugriff."
+msgstr[1] ""
+"%(limited_access_editors_count)s Nutzer haben eingeschränkte Zugriffsberechtigung in Kundo. Die eingeschränkten Zugriffsberechtigungen gelten für alle Kanäle, mit denen der Nutzer verbunden ist. Alle neu angelegten Nutzer verfügen über einen eingeschränkten Zugriff."
+
+# Case 3: Multiline with content split across lines - should preserve line breaks
+msgid_plural ""
+"Du och %(full_access_editors_count)s till användare har full behörighet."
+msgstr[0] ""
+"Sie und %(full_access_editors_count)s weitere Nutzer haben volle "
+"Zugriffsberechtigung."
+msgstr[1] ""
+"Sie und %(full_access_editors_count)s weitere Benutzer haben volle "
+"Zugriffsberechtigung."
+
+# Case 4: Danish example - similar multiline pattern
+msgid "%(limited_access_editors_count)s användare har begränsad behörighet."
+msgstr[0] ""
+"%(limited_access_editors_count)s bruger har begrænset adgang i Kundo. "
+"Begrænset adgang gælder i alle kanaler som brugeren er tilføjet. Alle nye "
+"brugere som tilføjes får begrænset adgang."
+
+# Case 5: Short message that shouldn't be reformatted
+msgid "Save"
+msgstr "Spara"

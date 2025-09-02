@@ -10,6 +10,7 @@ export interface TranslationFileConfig {
   pattern?: string;
   ignore?: string[];
   localeRegex?: string;
+  workflow?: 'default' | 'django';
 }
 
 // Translation file interface
@@ -48,6 +49,16 @@ export interface ProjectConfig {
 
   /** Last time translations were synced */
   lastSyncedAt: string | null;
+
+  /** Command to run after translations are updated but before commit */
+  postTranslateCommand?: string;
+
+  /** Django workflow configuration */
+  django?: {
+    updateSources?: boolean;
+    sourcesPattern?: string;
+    preserveTranslations?: boolean;
+  };
 }
 
 // Simplified translation config

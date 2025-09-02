@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { nanoid } from 'nanoid';
+import { execSync } from 'child_process';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus } from '../api/translations.js';
@@ -65,7 +66,9 @@ interface TranslationDependencies {
       targetPath: string,
       translations: any,
       languageCode: string,
-      sourcePath: string
+      sourcePath: string,
+      sourceLanguage?: string,
+      config?: ProjectConfig
     ) => Promise<any>;
     findMissingTranslations: (sourceFile: any, targetFiles: any[], config: ProjectConfig) => any;
     batchKeysWithMissing: (
@@ -87,6 +90,9 @@ interface TranslationDependencies {
       viewUrl?: string;
     }) => void;
   };
+  execUtils: {
+    execSync: (command: string, options?: any) => Buffer | string;
+  };
 }
 
 const defaultDeps: TranslationDependencies = {
@@ -102,11 +108,12 @@ const defaultDeps: TranslationDependencies = {
     batchKeysWithMissing,
     findMissingTranslationsByLocale
   },
-  gitUtils: { autoCommitChanges }
+  gitUtils: { autoCommitChanges },
+  execUtils: { execSync }
 };
 
 export async function translate(options: TranslationOptions = {}, deps: TranslationDependencies = defaultDeps): Promise<void> {
-  const { console, configUtils, authUtils, fileUtils, translationUtils, gitUtils } = deps;
+  const { console, configUtils, authUtils, fileUtils, translationUtils, gitUtils, execUtils } = deps;
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
@@ -233,6 +240,22 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
 
     if (translationResult.uniqueKeysTranslated.size > 0) {
+      if (config.postTranslateCommand) {
+        try {
+          if (verbose) {
+            console.log(chalk.blue(`\nℹ Executing postTranslateCommand: ${config.postTranslateCommand}`));
+          }
+          execUtils.execSync(config.postTranslateCommand, { stdio: 'inherit' });
+          if (verbose) {
+            console.log(chalk.green('✓ postTranslateCommand completed successfully'));
+          }
+        } catch (error) {
+          const err = error as Error;
+          console.warn(chalk.yellow(`\nℹ postTranslateCommand failed: ${err.message}`));
+        }
+        console.log('');
+      }
+
       try {
         gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
           keysTranslated: translationResult.uniqueKeysTranslated.size,

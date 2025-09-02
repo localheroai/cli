@@ -2,6 +2,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations } from '../api/imports.js';
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
+import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import {
   ProjectConfig,
   TranslationFile,
@@ -11,7 +12,7 @@ import {
 /**
  * File format supported by the import service
  */
-export type FileFormat = 'json' | 'yaml' | null;
+export type FileFormat = 'json' | 'yaml' | 'po' | null;
 
 /**
  * File details for import operations
@@ -63,15 +64,20 @@ function getFileFormat(filePath: string): FileFormat {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.json') return 'json';
   if (ext === '.yml' || ext === '.yaml') return 'yaml';
+  if (ext === '.po') return 'po';
   return null;
 }
 
 /**
  * Read file content and convert to base64
  * @param filePath Path to the file
+ * @param options Language context for proper handling
  * @returns Base64 encoded content
  */
-async function readFileContent(filePath: string): Promise<string> {
+async function readFileContent(
+  filePath: string,
+  options?: { sourceLanguage?: string; currentLanguage?: string }
+): Promise<string> {
   const content = await fs.readFile(filePath, 'utf8');
   const format = getFileFormat(filePath);
 
@@ -81,6 +87,17 @@ async function readFileContent(filePath: string): Promise<string> {
       const flattened = flattenTranslations(jsonContent);
 
       return Buffer.from(JSON.stringify(flattened)).toString('base64');
+    } catch {
+      return Buffer.from(content).toString('base64');
+    }
+  }
+
+  if (format === 'po') {
+    try {
+      const parsed = parsePoFile(content);
+      const apiFormat = poEntriesToApiFormat(parsed.entries, options);
+      
+      return Buffer.from(JSON.stringify(apiFormat)).toString('base64');
     } catch {
       return Buffer.from(content).toString('base64');
     }
@@ -158,7 +175,10 @@ export const importService = {
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 
@@ -168,7 +188,10 @@ export const importService = {
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 
@@ -234,15 +257,33 @@ export const importService = {
       return { status: 'no_files' };
     }
 
+    const sourceFiles = files.filter(file => file.language === config.sourceLocale);
+    const targetFiles = files.filter(file => file.language !== config.sourceLocale);
     const allTranslations: TranslationRecord[] = [];
 
-    for (const file of files) {
+    for (const file of sourceFiles) {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
         format: file.format === 'yml' ? 'yaml' : file.format,
         filename: file.path,
-        content: await readFileContent(fullPath)
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
+      });
+    }
+
+    for (const file of targetFiles) {
+      const fullPath = path.join(basePath, file.path);
+      allTranslations.push({
+        language: file.language,
+        format: file.format === 'yml' ? 'yaml' : file.format,
+        filename: file.path,
+        content: await readFileContent(fullPath, {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        })
       });
     }
 

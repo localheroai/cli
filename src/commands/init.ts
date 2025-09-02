@@ -22,6 +22,8 @@ interface ProjectTypeConfig {
     translationPath: string;
     filePattern: string;
     commonPaths?: string[];
+    ignorePaths?: string[];
+    workflow?: string;
   };
   commonPaths?: string[];
 }
@@ -38,6 +40,8 @@ interface ProjectDetectionResult {
     translationPath: string;
     filePattern: string;
     commonPaths?: string[];
+    ignorePaths?: string[];
+    workflow?: string;
   };
 }
 
@@ -70,6 +74,20 @@ interface InitAnswers {
 }
 
 const PROJECT_TYPES: ProjectTypes = {
+  django: {
+    directIndicators: ['manage.py'],
+    defaults: {
+      translationPath: 'translations/',
+      filePattern: '**/*.po',
+      ignorePaths: ['**/sources/**'],
+      workflow: 'django'
+    },
+    commonPaths: [
+      'translations',
+      'locale',
+      'locales'
+    ]
+  },
   rails: {
     directIndicators: ['config/application.rb', 'Gemfile'],
     defaults: {
@@ -187,7 +205,7 @@ const PROJECT_TYPES: ProjectTypes = {
     directIndicators: [],
     defaults: {
       translationPath: 'locales/',
-      filePattern: '**/*.{json,yml,yaml}'
+      filePattern: '**/*.{json,yml,yaml,po}'
     },
     commonPaths: [
       'src/locales',
@@ -265,7 +283,13 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         };
       }
     }
-    return { type, defaults: config.defaults };
+    return {
+      type,
+      defaults: {
+        ...config.defaults,
+        commonPaths: config.commonPaths
+      }
+    };
   }
 
   const commonPaths = PROJECT_TYPES.generic.commonPaths || [];
@@ -278,9 +302,16 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         defaults: {
           commonPaths: commonPaths,
           translationPath: `${translationPath}/`,
-          filePattern: contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0
-            ? '**/*.json'
-            : '**/*.{json,yml,yaml}'
+          filePattern: (() => {
+            const formats: string[] = [];
+            if (contents.jsonFiles.length > 0) formats.push('json');
+            if (contents.yamlFiles.length > 0) formats.push('yml', 'yaml');
+            if (contents.poFiles.length > 0) formats.push('po');
+
+            return formats.length === 1 && formats[0] !== 'yml'
+              ? `**/*.${formats[0]}`
+              : `**/*.{${formats.join(',')}}`;
+          })()
         }
       };
     }
@@ -358,22 +389,13 @@ async function promptForConfig(
     hint: dirHint
   });
 
-  let filePattern = projectDefaults.defaults.filePattern;
-  const contents = await getDirectoryContents(translationPath);
+  const filePattern = projectDefaults.defaults.filePattern;
 
-  if (contents) {
-    if (contents.jsonFiles.length > 0 && contents.yamlFiles.length === 0) {
-      filePattern = '**/*.json';
-    } else if (contents.jsonFiles.length === 0 && contents.yamlFiles.length > 0) {
-      filePattern = '**/*.{yml,yaml}';
-    } else if (contents.jsonFiles.length > 0 && contents.yamlFiles.length > 0) {
-      filePattern = '**/*.{json,yml,yaml}';
-    }
-  }
-
+  const defaultIgnorePaths = projectDefaults.defaults.ignorePaths || [];
   const ignorePaths = await promptService.input({
     message: 'Paths to ignore (comma-separated, leave empty for none):',
-    hint: '  Example: locales/ignored,locales/temp'
+    hint: '  Example: locales/ignored,locales/temp',
+    default: defaultIgnorePaths.join(', ')
   });
 
   if (!existingProject) {
@@ -453,8 +475,9 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     outputLocales: answers.outputLocales,
     translationFiles: {
       paths: answers.translationPath ? [answers.translationPath] : [],
-      pattern: answers.filePattern || '**/*.{json,yml,yaml}',
-      ignore: answers.ignorePaths || []
+      pattern: answers.filePattern || '**/*.{json,yml,yaml,po}',
+      ignore: answers.ignorePaths || [],
+      ...(projectDefaults.defaults.workflow && { workflow: projectDefaults.defaults.workflow as 'default' | 'django' })
     },
     lastSyncedAt: null
   };

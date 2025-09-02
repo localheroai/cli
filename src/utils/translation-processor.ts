@@ -74,7 +74,7 @@ export interface TranslationDependencies {
   translationUtils: {
     createTranslationJob: (jobRequest: any) => Promise<TranslationJobResponse>;
     checkJobStatus: (jobId: string, includeTranslations?: boolean) => Promise<any>;
-    updateTranslationFile: (targetPath: string, translations: any, languageCode: string, sourcePath: string) => Promise<any>;
+    updateTranslationFile: (targetPath: string, translations: any, languageCode: string, sourcePath: string, sourceLanguage?: string, config?: ProjectConfig) => Promise<any>;
   };
 }
 
@@ -184,7 +184,17 @@ async function monitorJobStatus(
 
       const waitSeconds = Math.min(2 ** retries, 30);
       if (verbose) {
-        console.log(chalk.blue(`  Job ${jobId} is ${status.status}, checking again in ${waitSeconds}s...`));
+        let progressMsg = `  Job ${jobId} is ${status.status}`;
+
+        // Add progress information if available
+        if (status.progress) {
+          const { completed_keys, total_keys } = status.progress;
+          const percentage = total_keys > 0 ? Math.round((completed_keys / total_keys) * 100) : 0;
+          progressMsg += ` (${completed_keys}/${total_keys} keys, ${percentage}%)`;
+        }
+
+        progressMsg += `, checking again in ${waitSeconds}s...`;
+        console.log(chalk.blue(progressMsg));
       }
       await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
       retries = Math.min(retries + 1, 5);
@@ -218,7 +228,8 @@ async function applyTranslations(
   console: TranslationDependencies['console'],
   processedEntries: Set<string>,
   uniqueKeysTranslated: Set<string>,
-  stats: TranslationStats
+  stats: TranslationStats,
+  config: ProjectConfig
 ): Promise<boolean> {
   const { jobId, data } = jobStatus;
 
@@ -253,7 +264,9 @@ async function applyTranslations(
     targetPath,
     data.translations.data,
     languageCode,
-    entry.path
+    entry.path,
+    undefined,
+    config
   );
 
   result.updatedKeys.forEach(key => uniqueKeysTranslated.add(key));
@@ -316,9 +329,30 @@ async function processBatch(
       jobTries[jobId]++;
 
       if (jobTries[jobId] > MAX_JOB_STATUS_CHECK_ATTEMPTS) {
-        if (verbose) {
-          console.warn(chalk.yellow(`  Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be marked as failed.`));
+        // Get final job status to show progress information
+        let progressInfo = '';
+        try {
+          const finalStatus = await translationUtils.checkJobStatus(jobId, false);
+          if (finalStatus.progress) {
+            const { completed_keys, total_keys } = finalStatus.progress;
+            progressInfo = ` (${completed_keys}/${total_keys} keys completed)`;
+
+            if (completed_keys > 0 && completed_keys < total_keys) {
+              console.warn(chalk.yellow(`  ⚠️  Job ${jobId} timed out with partial completion${progressInfo}`));
+              console.warn(chalk.gray('     The job may complete in the background or can be retried later.'));
+            } else if (completed_keys === 0) {
+              console.warn(chalk.yellow(`  ❌ Job ${jobId} failed to start processing${progressInfo}`));
+              console.warn(chalk.gray('     This may be due to server issues or invalid translation keys.'));
+            } else {
+              console.warn(chalk.yellow(`  ⏱️  Job ${jobId} may have completed but status is delayed${progressInfo}`));
+            }
+          } else {
+            console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`));
+          }
+        } catch {
+          console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`));
         }
+
         pendingJobs.delete(jobId);
         return { jobId, status: 'failed' };
       }
@@ -336,7 +370,8 @@ async function processBatch(
           console,
           processedEntries,
           uniqueKeysTranslated,
-          stats
+          stats,
+          config
         );
       }
 

@@ -1,0 +1,28 @@
+# Context (msgctxt) test file
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgctxt "menu"
+msgid "File"
+msgstr "Arkiv"
+
+msgctxt "document"
+msgid "File"
+msgstr "Fil"
+
+#: views.py
+msgctxt "greeting"
+msgid "Hello"
+msgstr "Hej"
+
+msgctxt "farewell"
+msgid "Hello"
+msgstr "Hallå"
+
+#: forms.py
+msgctxt ""
+"This is a multiline context that explains the usage of this particular "
+"translation string in detail."
+msgid "Save"
+msgstr "Spara"

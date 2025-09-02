@@ -37,7 +37,14 @@ const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     paths: [],
     ignore: []
   },
-  lastSyncedAt: null
+  lastSyncedAt: null,
+  postTranslateCommand: undefined
+};
+
+const DEFAULT_DJANGO_CONFIG = {
+  updateSources: true,
+  sourcesPattern: '**/sources/*-generated.po',
+  preserveTranslations: true
 };
 
 const defaultDeps: ConfigDependencies = {
@@ -104,10 +111,6 @@ export const configService: ConfigService = {
       const content = await fs.readFile(configPath, 'utf8');
       const config = JSON.parse(content) as ProjectConfig;
 
-      if (config.schemaVersion !== DEFAULT_PROJECT_CONFIG.schemaVersion) {
-        throw new Error(`Unsupported config schema version: ${config.schemaVersion}`);
-      }
-
       return config;
     } catch (error: any) {
       if (error.code === 'ENOENT') {
@@ -162,6 +165,11 @@ export const configService: ConfigService = {
       throw new Error('No project config found. Run `npx @localheroai/cli init` first');
     }
     await this.validateProjectConfig(config);
+
+    if (config.translationFiles?.workflow === 'django' && !config.django) {
+      config.django = DEFAULT_DJANGO_CONFIG;
+    }
+
     return config;
   },
 

@@ -2,8 +2,21 @@ import path from 'path';
 import { flattenTranslations, parseFile } from './files.js';
 import {
   TranslationFile,
+  ProjectConfig,
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
+import { findMissingPoTranslations, createUniqueKey } from './po-utils.js';
+
+export function isDjangoWorkflow(config: ProjectConfig): boolean {
+  return config.translationFiles?.workflow === 'django';
+}
+
+export function getDjangoSourcePath(targetPath: string): string {
+  return targetPath.replace(
+    /\/LC_MESSAGES\/([^/]+)\.po$/,
+    '/LC_MESSAGES/sources/$1-generated.po'
+  );
+}
 
 export interface MissingLocaleEntry {
   path: string;
@@ -186,7 +199,7 @@ export function findMissingTranslationsByLocale(
 }
 
 /**
- * Batch missing keys by source file
+ * Batch missing keys by source file (optimized for unique key sets)
  * @param sourceFiles Array of source translation files
  * @param missingByLocale Record of missing keys by locale and source file
  * @returns Result containing batches and errors
@@ -207,7 +220,7 @@ export function batchKeysWithMissing(
 
   const entriesBySourceFile: Record<string, SourceFileData> = {};
 
-  // Group entries by source file
+  // Group entries by source file (back to original approach for predictable behavior)
   for (const [localeSourceKey, entry] of Object.entries(missingByLocale)) {
     const { path: sourceFilePath } = entry;
 
@@ -462,7 +475,34 @@ export function processLocaleTranslations(
       targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
     }
 
-    const { missingKeys, skippedKeys } = findMissingTranslations(sourceKeys, targetKeys);
+    // Use .po-specific missing detection for .po files
+    const isPoFile = sourceFile.path.endsWith('.po') || targetPath.endsWith('.po');
+    let missingKeys: Record<string, SourceKeyDetails> = {};
+    let skippedKeys: Record<string, SkippedKeyDetails> = {};
+
+    if (isPoFile && sourceFile.content && targetFile?.content) {
+      const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
+      const targetContentRaw = Buffer.from(targetFile.content, 'base64').toString();
+
+      const missingPoTranslations = findMissingPoTranslations(sourceContentRaw, targetContentRaw);
+
+      // Convert the .po missing results to the expected format
+      missingPoTranslations.forEach(missing => {
+        const key = missing.context ? createUniqueKey(missing.key, missing.context) : missing.key;
+        missingKeys[key] = {
+          value: missing.value,
+          sourceKey: key,
+          context: missing.context,
+          isPlural: missing.isPlural,
+          pluralForm: missing.pluralForm
+        };
+      });
+    } else {
+      // For other file types (yml, json), use the generic missing detection
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+      missingKeys = result.missingKeys;
+      skippedKeys = result.skippedKeys;
+    }
 
     return {
       targetPath,

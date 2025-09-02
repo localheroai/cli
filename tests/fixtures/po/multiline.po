@@ -1,0 +1,24 @@
+# Multiline strings test file
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+
+#: views.py
+msgid ""
+"This is a very long message that spans multiple lines for better "
+"readability and to test how we handle line wrapping scenarios."
+msgstr ""
+"Detta är ett mycket långt meddelande som sträcker sig över flera rader för "
+"bättre läsbarhet och för att testa hur vi hanterar radbrytningsscenarier."
+
+#: forms.py
+msgid "Short message"
+msgstr "Kort meddelande"
+
+#: models.py
+msgid ""
+"Another multiline message with different wrapping that we need to preserve "
+"exactly as it appears in the original file without any changes."
+msgstr ""
+"Ett annat flerradigt meddelande med olika radbrytning som vi behöver "
+"bevara exakt som det visas i den ursprungliga filen utan ändringar."

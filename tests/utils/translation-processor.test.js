@@ -94,7 +94,9 @@ describe('translation-processor', () => {
         'locales/fr.json',
         { welcome: 'Bienvenue' },
         'fr',
-        'locales/en.json'
+        'locales/en.json',
+        undefined,
+        { projectId: 'test-project' }
       );
 
       // Verify the returned statistics
@@ -173,7 +175,9 @@ describe('translation-processor', () => {
         'locales/fr.json',
         { greeting: 'Bonjour' },
         'fr',
-        'locales/en.json'
+        'locales/en.json',
+        undefined,
+        { projectId: 'test-project' }
       );
       expect(result.totalLanguages).toBe(1);
       expect(result.uniqueKeysTranslated.size).toBe(1);
@@ -403,19 +407,25 @@ describe('translation-processor', () => {
         'locales/fr/common.json',
         { welcome: 'Bienvenue' },
         'fr',
-        'locales/en/common.json'
+        'locales/en/common.json',
+        undefined,
+        { projectId: 'test-project' }
       );
       expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
         'locales/es/common.json',
         { welcome: 'Bienvenido' },
         'es',
-        'locales/en/common.json'
+        'locales/en/common.json',
+        undefined,
+        { projectId: 'test-project' }
       );
       expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
         'locales/fr/home.json',
         { title: 'Accueil' },
         'fr',
-        'locales/en/home.json'
+        'locales/en/home.json',
+        undefined,
+        { projectId: 'test-project' }
       );
       expect(result.totalLanguages).toBe(2); // fr and es
       expect(result.allJobIds).toEqual(['job-fr-1', 'job-es-1', 'job-fr-2']);
@@ -480,16 +490,19 @@ describe('translation-processor', () => {
         );
 
         expect(mockConsole.warn).toHaveBeenCalledWith(
-          expect.stringContaining(`Job ${testJobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be marked as failed.`)
+          expect.stringContaining(`Job ${testJobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`)
         );
 
         const checkJobStatusCallsForTestJob = mockTranslationUtils.checkJobStatus.mock.calls.filter(
           call => call[0] === testJobId
         );
-        expect(checkJobStatusCallsForTestJob.length).toBe(MAX_JOB_STATUS_CHECK_ATTEMPTS);
-        checkJobStatusCallsForTestJob.forEach(call => {
+        expect(checkJobStatusCallsForTestJob.length).toBe(MAX_JOB_STATUS_CHECK_ATTEMPTS + 1); // +1 for final progress check
+        // First 25 calls should have includeTranslations=true
+        checkJobStatusCallsForTestJob.slice(0, MAX_JOB_STATUS_CHECK_ATTEMPTS).forEach(call => {
           expect(call[1]).toBe(true);
         });
+        // Last call should have includeTranslations=false (final progress check)
+        expect(checkJobStatusCallsForTestJob[MAX_JOB_STATUS_CHECK_ATTEMPTS][1]).toBe(false);
 
         expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalledWith(
           'locales/fr/pending.json',

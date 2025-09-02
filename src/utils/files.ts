@@ -10,6 +10,7 @@ import type {
   TranslationFilesResult,
   TranslationFileOptions
 } from '../types/index.js';
+import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 
 
 /**
@@ -26,6 +27,10 @@ export function parseFile(content: string, format: string, filePath: string = ''
           : `${jsonError.message} (check for missing commas, quotes, or brackets)`;
         throw new Error(errorInfo);
       }
+    }
+    if (format === 'po') {
+      const parsed = parsePoFile(content);
+      return poEntriesToApiFormat(parsed.entries);
     }
     return yaml.parse(content);
   } catch (error: any) {
@@ -297,7 +302,7 @@ export async function findTranslationFiles(
   const { translationFiles } = config;
   const {
     paths = [],
-    pattern = '**/*.{json,yml,yaml}',
+    pattern = '**/*.{json,yml,yaml,po}',
     ignore = [],
     localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
   } = translationFiles || {};
@@ -400,6 +405,9 @@ export async function findTranslationFiles(
           } else if (format === 'yml' || format === 'yaml') {
             console.warn(chalk.gray('  Tip: Check for proper indentation and quote matching in your YAML file.'));
           }
+        } else if (error.message.includes('Could not extract locale from path')) {
+          console.warn(chalk.yellow(`Warning: ${error.message}`));
+          console.warn(chalk.gray('  File will be skipped as it doesn\'t match expected locale pattern.'));
         } else if (verbose) {
           console.warn(chalk.yellow(`Warning: ${error.message}`));
           console.error(chalk.dim(error.stack));
@@ -466,6 +474,7 @@ export interface DirectoryContents {
   files: string[];
   jsonFiles: string[];
   yamlFiles: string[];
+  poFiles: string[];
 }
 
 export async function getDirectoryContents(dir: string, fsModule = fs): Promise<DirectoryContents | null> {
@@ -474,7 +483,8 @@ export async function getDirectoryContents(dir: string, fsModule = fs): Promise<
     return {
       files,
       jsonFiles: files.filter(f => f.endsWith('.json')),
-      yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+      yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml')),
+      poFiles: files.filter(f => f.endsWith('.po'))
     };
   } catch {
     return null;

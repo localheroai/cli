@@ -6,7 +6,7 @@ import { findTranslationFiles } from './files.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult } from '../types/index.js';
 
-const MAX_PAGES = 100;
+const MAX_PAGES = parseInt(process.env.LOCALHERO_MAX_PAGES || '500');
 
 interface LanguageUpdate {
   code: string;
@@ -30,6 +30,7 @@ interface Pagination {
   current_page: number;
   total_pages: number;
   total_count: number;
+  items_per_page?: number;
 }
 
 interface ApiUpdateResponse {
@@ -99,13 +100,20 @@ export const syncService: SyncService = {
       }
 
       if (response.pagination) {
-        const { current_page, total_pages } = response.pagination;
+        const { current_page, total_pages, items_per_page } = response.pagination;
         hasMorePages = current_page < total_pages;
         currentPage++;
 
         if (verbose && hasMorePages) {
           if (total_pages > MAX_PAGES) {
-            console.log(chalk.yellow(`  ⚠️  Limiting to ${MAX_PAGES} pages out of ${total_pages} total`));
+            const itemsPerPage = items_per_page || 100;
+            const totalItems = total_pages * itemsPerPage;
+            const limitedItems = MAX_PAGES * itemsPerPage;
+
+            // Debug: Log what API is returning
+            console.log(chalk.gray(`  Debug: API returned total_pages=${total_pages}, items_per_page=${items_per_page}`));
+
+            console.log(chalk.yellow(`  ⚠️  Limited to ${MAX_PAGES}/${total_pages} pages (${limitedItems.toLocaleString()}/${totalItems.toLocaleString()} updates). Use LOCALHERO_MAX_PAGES=${total_pages} to get all.`));
           } else {
             console.log(chalk.gray(`  Fetching page ${currentPage} of ${total_pages}`));
           }
@@ -113,6 +121,10 @@ export const syncService: SyncService = {
       } else {
         hasMorePages = false;
       }
+    }
+
+    if (currentPage > MAX_PAGES && hasMorePages && verbose) {
+      console.warn(chalk.yellow(`⚠️  Reached page limit (${MAX_PAGES}), some translations skipped. Use LOCALHERO_MAX_PAGES=${MAX_PAGES * 2} to increase.`));
     }
 
     if (!allFiles.length && !deletedKeys.length) {
@@ -179,8 +191,8 @@ export const syncService: SyncService = {
         }
 
         try {
-          await updateTranslationFile(file.path, translations, lang.code, sourceFilePath);
-          totalUpdates += Object.keys(translations).length;
+          const updateResult = await updateTranslationFile(file.path, translations, lang.code, sourceFilePath, config.sourceLocale, config);
+          totalUpdates += updateResult.updatedKeys.length;
         } catch (error: any) {
           console.error(chalk.yellow(`⚠️  Failed to update ${file.path}: ${error.message}`));
         }
