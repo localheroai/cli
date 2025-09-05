@@ -406,8 +406,7 @@ export async function findTranslationFiles(
             console.warn(chalk.gray('  Tip: Check for proper indentation and quote matching in your YAML file.'));
           }
         } else if (error.message.includes('Could not extract locale from path')) {
-          console.warn(chalk.yellow(`Warning: ${error.message}`));
-          console.warn(chalk.gray('  File will be skipped as it doesn\'t match expected locale pattern.'));
+          console.warn(chalk.yellow(`Warning: ${error.message}`), chalk.gray('[Skipping file]'));
         } else if (verbose) {
           console.warn(chalk.yellow(`Warning: ${error.message}`));
           console.error(chalk.dim(error.stack));
