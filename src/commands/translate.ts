@@ -245,7 +245,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           if (verbose) {
             console.log(chalk.blue(`\nℹ Executing postTranslateCommand: ${config.postTranslateCommand}`));
           }
-          execUtils.execSync(config.postTranslateCommand, { stdio: 'inherit' });
+          execUtils.execSync(config.postTranslateCommand, { stdio: verbose ? 'inherit' : 'pipe' });
           if (verbose) {
             console.log(chalk.green('✓ postTranslateCommand completed successfully'));
           }

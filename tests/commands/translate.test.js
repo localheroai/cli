@@ -853,6 +853,6 @@ describe('translate command', () => {
 
     await translate({}, createTranslateDeps({ execUtils: { execSync: mockExecSync } }));
 
-    expect(mockExecSync).toHaveBeenCalledWith('npm run build-translations', { stdio: 'inherit' });
+    expect(mockExecSync).toHaveBeenCalledWith('npm run build-translations', { stdio: 'pipe' });
   });
 });
