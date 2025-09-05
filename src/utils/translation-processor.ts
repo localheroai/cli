@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { ProjectConfig } from '../types/index.js';
+import { Spinner } from './spinner.js';
 
 /**
  * Types for translation processing
@@ -422,19 +423,26 @@ export async function processTranslationBatches(
   const allJobIds: string[] = [];
   const uniqueKeysTranslated = new Set<string>();
 
-  for (const batch of batches) {
-    await processBatch(
-      batch,
-      missingByLocale,
-      config,
-      verbose,
-      deps,
-      processedEntries,
-      uniqueKeysTranslated,
-      allJobIds,
-      stats,
-      jobGroupId
-    );
+  const spinner = !verbose ? new Spinner('Processing translations...') : null;
+  spinner?.start();
+
+  try {
+    for (const batch of batches) {
+      await processBatch(
+        batch,
+        missingByLocale,
+        config,
+        verbose,
+        deps,
+        processedEntries,
+        uniqueKeysTranslated,
+        allJobIds,
+        stats,
+        jobGroupId
+      );
+    }
+  } finally {
+    spinner?.stop();
   }
 
   return {
