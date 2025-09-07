@@ -239,7 +239,15 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
     }
 
+
     if (translationResult.uniqueKeysTranslated.size > 0) {
+      if (translationResult.jobGroupShortUrl) {
+        console.log(`» View results at: ${translationResult.jobGroupShortUrl}`);
+      } else if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
+        const jobIdsParam = translationResult.allJobIds.join(',');
+        console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
+      }
+
       if (config.postTranslateCommand) {
         try {
           if (verbose) {
@@ -253,7 +261,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           const err = error as Error;
           console.warn(chalk.yellow(`\nℹ postTranslateCommand failed: ${err.message}`));
         }
-        console.log('');
       }
 
       try {
@@ -265,15 +272,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       } catch (error) {
         const err = error as Error;
         console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
-      }
-    }
-
-    if (translationResult.uniqueKeysTranslated.size > 0) {
-      if (translationResult.jobGroupShortUrl) {
-        console.log(`» View results at: ${translationResult.jobGroupShortUrl}`);
-      } else if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
-        const jobIdsParam = translationResult.allJobIds.join(',');
-        console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
       }
     }
   } catch (error) {
