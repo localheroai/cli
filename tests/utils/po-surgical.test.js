@@ -594,4 +594,111 @@ msgstr "Hej"
       expect(result).toContain('msgid_plural "New Items"');
     });
   });
+
+  describe('Multiline Word Spacing', () => {
+    test('should preserve spaces when breaking long lines into chunks', () => {
+      const original = `# Test file for multiline spacing
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Activate the sources you want your AI drafts to retrieve information from. If an external system is integrated with the customer card, information from there will also be used."
+msgstr ""
+`;
+
+      const translations = {
+        'Activate the sources you want your AI drafts to retrieve information from. If an external system is integrated with the customer card, information from there will also be used.': 'Aktivera källorna du vill att dina AI-utkast ska hämta information från. Om ett externt system är integrerat med kundkortet kommer även information därifrån att användas.'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations);
+
+      expect(result).not.toContain('hämtainformation');
+      expect(result).not.toContain('därifrånatt');
+      
+      expect(result).toContain('hämta ');
+      expect(result).toContain('information från');
+      expect(result).toContain('därifrån att');
+      
+      expect(result).toContain('Aktivera källorna');
+      expect(result).toContain('Om ett externt system');
+    });
+
+    test('should maintain proper word spacing in long translated text', () => {
+      const original = `# Test file for long text spacing
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "This is a very long message that contains multiple words and should maintain proper spacing when broken into chunks"
+msgstr ""
+`;
+
+      const translations = {
+        'This is a very long message that contains multiple words and should maintain proper spacing when broken into chunks': 'This translation is also very long and contains many words that need to maintain proper spacing between them when the line gets broken into multiple chunks for formatting'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations);
+
+      expect(result).not.toContain('spacingwhen');
+      expect(result).not.toContain('themwhen');
+      expect(result).not.toContain('multiplechunks');
+      
+      expect(result).toContain('spacing between them');
+      expect(result).toContain('multiple chunks for');
+      
+      expect(result).toContain('maintain proper spacing between them when');
+    });
+
+    test('should handle single line format appropriately', () => {
+      const original = `# Test file for single line format
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Short message"
+msgstr ""
+`;
+
+      const translations = {
+        'Short message': 'Kort meddelande'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations);
+
+      expect(result).toContain('msgstr "Kort meddelande"');
+      expect(result).not.toContain('msgstr "Kort meddelande "');
+      expect(result).not.toContain('msgstr ""\n"Kort meddelande"');
+    });
+
+    test('should handle complex multiline translations with proper spacing', () => {
+      const original = `# Test file for complex multiline content
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Aktivera de källor du vill att dina AI-utkast ska hämta information från. Har ni integrerat ett externt system med kundkortet används även information därifrån."
+msgstr ""
+`;
+
+      const translations = {
+        'Aktivera de källor du vill att dina AI-utkast ska hämta information från. Har ni integrerat ett externt system med kundkortet används även information därifrån.': 'Activeer de bronnen waarvan je wilt dat je AI-schetsen informatie ophalen. Als er een extern systeem is geïntegreerd met het klantprofiel, wordt ook die informatie gebruikt.'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations);
+
+      expect(result).not.toContain('schetseninformatie');
+      expect(result).not.toContain('isgeïntegreerd'); 
+      expect(result).not.toContain('informatiegebruikt');
+      
+      expect(result).toContain('AI-schetsen ');
+      expect(result).toContain('informatie ophalen');
+      expect(result).toContain('is ');
+      expect(result).toContain('geïntegreerd met');
+      expect(result).toContain('informatie ');
+      expect(result).toContain('gebruikt');
+      
+      expect(result).toContain('Activeer de bronnen');
+      expect(result).toContain('Als er een extern systeem');
+    });
+  });
 });

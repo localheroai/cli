@@ -853,7 +853,7 @@ function formatMsgstrValue(value: string, format: MsgstrFormat, msgstrPrefix: st
         if (wouldBeLength <= maxContentLength || !currentChunk) {
           currentChunk += spaceIfNeeded + word;
         } else {
-          lines.push(`${format.indentation}"${currentChunk}"`);
+          lines.push(`${format.indentation}"${currentChunk} "`);
           currentChunk = word;
         }
       }
