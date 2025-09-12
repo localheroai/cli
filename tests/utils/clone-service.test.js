@@ -353,8 +353,14 @@ describe('cloneService', () => {
             };
 
             mockCloneApi.downloadFile
-                .mockResolvedValueOnce(undefined) // First file succeeds
-                .mockRejectedValue(new Error('Download failed')); // Second file fails
+                .mockImplementation(async (url, filePath) => {
+                    if (filePath === 'public/locales/common.json') {
+                        return undefined; // Success
+                    } else if (filePath === 'public/locales/navigation.json') {
+                        throw new Error('Download failed'); // Fail
+                    }
+                    throw new Error('Unexpected file path in test');
+                });
 
             // Mock setTimeout to resolve immediately
             const originalSetTimeout = global.setTimeout;
