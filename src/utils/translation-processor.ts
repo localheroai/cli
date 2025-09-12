@@ -272,6 +272,18 @@ async function applyTranslations(
 
   result.updatedKeys.forEach(key => uniqueKeysTranslated.add(key));
 
+  if (verbose && result.updatedKeys.length > 0) {
+    result.updatedKeys.forEach(key => {
+      const translation = data.translations.data[key];
+      if (translation) {
+        const truncatedTranslation = typeof translation === 'string' && translation.length > 50
+          ? `${translation.substring(0, 47)}…`
+          : translation;
+        console.log(chalk.gray(`    ${key} → "${truncatedTranslation}"`));
+      }
+    });
+  }
+
   if (!processedEntries.has(`locale:${languageCode}`)) {
     stats.totalLanguages++;
     stats.languages.add(languageCode);
