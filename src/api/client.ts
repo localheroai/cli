@@ -2,6 +2,14 @@ import { ApiResponseError } from '../types/index.js';
 
 const DEFAULT_API_HOST = 'https://api.localhero.ai';
 
+// Retry configuration for network errors
+const RETRY_CONFIG = {
+  maxRetries: 5,
+  initialDelay: 1000, // 1 second
+  maxDelay: 8000,     // 8 seconds
+  backoffFactor: 2
+};
+
 export function getApiHost(): string {
   return process.env.LOCALHERO_API_HOST || DEFAULT_API_HOST;
 }
@@ -38,6 +46,41 @@ function getNetworkErrorMessage(error: NetworkError): string {
   return `Network error while connecting to ${getApiHost()}. Please check your internet connection and try again.`;
 }
 
+function isRetryableError(error: NetworkError): boolean {
+  if (error.code === 'ECONNREFUSED') return true;
+  if (error.code === 'ECONNRESET') return true;
+  if (error.code === 'ETIMEDOUT') return true;
+  if (error.cause?.code === 'ENOTFOUND') return true;
+  if (error.cause?.code === 'ETIMEDOUT') return true;
+  if (error.cause?.code === 'ECONNRESET') return true;
+
+  return false;
+}
+
+async function fetchWithRetry(url: string, options: RequestInit, retryCount: number = 0): Promise<Response> {
+  try {
+    return await fetch(url, options);
+  } catch (error) {
+    const networkError = error as NetworkError;
+
+    if (isRetryableError(networkError) && retryCount < RETRY_CONFIG.maxRetries) {
+      const delay = Math.min(
+        RETRY_CONFIG.initialDelay * Math.pow(RETRY_CONFIG.backoffFactor, retryCount),
+        RETRY_CONFIG.maxDelay
+      );
+
+      console.log(`Network error, retrying in ${delay / 1000}s... (attempt ${retryCount + 1}/${RETRY_CONFIG.maxRetries})`);
+      await sleep(delay / 1000);
+      return fetchWithRetry(url, options, retryCount + 1);
+    }
+
+    const message = getNetworkErrorMessage(networkError);
+    networkError.message = message;
+    (networkError as any).cliErrorMessage = message;
+    throw networkError;
+  }
+}
+
 export async function apiRequest<T = any>(endpoint: string, options: ApiRequestOptions = {}): Promise<T> {
   const apiHost = getApiHost();
   const url = `${apiHost}${endpoint}`;
@@ -61,16 +104,7 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
     fetchOptions.body = JSON.stringify(options.body);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, fetchOptions);
-  } catch (error) {
-    const networkError = error as NetworkError;
-    const message = getNetworkErrorMessage(networkError);
-    networkError.message = message;
-    (networkError as any).cliErrorMessage = message;
-    throw networkError;
-  }
+  const response = await fetchWithRetry(url, fetchOptions);
 
   let data: any;
   try {
