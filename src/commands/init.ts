@@ -440,8 +440,145 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     login: loginFn = login
   } = deps;
   const existingConfig = await configUtils.getProjectConfig(basePath);
+
   if (existingConfig) {
-    console.log(chalk.yellow('Existing configuration found in localhero.json. Skipping initialization.'));
+    let workflowCreated = false;
+    console.log(chalk.green('✓ Configuration found! Let\'s verify and set up your API access.\n'));
+
+    const requiredFields = ['projectId', 'sourceLocale', 'outputLocales'];
+    const missingFields = requiredFields.filter(field => !existingConfig[field]);
+
+    if (missingFields.length > 0) {
+      console.log(chalk.red(`✗ Invalid configuration: missing fields ${missingFields.join(', ')}`));
+      console.log(chalk.yellow('Please check your localhero.json file and try again.\n'));
+      return;
+    }
+
+    console.log(chalk.blue('📋 Project Configuration:'));
+    console.log(`   Project ID: ${existingConfig.projectId}`);
+    console.log(`   Source: ${existingConfig.sourceLocale}`);
+    console.log(`   Targets: ${existingConfig.outputLocales.join(', ')}`);
+    console.log(`   Pattern: ${existingConfig.translationFiles?.pattern || 'not specified'}\n`);
+
+    const isAuthenticated = await authUtils.checkAuth();
+    if (!isAuthenticated) {
+      console.log('Let\'s connect to your LocalHero account.');
+
+      await loginFn({
+        console,
+        basePath,
+        promptService,
+        configUtils,
+        verifyApiKey: authUtils.verifyApiKey,
+        isCalledFromInit: true
+      });
+    } else {
+      console.log(chalk.green('✓ API key found and valid'));
+
+      try {
+        const projects = await projectApi.listProjects();
+        const projectExists = projects.some(p => p.id === existingConfig.projectId);
+        if (!projectExists) {
+          console.log(chalk.red(`✗ Project ${existingConfig.projectId} not found in your organization`));
+          console.log(chalk.yellow('Please check your localhero.json file or contact support.\n'));
+          return;
+        }
+        console.log(chalk.green('✓ Project access verified\n'));
+      } catch {
+        console.log(chalk.yellow('⚠️  Could not verify project access. Continuing anyway...\n'));
+      }
+    }
+
+    const shouldImport = await promptService.confirm({
+      message: 'Would you like to import existing translation files? (recommended)',
+      default: true
+    });
+
+    if (shouldImport) {
+      console.log('\nSearching for translation files...');
+      try {
+        const importResult = await importUtils.importTranslations(existingConfig, basePath);
+
+        if (importResult.status === 'no_files') {
+          console.log(chalk.yellow('No translation files found.'));
+        } else if ((importResult.status === 'completed' || importResult.status === 'success') && importResult.statistics) {
+          console.log(chalk.green('\n✓ Successfully imported translations'));
+
+          console.log('\nImport summary:');
+          if (importResult.files) {
+            const sourceCount = importResult.files.source.length;
+            const targetCount = importResult.files.target.length;
+            console.log(`- ${sourceCount + targetCount} translation files imported`);
+            console.log(`- ${sourceCount} source files (${existingConfig.sourceLocale})`);
+            console.log(`- ${targetCount} target files (${existingConfig.outputLocales.join(', ')})`);
+          }
+
+          const stats = importResult.statistics as any;
+          if (stats) {
+            console.log(`- Total keys: ${stats.total_keys || 0}`);
+
+            if (Array.isArray(stats.languages)) {
+              const validLanguages = stats.languages.filter(lang => lang.code);
+              console.log(`- Languages: ${validLanguages.length}`);
+              validLanguages.forEach((lang: any) => {
+                console.log(`  - ${lang.code}: ${lang.translated || 0} keys (${lang.missing || 0} missing)`);
+              });
+            }
+          }
+
+          if (importResult.translations_url) {
+            console.log(chalk.green(`\nView your translations at: ${importResult.translations_url}`));
+          }
+        } else if (importResult.status === 'failed' || importResult.status === 'error') {
+          console.log(chalk.red('✗ Failed to import translations'));
+          console.log(chalk.red(`Error: ${importResult.error || 'Import failed'}`));
+        }
+      } catch (error: any) {
+        console.log(chalk.red('✗ Failed to import translations'));
+        console.log(chalk.red(`Error: ${error.message || 'Import failed'}`));
+      }
+    }
+
+    if (workflowExists(basePath)) {
+      console.log(chalk.green('✓ GitHub Actions workflow found'));
+      console.log(chalk.yellow('\n⚠️  Remember to add your API key to repository secrets:'));
+      console.log('   Name: LOCALHERO_API_KEY');
+      console.log('   Value: Get from https://localhero.ai/api-keys');
+      console.log('   Location: Repository Settings → Secrets and variables → Actions (On GitHub repo page)\n');
+    } else {
+      const shouldSetupGitHubAction = await promptService.confirm({
+        message: 'Would you like to set up GitHub Actions for automatic translations?',
+        default: true
+      });
+
+      if (shouldSetupGitHubAction) {
+        try {
+          const paths = existingConfig.translationFiles?.paths || [''];
+          const workflowFile = await createGitHubActionFile(basePath, paths);
+          workflowCreated = true;  // Set flag that we created it
+          console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
+          console.log('\nAdd your API key to GitHub repository secrets:');
+          console.log('   Name: LOCALHERO_API_KEY');
+          console.log('   Value: Your API key from https://localhero.ai/api-keys');
+          console.log('   Location: Settings → Secrets and variables → Actions (On GitHub repo page)');
+        } catch (error: any) {
+          console.log(chalk.yellow('\nFailed to create GitHub Action workflow:'), error.message);
+        }
+      }
+    }
+
+    console.log('\n🎉 Setup complete!');
+
+    if (workflowCreated) {
+      console.log('\n📝 Don\'t forget to commit and push the new workflow file.');
+    }
+
+    if (workflowExists(basePath)) {
+      console.log('\nTranslations will run automatically on pull requests, or manually with:');
+    } else {
+      console.log('\nYou can run translations manually with:');
+    }
+    console.log('  npx @localheroai/cli translate');
     return;
   }
 
@@ -462,6 +599,7 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
 
   console.log('\nLet\'s set up configuration for your project.\n');
 
+  let workflowCreated = false;  // Track if we created workflow in this session
   const projectDefaults = await detectProjectType();
   const answers: InitAnswers | null = await promptForConfig(projectDefaults, projectApi, promptService, console);
   if (!answers) {
@@ -499,6 +637,8 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
       try {
         const paths = answers.translationPath ? [answers.translationPath] : [''];
         const workflowFile = await createGitHubActionFile(basePath, paths);
+
+        workflowCreated = true;
         console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
         console.log('\nNext steps:');
         console.log('1. Add your API key to your repository\'s secrets:');
@@ -510,6 +650,13 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
         console.log(chalk.yellow('\nFailed to create GitHub Action workflow:'), error.message);
       }
     }
+  } else {
+    console.log(chalk.green('✓ GitHub Actions workflow already configured'));
+
+    console.log(chalk.yellow('\n⚠️  Remember to add your API key to repository secrets:'));
+    console.log('   Name: LOCALHERO_API_KEY');
+    console.log('   Value: Get from https://localhero.ai/api-keys');
+    console.log('   Location: Repository Settings → Secrets and variables → Actions\n');
   }
 
   const shouldImport = await promptService.confirm({
@@ -577,6 +724,17 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
   }
 
   if (!hasErrors) {
-    console.log('\n🚀 Done! Start translating with: npx @localheroai/cli translate');
+    console.log('\n🎉 Setup complete!');
+
+    if (workflowCreated) {
+      console.log('\n📝 Don\'t forget to commit and push the new workflow file.');
+    }
+
+    if (workflowExists(basePath)) {
+      console.log('\nTranslations will run automatically on pull requests, or manually with:');
+    } else {
+      console.log('\nYou can run translations manually with:');
+    }
+    console.log('  npx @localheroai/cli translate');
   }
 }
