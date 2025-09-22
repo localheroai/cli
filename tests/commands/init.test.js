@@ -61,13 +61,35 @@ describe('init command', () => {
     jest.resetAllMocks();
   });
 
-  it('skips initialization if configuration exists', async () => {
-    configUtils.getProjectConfig.mockResolvedValue({ exists: true });
+  it('handles existing configuration and checks authentication', async () => {
+    const validConfig = {
+      projectId: 'test-123',
+      sourceLocale: 'en',
+      outputLocales: ['es', 'fr'],
+      translationFiles: { pattern: '**/*.json' }
+    };
+    configUtils.getProjectConfig.mockResolvedValue(validConfig);
+    authUtils.checkAuth.mockResolvedValue(true); // Already authenticated
+    promptService.confirm.mockResolvedValue(false); // Don't import
+
     await init(createInitDeps());
 
     const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
-    expect(allConsoleOutput).toContain('Existing configuration found');
-    expect(promptService.getApiKey).not.toHaveBeenCalled();
+    expect(allConsoleOutput).toContain('Configuration found!');
+    expect(allConsoleOutput).toContain('API key found and valid');
+    expect(login).not.toHaveBeenCalled();
+  });
+
+  it('validates existing configuration and shows error for invalid config', async () => {
+    const invalidConfig = { exists: true }; // Missing required fields
+    configUtils.getProjectConfig.mockResolvedValue(invalidConfig);
+
+    await init(createInitDeps());
+
+    const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+    expect(allConsoleOutput).toContain('Configuration found!');
+    expect(allConsoleOutput).toContain('Invalid configuration: missing fields');
+    expect(authUtils.checkAuth).not.toHaveBeenCalled();
   });
 
   it('detects when authentication is needed', async () => {
