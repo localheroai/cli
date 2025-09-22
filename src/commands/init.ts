@@ -484,8 +484,8 @@ async function handleGitHubWorkflowSetup(
     console.log('1. Add your API key to your repository\'s secrets:');
     console.log('   - Go to Settings > Secrets and variables > Actions > New repository secret');
     console.log('   - Name: LOCALHERO_API_KEY');
-    console.log('   - Value: [Your API Key] (find this at https://localhero.ai/api-keys or in your local .localhero_key file)');
-    console.log('\n2. Commit and push the workflow file to enable automatic translations\n');
+    console.log('   - Value: [Your API Key] (find this at https://localhero.ai/api-keys)');
+    console.log('2. Commit and push the workflow file to enable automatic translations\n');
     return { created: true };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
