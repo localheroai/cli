@@ -11,6 +11,7 @@ import type {
   TranslationFileOptions
 } from '../types/index.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
+import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from './file-size.js';
 
 
 /**
@@ -364,6 +365,15 @@ export async function findTranslationFiles(
         };
 
         if (parseContent) {
+          const fileSize = await getFileSize(filePath);
+
+          if (isFileTooLarge(fileSize)) {
+            console.error(chalk.red(
+              `✖ File too large: ${filePath} (${formatFileSize(fileSize)}) exceeds maximum size limit of ${formatFileSize(FILE_SIZE_LIMITS.MAX_SIZE)}. Skipping.`
+            ));
+            continue;
+          }
+
           const content = await readFile(filePath, 'utf8');
           const parsedContent = parseFile(content, format, filePath);
 
