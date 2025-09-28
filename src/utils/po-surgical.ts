@@ -1,5 +1,5 @@
 import { po } from 'gettext-parser';
-import { createUniqueKey, normalizeStringValue, parseUniqueKey, parsePoFile, PLURAL_SUFFIX } from './po-utils.js';
+import { createUniqueKey, normalizeStringValue, parseUniqueKey, parsePoFile, PLURAL_PREFIX, extractNPlurals, MAX_PLURAL_FORMS } from './po-utils.js';
 
 /**
  * Surgical update of .po file - only modify lines that actually changed
@@ -42,13 +42,10 @@ export function surgicalUpdatePoFile(
 
         if (entry.msgid_plural) {
           const pluralKey = createUniqueKey(entry.msgid_plural, contextValue);
-          const pluralSuffixKey = uniqueKey + PLURAL_SUFFIX;
 
-          // Check for __plural_1 suffix key first, then fallback to msgid_plural key
+          // Check for msgid_plural key
           let newPluralValue = '';
-          if (translations[pluralSuffixKey]) {
-            newPluralValue = translations[pluralSuffixKey];
-          } else if (translations[pluralKey] && entry.msgid_plural !== msgid) {
+          if (translations[pluralKey] && entry.msgid_plural !== msgid) {
             newPluralValue = translations[pluralKey];
           }
 
@@ -58,6 +55,20 @@ export function surgicalUpdatePoFile(
 
             if (currentPluralValue !== normalizedNewPluralValue) {
               allIdentical = false;
+            }
+          }
+
+          // Check for __plural_N keys
+          for (let i = 1; i < entry.msgstr.length; i++) {
+            const pluralKey = uniqueKey + `${PLURAL_PREFIX}${i}`;
+            if (translations[pluralKey]) {
+              const currentPluralValue = normalizeStringValue(entry.msgstr[i] || '');
+              const newPluralValue = translations[pluralKey];
+              const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
+
+              if (currentPluralValue !== normalizedNewPluralValue) {
+                allIdentical = false;
+              }
             }
           }
         }
@@ -80,28 +91,47 @@ export function surgicalUpdatePoFile(
  */
 function groupPluralTranslations(translations: Record<string, string>): {
   regular: Record<string, string>;
-  pluralGroups: Map<string, { singular: string; plural: string }>;
+  pluralGroups: Map<string, string[]>;
 } {
   const regular: Record<string, string> = {};
-  const pluralGroups = new Map<string, { singular: string; plural: string }>();
+  const pluralGroups = new Map<string, string[]>();
 
-  // First pass: identify plural pairs
+  // First pass: identify plural groups by base key
   Object.keys(translations).forEach(key => {
-    if (key.endsWith(PLURAL_SUFFIX)) {
-      const baseKey = key.replace(new RegExp(PLURAL_SUFFIX + '$'), '');
-      if (translations[baseKey]) {
-        // This is a plural pair
-        pluralGroups.set(baseKey, {
-          singular: translations[baseKey],
-          plural: translations[key]
-        });
+    const pluralMatch = key.match(/^(.+)__plural_(\d+)$/);
+    if (pluralMatch) {
+      const baseKey = pluralMatch[1];
+      const pluralIndex = parseInt(pluralMatch[2]);
+
+      if (!pluralGroups.has(baseKey)) {
+        pluralGroups.set(baseKey, []);
+      }
+
+      // Validate plural index bounds
+      if (pluralIndex >= 0 && pluralIndex <= MAX_PLURAL_FORMS) {
+        const pluralArray = pluralGroups.get(baseKey)!;
+        while (pluralArray.length <= pluralIndex) {
+          pluralArray.push('');
+        }
+        pluralArray[pluralIndex] = translations[key];
+      } else {
+        console.warn(`Invalid plural index ${pluralIndex} for key ${baseKey}, skipping`);
       }
     }
   });
 
-  // Second pass: add regular keys (excluding those in plural pairs)
+  // Second pass: add base keys (msgstr[0]) to plural groups if they exist
   Object.entries(translations).forEach(([key, value]) => {
-    if (!key.endsWith(PLURAL_SUFFIX) && !pluralGroups.has(key)) {
+    if (pluralGroups.has(key)) {
+      // This is a base key of a plural group
+      const pluralArray = pluralGroups.get(key)!;
+      if (pluralArray.length === 0) {
+        pluralArray.push(value);
+      } else {
+        pluralArray[0] = value;
+      }
+    } else if (!key.match(/__plural_\d+$/)) {
+      // Regular (non-plural) key
       regular[key] = value;
     }
   });
@@ -247,28 +277,31 @@ function processLineByLine(
           }
         }
 
-        // Handle plural forms
         if (entry.msgid_plural) {
-          const pluralKey = createUniqueKey(entry.msgid_plural, contextValue);
-          const pluralSuffixKey = uniqueKey + PLURAL_SUFFIX;
+          const actualPluralCount = entry.msgstr.length;
 
-          let pluralTranslationKey = '';
-          let newPluralValue = '';
+          // Check for plural forms for this specific key
+          for (let i = 1; i < actualPluralCount; i++) {
+            const pluralKey = uniqueKey + `${PLURAL_PREFIX}${i}`;
 
-          if (translations[pluralSuffixKey]) {
-            pluralTranslationKey = pluralSuffixKey;
-            newPluralValue = translations[pluralSuffixKey];
-          } else if (translations[pluralKey] && entry.msgid_plural !== msgid) {
-            pluralTranslationKey = pluralKey;
-            newPluralValue = translations[pluralKey];
+            if (translations[pluralKey]) {
+              const currentPluralValue = normalizeStringValue(entry.msgstr[i] || '');
+              const newPluralValue = translations[pluralKey];
+              const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
+
+              if (currentPluralValue !== normalizedNewPluralValue) {
+                changesToMake.set(pluralKey, newPluralValue);
+              }
+            }
           }
 
-          if (pluralTranslationKey && newPluralValue) {
+          const pluralKey = createUniqueKey(entry.msgid_plural, contextValue);
+          if (translations[pluralKey] && entry.msgid_plural !== msgid) {
             const currentPluralValue = normalizeStringValue(entry.msgstr[1] || '');
-            const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
+            const normalizedNewPluralValue = normalizeStringValue(translations[pluralKey]);
 
             if (currentPluralValue !== normalizedNewPluralValue) {
-              changesToMake.set(pluralTranslationKey, newPluralValue);
+              changesToMake.set(pluralKey, translations[pluralKey]);
             }
           }
         }
@@ -414,17 +447,16 @@ function processLineByLine(
       if (pluralIndex === 0) {
         keyToCheck = createUniqueKey(currentEntry.msgid!, currentEntry.msgctxt);
       } else {
-        // For plural forms, check for the __plural_1 suffix key first
         const baseKey = createUniqueKey(currentEntry.msgid!, currentEntry.msgctxt);
-        const pluralSuffixKey = baseKey + PLURAL_SUFFIX;
+        const pluralSuffixKey = baseKey + `${PLURAL_PREFIX}${pluralIndex}`;
 
-        // Try the __plural_1 key first, fall back to msgid_plural key
+        // Try the ${PLURAL_PREFIX}N suffix key first, fall back to msgid_plural key for backward compatibility
         if (changesToMake.has(pluralSuffixKey)) {
           keyToCheck = pluralSuffixKey;
         } else {
           keyToCheck = createUniqueKey(currentEntry.msgid_plural!, currentEntry.msgctxt);
-          // For msgstr[1], only update if the msgid_plural is different from msgid
-          // Otherwise msgstr[1] would get the same translation as msgstr[0]
+          // For msgstr[N], only update if the msgid_plural is different from msgid
+          // Otherwise msgstr[N] would get the same translation as msgstr[0]
           if (currentEntry.msgid_plural === currentEntry.msgid) {
             keyToCheck = ''; // Use empty key to prevent match
           }
@@ -529,10 +561,7 @@ function addNewEntries(
         return;
       }
 
-      const pluralKey = uniqueKey + PLURAL_SUFFIX;
-
-      // Try to find the proper msgid_plural from the source file if available
-      let msgid_plural = generateEnglishPlural(msgid); // fallback to simple pluralization
+      let msgid_plural: string | null = null;
 
       if (options?.sourceContent) {
         try {
@@ -549,114 +578,38 @@ function addNewEntries(
             msgid_plural = sourceEntry.msgid_plural;
           }
         } catch (error) {
-          // If source parsing fails, continue with fallback
-          console.warn('Failed to parse source content for msgid_plural lookup', error);
+          if (error instanceof SyntaxError) {
+            console.warn('Failed to parse source content for msgid_plural lookup: Invalid PO syntax');
+          } else {
+            console.warn('Failed to parse source content for msgid_plural lookup', error);
+          }
         }
       }
 
-      result.push(...createNewPluralEntry(msgid, msgid_plural, pluralData.singular, pluralData.plural, context));
+      if (!msgid_plural) {
+        console.warn(`Skipping plural entry creation for '${msgid}' - no msgid_plural found in source content. Provide sourceContent with proper plural forms to enable plural translation support.`);
+        return;
+      }
 
-      // Mark both keys as updated
+      // Extract nplurals from the target file's headers
+      const targetNplurals = extractNPlurals(parsed.headers || {});
+
+      result.push(...createNewPluralEntry(msgid, msgid_plural, pluralData, context, targetNplurals));
+
+      // Mark all plural keys as updated
       updatedTranslations.add(uniqueKey);
-      updatedTranslations.add(pluralKey);
+      pluralData.forEach((_, index) => {
+        if (index > 0) {
+          updatedTranslations.add(uniqueKey + `${PLURAL_PREFIX}${index}`);
+        }
+      });
     }
   });
 
   return result;
 }
 
-/**
- * Generate simple English plural form
- * This is a basic implementation for common cases
- */
-function generateEnglishPlural(singular: string): string {
-  if (!singular || singular.trim() === '') {
-    return singular;
-  }
 
-  const text = singular.trim();
-
-  // Handle strings with placeholders - find the last word that's likely a noun
-  const words = text.split(/\s+/);
-  let targetWordIndex = -1;
-  let targetWord = '';
-
-  // Look for the last word that could be a noun (not a placeholder, not a number)
-  for (let i = words.length - 1; i >= 0; i--) {
-    const word = words[i];
-    // Skip placeholders like %(count)s, %d, {count}, etc.
-    if (!word.match(/^[%{].*[}%sd]$/) && !word.match(/^\d+$/)) {
-      targetWordIndex = i;
-      targetWord = word;
-      break;
-    }
-  }
-
-  if (targetWordIndex === -1 || !targetWord) {
-    // No suitable word found, return original
-    return text;
-  }
-  // Pluralize the target word
-  const pluralWord = pluralizeWord(targetWord);
-
-  // Reconstruct the full string with the pluralized word
-  const newWords = [...words];
-  newWords[targetWordIndex] = pluralWord;
-  return newWords.join(' ');
-}
-
-/**
- * Pluralize a single English word
- */
-function pluralizeWord(word: string): string {
-  if (!word) return word;
-
-  // Handle common irregular plurals
-  const irregulars: Record<string, string> = {
-    'child': 'children',
-    'person': 'people',
-    'man': 'men',
-    'woman': 'women',
-    'tooth': 'teeth',
-    'foot': 'feet',
-    'mouse': 'mice',
-    'goose': 'geese'
-  };
-
-  // Check for irregular plurals (case insensitive, but preserve original case)
-  const lowerWord = word.toLowerCase();
-  if (irregulars[lowerWord]) {
-    // Preserve the case pattern of the original word
-    const irregular = irregulars[lowerWord];
-    if (word === word.toUpperCase()) {
-      return irregular.toUpperCase();
-    } else if (word[0] === word[0].toUpperCase()) {
-      return irregular.charAt(0).toUpperCase() + irregular.slice(1);
-    }
-    return irregular;
-  }
-
-  // Handle words ending in consonant + y -> ies
-  if (word.length > 1 && word.endsWith('y') && !'aeiou'.includes(word[word.length - 2].toLowerCase())) {
-    return word.slice(0, -1) + 'ies';
-  }
-
-  // Handle words ending in s, ss, sh, ch, x, z -> es
-  if (word.match(/[sxz]$/) || word.match(/(sh|ch)$/)) {
-    return word + 'es';
-  }
-
-  // Handle words ending in f or fe -> ves
-  if (word.endsWith('f')) {
-    return word.slice(0, -1) + 'ves';
-  }
-  if (word.endsWith('fe')) {
-    return word.slice(0, -2) + 'ves';
-  }
-
-  // Default: add 's'
-  return word + 's';
-}
 
 /**
  * Create a new regular translation entry
@@ -680,9 +633,9 @@ function createNewEntry(msgid: string, msgstr: string, context?: string): string
 function createNewPluralEntry(
   msgid: string,
   msgid_plural: string,
-  singular: string,
-  plural: string,
-  context?: string
+  translations: string[],
+  context?: string,
+  nplurals: number = 2
 ): string[] {
   const result: string[] = [];
 
@@ -692,8 +645,12 @@ function createNewPluralEntry(
 
   result.push(`msgid "${escapePoString(msgid)}"`);
   result.push(`msgid_plural "${escapePoString(msgid_plural)}"`);
-  result.push(`msgstr[0] "${escapePoString(singular)}"`);
-  result.push(`msgstr[1] "${escapePoString(plural)}"`);
+
+  // Write all required plural forms for the target language
+  for (let i = 0; i < nplurals; i++) {
+    const translation = translations[i] || ''; // Use empty string if no translation provided
+    result.push(`msgstr[${i}] "${escapePoString(translation)}"`);
+  }
 
   return result;
 }
@@ -814,8 +771,21 @@ function detectMsgstrFormat(lines: string[], startIndex: number): MsgstrFormat {
 function formatMsgstrValue(value: string, format: MsgstrFormat, msgstrPrefix: string): string[] {
   const lines: string[] = [];
 
+  // Handle empty values as single-line entries
+  if (!value || value.trim() === '') {
+    lines.push(`${format.indentation}${msgstrPrefix} ""`);
+    return lines;
+  }
+
   // Preserve single-line format if original was single-line and new value is reasonable length
+  // Also prefer single-line for very short values when original was multiline but essentially empty
   if (!format.isMultiline && value.length <= 120 && !value.includes('\n')) {
+    lines.push(`${format.indentation}${msgstrPrefix} "${escapePoString(value)}"`);
+    return lines;
+  }
+
+  // For multiline originals with empty first line, only convert to single-line if the value is very short
+  if (format.isMultiline && format.hasEmptyFirstLine && value.length <= 40 && !value.includes('\n')) {
     lines.push(`${format.indentation}${msgstrPrefix} "${escapePoString(value)}"`);
     return lines;
   }

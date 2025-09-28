@@ -5,7 +5,7 @@ import {
   ProjectConfig,
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
-import { findMissingPoTranslations, createUniqueKey } from './po-utils.js';
+import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX } from './po-utils.js';
 
 export function isDjangoWorkflow(config: ProjectConfig): boolean {
   return config.translationFiles?.workflow === 'django';
@@ -483,19 +483,40 @@ export function processLocaleTranslations(
     if (isPoFile && sourceFile.content && targetFile?.content) {
       const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
       const targetContentRaw = Buffer.from(targetFile.content, 'base64').toString();
-
       const missingPoTranslations = findMissingPoTranslations(sourceContentRaw, targetContentRaw);
 
       // Convert the .po missing results to the expected format
       missingPoTranslations.forEach(missing => {
         const key = missing.context ? createUniqueKey(missing.key, missing.context) : missing.key;
-        missingKeys[key] = {
+
+        // Extract plural index from key name (e.g., "book__plural_2" -> 2)
+        const pluralMatch = missing.key.match(new RegExp(`${PLURAL_PREFIX.replace('_', '\\\\_')}(\\\\d+)$`));
+        const pluralIndex = pluralMatch ? parseInt(pluralMatch[1]) : 0;
+
+        // Extract base msgid for plural forms (remove __plural_X suffix)
+        const baseMsgid = missing.key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\\\_')}\\\\d+$`), '');
+
+        const entryData: any = {
           value: missing.value,
           sourceKey: key,
-          context: missing.context,
-          isPlural: missing.isPlural,
-          pluralForm: missing.pluralForm
+          context: missing.context
         };
+
+        if (missing.isPlural) {
+          entryData.metadata = {
+            po_plural: true,
+            plural_index: pluralIndex
+          };
+
+          // Add msgid_plural to first form (index 0), msgid to others
+          if (pluralIndex === 0) {
+            entryData.metadata.msgid_plural = missing.pluralForm;
+          } else {
+            entryData.metadata.msgid = baseMsgid;
+          }
+        }
+
+        missingKeys[key] = entryData;
       });
     } else {
       // For other file types (yml, json), use the generic missing detection
