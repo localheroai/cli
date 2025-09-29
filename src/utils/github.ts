@@ -91,6 +91,7 @@ on:
 
 jobs:
   translate:
+    if: \${{ !contains(github.event.pull_request.labels.*.name, 'skip-translation') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
