@@ -386,7 +386,8 @@ async function handleImportProcess(
   config: BaseProjectConfig,
   basePath: string,
   importUtils: typeof importService,
-  console: Console
+  console: Console,
+  configUtils: typeof configService
 ): Promise<ImportProcessResult> {
   console.log('\nSearching for translation files...');
 
@@ -434,6 +435,8 @@ async function handleImportProcess(
       if (importResult.translations_url) {
         console.log(chalk.green(`\nView your translations at: ${importResult.translations_url}`));
       }
+
+      await configUtils.updateLastSyncedAt(basePath);
 
       return { success: true, hasWarnings: (importResult.warnings?.length || 0) > 0 };
     }
@@ -522,7 +525,7 @@ async function handleExistingConfiguration(
   existingConfig: BaseProjectConfig,
   deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'login'>>
 ): Promise<void> {
-  const { console, basePath, promptService, authUtils, projectApi, login: loginFn, importUtils } = deps;
+  const { console, basePath, promptService, authUtils, projectApi, login: loginFn, importUtils, configUtils } = deps;
 
   let workflowCreated = false;
   console.log(chalk.green('✓ Configuration found! Let\'s verify and set up your API access.\n'));
@@ -563,19 +566,24 @@ async function handleExistingConfiguration(
         console.log(chalk.yellow('Please check your localhero.json file or contact support.\n'));
         return;
       }
-      console.log(chalk.green('✓ Project access verified\n'));
+      console.log(chalk.green('✓ Project access verified'));
     } catch {
       console.log(chalk.yellow('⚠️  Could not verify project access. Continuing anyway...\n'));
     }
   }
 
-  const shouldImport = await promptService.confirm({
-    message: 'Would you like to import existing translation files? (recommended)',
-    default: true
-  });
+  // Check if we've previously imported files
+  if (existingConfig.lastSyncedAt) {
+    console.log(chalk.green('✓ Translation files previously imported'));
+  } else {
+    const shouldImport = await promptService.confirm({
+      message: 'Would you like to import existing translation files? (recommended)',
+      default: true
+    });
 
-  if (shouldImport) {
-    await handleImportProcess(existingConfig, basePath, importUtils, console);
+    if (shouldImport) {
+      await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils);
+    }
   }
 
   const workflowResult = await handleGitHubWorkflowSetup(
@@ -657,7 +665,7 @@ async function handleNewProjectSetup(
     console.log('\nSearching for translation files in:');
     console.log(`${config.translationFiles.paths.join(', ')}`);
 
-    const importResult = await handleImportProcess(config, basePath, importUtils, console);
+    const importResult = await handleImportProcess(config, basePath, importUtils, console, configUtils);
     hasErrors = !importResult.success;
   }
 
