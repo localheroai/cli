@@ -31,7 +31,7 @@ export function parseFile(content: string, format: string, filePath: string = ''
     }
     if (format === 'po') {
       const parsed = parsePoFile(content);
-      return poEntriesToApiFormat(parsed.entries);
+      return poEntriesToApiFormat(parsed);
     }
     return yaml.parse(content);
   } catch (error: any) {

@@ -1,6 +1,30 @@
 import { po } from 'gettext-parser';
 
-export const PLURAL_SUFFIX = '__plural_1';
+export const PLURAL_PREFIX = '__plural_';
+export const MAX_PLURAL_FORMS = 10; // Covers MANY languages: Arabic=6, Russian=3, etc.
+
+/**
+ * Extract the number of plural forms from PO file headers
+ */
+export function extractNPlurals(headers: Record<string, string>): number {
+  if (!headers || typeof headers !== 'object') {
+    return 2; // default fallback
+  }
+
+  const pluralForms = headers['plural-forms'] || headers['Plural-Forms'];
+  if (pluralForms && typeof pluralForms === 'string') {
+    const match = pluralForms.match(/nplurals\s*=\s*(\d+)/);
+    if (match && match[1]) {
+      const nplurals = parseInt(match[1], 10);
+      // Validate reasonable range and ensure it's a valid number
+      if (!isNaN(nplurals) && nplurals >= 1 && nplurals <= MAX_PLURAL_FORMS) {
+        return nplurals;
+      }
+      console.warn(`Invalid nplurals value: ${nplurals}, using default of 2`);
+    }
+  }
+  return 2; // default fallback
+}
 
 export interface PoEntry {
   msgid: string;
@@ -71,15 +95,16 @@ export function parseUniqueKey(key: string): { msgid: string; context?: string }
 }
 
 /**
- * Convert .po entries to API compatible format
+ * Convert .po file to API compatible format
  */
 export function poEntriesToApiFormat(
-  entries: PoEntry[],
+  parsed: ParsedPoFile,
   options?: { sourceLanguage?: string; currentLanguage?: string }
 ): Record<string, any> {
   const keys: Record<string, any> = {};
+  const nplurals = extractNPlurals(parsed.headers);
 
-  entries.forEach(entry => {
+  parsed.entries.forEach(entry => {
     const uniqueKey = createUniqueKey(entry.msgid, entry.msgctxt);
 
     let translatorComments: string | undefined;
@@ -101,52 +126,38 @@ export function poEntriesToApiFormat(
     if (entry.msgid_plural) {
       const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
         options.sourceLanguage === options.currentLanguage;
-      const singularValue = entry.msgstr && entry.msgstr[0] ? entry.msgstr[0] :
-        (isSourceLanguage ? entry.msgid : '');
 
-      const singularKeyData: any = {
-        value: singularValue,
-        metadata: {
-          po_plural: true,
-          msgid_plural: entry.msgid_plural,
-          plural_index: 0
+      // Generate all plural forms based on nplurals
+      for (let i = 0; i < nplurals; i++) {
+        const suffix = i === 0 ? '' : `${PLURAL_PREFIX}${i}`;
+        const keyName = uniqueKey + suffix;
+        const value = entry.msgstr && entry.msgstr[i] ? entry.msgstr[i] :
+          (isSourceLanguage ? (i === 0 ? entry.msgid : entry.msgid_plural) : '');
+
+        const keyData: any = {
+          value,
+          metadata: {
+            po_plural: true,
+            plural_index: i
+          }
+        };
+
+        if (i === 0) {
+          keyData.metadata.msgid_plural = entry.msgid_plural;
+        } else {
+          keyData.metadata.msgid = entry.msgid;
         }
-      };
 
-      if (translatorComments) {
-        singularKeyData.metadata.translator_comments = translatorComments;
-      }
-
-      if (entry.msgctxt) {
-        singularKeyData.context = entry.msgctxt;
-      }
-
-      keys[uniqueKey] = singularKeyData;
-
-      // Plural form with special suffix
-      const pluralKey = uniqueKey + PLURAL_SUFFIX;
-      const pluralValue = entry.msgstr && entry.msgstr[1] ? entry.msgstr[1] :
-        (isSourceLanguage ? entry.msgid_plural : '');
-
-      const pluralKeyData: any = {
-        value: pluralValue,
-        metadata: {
-          po_plural: true,
-          msgid: entry.msgid,
-          plural_index: 1
+        if (translatorComments) {
+          keyData.metadata.translator_comments = translatorComments;
         }
-      };
 
-      // Include translator comments in plural metadata
-      if (translatorComments) {
-        pluralKeyData.metadata.translator_comments = translatorComments;
+        if (entry.msgctxt) {
+          keyData.context = entry.msgctxt;
+        }
+
+        keys[keyName] = keyData;
       }
-
-      if (entry.msgctxt) {
-        pluralKeyData.context = entry.msgctxt;
-      }
-
-      keys[pluralKey] = pluralKeyData;
     } else {
       // Handle regular (non-plural) entries
       const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
@@ -227,8 +238,13 @@ export function findMissingPoTranslations(
   sourceContent: string,
   targetContent: string
 ): MissingTranslation[] {
-  const sourceEntries = parsePoFile(sourceContent).entries;
-  const targetEntries = parsePoFile(targetContent).entries;
+  const sourceParsed = parsePoFile(sourceContent);
+  const targetParsed = parsePoFile(targetContent);
+  const sourceEntries = sourceParsed.entries;
+  const targetEntries = targetParsed.entries;
+
+  // Use target file's nplurals to determine how many plural forms to check for
+  const targetNplurals = extractNPlurals(targetParsed.headers);
 
   const targetMap = new Map<string, PoEntry>();
   targetEntries.forEach(entry => {
@@ -243,39 +259,24 @@ export function findMissingPoTranslations(
     const targetEntry = targetMap.get(key);
 
     if (entry.msgid_plural) {
-      // Handle plural entries - check both singular and plural forms
+      for (let i = 0; i < targetNplurals; i++) {
+        const isEmpty = !targetEntry ||
+          !targetEntry.msgstr ||
+          !targetEntry.msgstr[i] ||
+          targetEntry.msgstr[i].trim() === '';
 
-      // Check singular form (msgstr[0])
-      const singularEmpty = !targetEntry ||
-        !targetEntry.msgstr ||
-        !targetEntry.msgstr[0] ||
-        targetEntry.msgstr[0].trim() === '';
+        if (isEmpty) {
+          const suffix = i === 0 ? '' : `${PLURAL_PREFIX}${i}`;
+          const keyName = key + suffix;
 
-      if (singularEmpty) {
-        missing.push({
-          key: entry.msgid,
-          context: entry.msgctxt,
-          value: entry.msgid,
-          isPlural: true,
-          pluralForm: entry.msgid_plural
-        });
-      }
-
-      // Check plural form (msgstr[1]) - use the __plural_1 suffix to match our key structure
-      const pluralEmpty = !targetEntry ||
-        !targetEntry.msgstr ||
-        !targetEntry.msgstr[1] ||
-        targetEntry.msgstr[1].trim() === '';
-
-      if (pluralEmpty) {
-        const pluralKey = key + PLURAL_SUFFIX;
-        missing.push({
-          key: pluralKey,
-          context: entry.msgctxt,
-          value: entry.msgid_plural,
-          isPlural: true,
-          pluralForm: entry.msgid_plural
-        });
+          missing.push({
+            key: keyName,
+            context: entry.msgctxt,
+            value: i === 0 ? entry.msgid : entry.msgid_plural,
+            isPlural: true,
+            pluralForm: entry.msgid_plural
+          });
+        }
       }
     } else {
       // Handle regular (non-plural) entries

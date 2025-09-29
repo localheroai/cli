@@ -95,8 +95,8 @@ async function readFileContent(
   if (format === 'po') {
     try {
       const parsed = parsePoFile(content);
-      const apiFormat = poEntriesToApiFormat(parsed.entries, options);
-      
+      const apiFormat = poEntriesToApiFormat(parsed, options);
+
       return Buffer.from(JSON.stringify(apiFormat)).toString('base64');
     } catch {
       return Buffer.from(content).toString('base64');

@@ -427,19 +427,24 @@ msgstr "annan"`;
       expect(result).toContain('msgstr "Ny Nyckel Med Kontext"');
     });
 
-    test('should add new plural translation entries', () => {
+    test('should skip new plural translation entries when no source msgid_plural available', () => {
       const original = loadFixture('simple');
       const translations = {
         'New Item': 'Nytt Objekt',
         'New Item__plural_1': 'Nya Objekt'
       };
 
+      const originalWarn = console.warn;
+      console.warn = jest.fn();
+
       const result = surgicalUpdatePoFile(original, translations);
 
-      expect(result).toContain('msgid "New Item"');
-      expect(result).toContain('msgid_plural "New Items"');
-      expect(result).toContain('msgstr[0] "Nytt Objekt"');
-      expect(result).toContain('msgstr[1] "Nya Objekt"');
+      console.warn = originalWarn;
+
+      expect(result).not.toContain('msgid "New Item"');
+      expect(result).not.toContain('msgid_plural');
+      expect(result).not.toContain('msgstr[0]');
+      expect(result).not.toContain('msgstr[1]');
     });
 
     test('should skip adding new entries when msgid equals msgstr in source language', () => {
@@ -543,7 +548,7 @@ msgstr "Hej"
       expect(result).toContain('msgstr[1] "%(count)s sidor"');
     });
 
-    test('should fall back to translation as msgid_plural when sourceContent is not available', () => {
+    test('should skip plural entries when sourceContent is not available', () => {
       const targetContent = `msgid ""
 msgstr ""
 
@@ -556,13 +561,17 @@ msgstr "Hej"
         '%(count)s item__plural_1': '%(count)s objekt' // Swedish plural same as singular
       };
 
+      const originalWarn = console.warn;
+      console.warn = jest.fn();
+
       const result = surgicalUpdatePoFile(targetContent, translations);
 
+      console.warn = originalWarn;
 
-      expect(result).toContain('msgid "%(count)s item"');
-      expect(result).toContain('msgid_plural "%(count)s items"');
-      expect(result).toContain('msgstr[0] "%(count)s objekt"');
-      expect(result).toContain('msgstr[1] "%(count)s objekt"');
+      expect(result).not.toContain('msgid "%(count)s item"');
+      expect(result).not.toContain('msgid_plural');
+      expect(result).not.toContain('msgstr[0]');
+      expect(result).not.toContain('msgstr[1]');
     });
 
     test('should handle sourceContent parsing errors gracefully', () => {
@@ -580,7 +589,6 @@ msgstr "Hej"
         'New Item__plural_1': 'Nya Objekt'
       };
 
-      // Suppress console.warn for this test
       const originalWarn = console.warn;
       console.warn = jest.fn();
 
@@ -590,8 +598,8 @@ msgstr "Hej"
 
       console.warn = originalWarn;
 
-      expect(result).toContain('msgid "New Item"');
-      expect(result).toContain('msgid_plural "New Items"');
+      expect(result).not.toContain('msgid "New Item"');
+      expect(result).not.toContain('msgid_plural');
     });
   });
 
@@ -614,11 +622,11 @@ msgstr ""
 
       expect(result).not.toContain('hämtainformation');
       expect(result).not.toContain('därifrånatt');
-      
+
       expect(result).toContain('hämta ');
       expect(result).toContain('information från');
       expect(result).toContain('därifrån att');
-      
+
       expect(result).toContain('Aktivera källorna');
       expect(result).toContain('Om ett externt system');
     });
@@ -642,10 +650,10 @@ msgstr ""
       expect(result).not.toContain('spacingwhen');
       expect(result).not.toContain('themwhen');
       expect(result).not.toContain('multiplechunks');
-      
+
       expect(result).toContain('spacing between them');
       expect(result).toContain('multiple chunks for');
-      
+
       expect(result).toContain('maintain proper spacing between them when');
     });
 
@@ -687,18 +695,213 @@ msgstr ""
       const result = surgicalUpdatePoFile(original, translations);
 
       expect(result).not.toContain('schetseninformatie');
-      expect(result).not.toContain('isgeïntegreerd'); 
+      expect(result).not.toContain('isgeïntegreerd');
       expect(result).not.toContain('informatiegebruikt');
-      
+
       expect(result).toContain('AI-schetsen ');
       expect(result).toContain('informatie ophalen');
       expect(result).toContain('is ');
       expect(result).toContain('geïntegreerd met');
       expect(result).toContain('informatie ');
       expect(result).toContain('gebruikt');
-      
+
       expect(result).toContain('Activeer de bronnen');
       expect(result).toContain('Als er een extern systeem');
+    });
+  });
+
+  describe('Multi-Plural Forms Support', () => {
+    test('should handle Polish plural forms (3 forms) correctly', () => {
+      const polishTarget = `# Polish translation
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: pl\\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\\n"
+
+msgid "file"
+msgid_plural "files"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+`;
+
+      const englishSource = `# English source
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: en\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "file"
+msgid_plural "files"
+msgstr[0] "file"
+msgstr[1] "files"
+`;
+
+      const translations = {
+        'file': 'plik',
+        'file__plural_1': 'pliki',
+        'file__plural_2': 'plików'
+      };
+
+      const result = surgicalUpdatePoFile(polishTarget, translations, {
+        sourceContent: englishSource,
+        sourceLanguage: 'en',
+        targetLanguage: 'pl'
+      });
+
+      expect(result).toContain('msgstr[0] "plik"');
+      expect(result).toContain('msgstr[1] "pliki"');
+      expect(result).toContain('msgstr[2] "plików"');
+    });
+
+    test('should handle Arabic plural forms (6 forms) correctly', () => {
+      const arabicTarget = `# Arabic translation
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: ar\\n"
+"Plural-Forms: nplurals=6; plural=n==0 ? 0 : n==1 ? 1 : n==2 ? 2 : n%100>=3 && n%100<=10 ? 3 : n%100>=11 ? 4 : 5;\\n"
+
+msgid "book"
+msgid_plural "books"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+msgstr[3] ""
+msgstr[4] ""
+msgstr[5] ""
+`;
+
+      const englishSource = `# English source
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: en\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "book"
+msgid_plural "books"
+msgstr[0] "book"
+msgstr[1] "books"
+`;
+
+      const translations = {
+        'book': 'كتاب',
+        'book__plural_1': 'كتاب',
+        'book__plural_2': 'كتابان',
+        'book__plural_3': 'كتب',
+        'book__plural_4': 'كتاباً',
+        'book__plural_5': 'كتاب'
+      };
+
+      const result = surgicalUpdatePoFile(arabicTarget, translations, {
+        sourceContent: englishSource,
+        sourceLanguage: 'en',
+        targetLanguage: 'ar'
+      });
+
+      expect(result).toContain('msgstr[0] "كتاب"');
+      expect(result).toContain('msgstr[1] "كتاب"');
+      expect(result).toContain('msgstr[2] "كتابان"');
+      expect(result).toContain('msgstr[3] "كتب"');
+      expect(result).toContain('msgstr[4] "كتاباً"');
+      expect(result).toContain('msgstr[5] "كتاب"');
+    });
+
+    test('should create new multi-plural entries when they do not exist', () => {
+      const polishTarget = `# Polish translation
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: pl\\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\\n"
+`;
+
+      const englishSource = `# English source
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: en\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "item"
+msgid_plural "items"
+msgstr[0] "item"
+msgstr[1] "items"
+`;
+
+      const translations = {
+        'item': 'element',
+        'item__plural_1': 'elementy',
+        'item__plural_2': 'elementów'
+      };
+
+      const result = surgicalUpdatePoFile(polishTarget, translations, {
+        sourceContent: englishSource,
+        sourceLanguage: 'en',
+        targetLanguage: 'pl'
+      });
+
+      expect(result).toContain('msgid "item"');
+      expect(result).toContain('msgid_plural "items"');
+      expect(result).toContain('msgstr[0] "element"');
+      expect(result).toContain('msgstr[1] "elementy"');
+      expect(result).toContain('msgstr[2] "elementów"');
+    });
+
+    test('should handle partial plural translations gracefully', () => {
+      const polishTarget = `# Polish translation
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: pl\\n"
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\\n"
+
+msgid "message"
+msgid_plural "messages"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+`;
+
+      const englishSource = `# English source
+
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: en\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "message"
+msgid_plural "messages"
+msgstr[0] "message"
+msgstr[1] "messages"
+`;
+
+      // Only provide translations for some forms
+      const translations = {
+        'message': 'wiadomość',
+        'message__plural_2': 'wiadomości'
+      };
+
+      const result = surgicalUpdatePoFile(polishTarget, translations, {
+        sourceContent: englishSource,
+        sourceLanguage: 'en',
+        targetLanguage: 'pl'
+      });
+
+      expect(result).toContain('msgstr[0] "wiadomość"');
+      expect(result).toContain('msgstr[1] ""'); // Empty - not provided
+      expect(result).toContain('msgstr[2] "wiadomości"');
     });
   });
 });
