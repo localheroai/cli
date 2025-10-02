@@ -177,9 +177,15 @@ export const configService: ConfigService = {
    * Update the lastSyncedAt field in the project config
    */
   async updateLastSyncedAt(basePath?: string): Promise<ProjectConfig> {
-    const config = await this.getValidProjectConfig(basePath);
-    config.lastSyncedAt = new Date().toISOString();
-    await this.saveProjectConfig(config, basePath);
-    return config;
+    const config = await this.getProjectConfig(basePath);
+    if (!config) {
+      throw new Error('No project config found. Run `npx @localheroai/cli init` first');
+    }
+    const updatedConfig = {
+      ...config,
+      lastSyncedAt: new Date().toISOString()
+    };
+    await this.saveProjectConfig(updatedConfig, basePath);
+    return updatedConfig;
   }
 };
