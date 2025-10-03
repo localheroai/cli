@@ -182,7 +182,9 @@ msgstr[1] "%(count)d items"
 
       expect(result['Hello']).toEqual({
         value: 'Hej',
-        metadata: 'hello_greeting'
+        metadata: {
+          translator_comments: 'hello_greeting'
+        }
       });
     });
 
@@ -239,6 +241,26 @@ msgstr[1] "%(count)d items"
 
       expect(result['%(count)d item'].metadata.translator_comments).toBe('Count of items in shopping cart');
       expect(result['%(count)d item__plural_1'].metadata.translator_comments).toBe('Count of items in shopping cart');
+    });
+
+    it('should NOT include metadata for non-plural entries without translator comments', () => {
+      const entries = [
+        {
+          msgid: 'Hello',
+          msgstr: ['Hej'],
+          msgctxt: undefined,
+          msgid_plural: undefined,
+          comments: undefined
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Hello']).toEqual({
+        value: 'Hej'
+      });
+      expect(result['Hello'].metadata).toBeUndefined();
     });
   });
 

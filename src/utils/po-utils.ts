@@ -170,7 +170,9 @@ export function poEntriesToApiFormat(
       };
 
       if (translatorComments) {
-        keyData.metadata = translatorComments;
+        keyData.metadata = {
+          translator_comments: translatorComments
+        };
       }
 
       if (entry.msgctxt) {
