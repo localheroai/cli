@@ -7,9 +7,9 @@ LocalHero.ai is an AI-powered I18n translation service that seamlessly integrate
 ## Features 🚀
 
 - 🤖 AI-powered translations that preserve your brand voice
-- 🔌 Seamless integration with Rails, React and other frameworks coming soon
+- 🔌 Seamless integration with with framworks like Rails, React, Django.
 - 🚀 Automated workflow with GitHub Actions support
-- 📦 Works with YAML and JSON translation files
+- 📦 Works with YAML, JSON, .po (experimental) translation files
 
 ## Getting Started 🏁
 
@@ -67,6 +67,30 @@ Translating your missing keys:
 - Automatically detects missing translations and sends them to the Localhero.ai translation API for translation
 - Updates translation files with any new or update translations
 - It's run manually or by GitHub Actions. When run as a GitHub action any new translations are automatically committed to git.
+
+#### Options
+
+**`--verbose`**: Enable verbose logging for the translation process.
+
+**`--changed-only`**: Only translate keys that have changed in the current branch _[experimental]_
+
+```bash
+npx @localheroai/cli translate --changed-only
+```
+
+The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them. 
+
+You can customize the base branch in your `localhero.json`:
+
+```json
+{
+  "translationFiles": {
+    "paths": ["locales/"],
+    "baseBranch": "develop"
+  }
+}
+```
+
 
 ### Pull / push
 
