@@ -11,6 +11,7 @@ import { createGitHubActionFile, workflowExists } from '../utils/github.js';
 import { directoryExists, findFirstExistingPath, getDirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
+import { Spinner } from '../utils/spinner.js';
 
 // Additional interfaces for better type safety
 interface ImportStatistics {
@@ -389,10 +390,12 @@ async function handleImportProcess(
   console: Console,
   configUtils: typeof configService
 ): Promise<ImportProcessResult> {
-  console.log('\nSearching for translation files...');
+  const spinner = new Spinner('Importing translations...');
+  spinner.start();
 
   try {
     const importResult = await importUtils.importTranslations(config, basePath) as TypedImportResult;
+    spinner.stop();
 
     if (importResult.status === 'no_files') {
       console.log(chalk.yellow('No translation files found.'));
@@ -449,6 +452,7 @@ async function handleImportProcess(
 
     return { success: true, hasWarnings: false };
   } catch (error) {
+    spinner.stop();
     const errorMessage = error instanceof Error ? error.message : 'Import failed';
     console.log(chalk.red('✗ Failed to import translations'));
     console.log(chalk.red(`Error: ${errorMessage}`));
