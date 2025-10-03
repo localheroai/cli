@@ -6,6 +6,7 @@ import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
+import { filterByGitChanges, isGitAvailable } from '../utils/git-changes.js';
 import {
   findMissingTranslations,
   batchKeysWithMissing,
@@ -30,6 +31,7 @@ import { ApiResponseError } from '../types/index.js';
 export interface TranslationOptions {
   verbose?: boolean;
   commit?: boolean;
+  changedOnly?: boolean;
   [key: string]: any;
 }
 
@@ -172,13 +174,42 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.log(chalk.blue(`ℹ Found ${sourceFiles.length} source files for locale ${config.sourceLocale}`));
   }
 
-  const missingByLocale = translationUtils.findMissingTranslationsByLocale(
+  if (options.changedOnly && !isGitAvailable()) {
+    console.error(chalk.red('\n✖ Git is required for the --changed-only flag but is not available.\n'));
+    console.error(chalk.yellow('Please ensure you are in a git repository.\n'));
+    process.exit(1);
+    return;
+  }
+
+  let missingByLocale = translationUtils.findMissingTranslationsByLocale(
     sourceFiles,
     targetFilesByLocale,
     config,
     !!verbose,
     console
   );
+
+  if (options.changedOnly) {
+    const filtered = filterByGitChanges(
+      sourceFiles,
+      missingByLocale,
+      config,
+      !!verbose
+    );
+
+    if (filtered !== null) {
+      if (Object.keys(filtered).length === 0) {
+        console.log(chalk.green('✓ All changed keys are already translated'));
+        return;
+      }
+      missingByLocale = filtered;
+    } else {
+      console.error(chalk.red('\n✖ Could not determine changed keys (e.g., base branch not found).\n'));
+      console.error(chalk.yellow('Run with --verbose for more details.\n'));
+      process.exit(1);
+      return;
+    }
+  }
 
   interface LocaleSummary {
     keyCount: number;
@@ -220,9 +251,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   try {
-    // Generate a id to group the jobs with
     const jobGroupId = nanoid();
-
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
       missingByLocale as any,
@@ -281,20 +310,12 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         console.error(chalk.red(`  ${error.details}`));
       }
     } else {
-      // Handle any other type of error
       const err = error as Error;
+
       console.error(chalk.red(`\n✖ Error processing translation jobs: ${err.message}`));
+
       if (err.stack) {
-        const stackLines = err.stack.split('\n').slice(1);
-        if (stackLines && stackLines.length > 0) {
-          console.error(chalk.dim('\nStack trace:'));
-          stackLines.forEach(line => {
-            const trimmed = line.trim();
-            if (trimmed.startsWith(' at ')) {
-              console.error(chalk.dim(trimmed));
-            }
-          });
-        }
+        console.error(chalk.dim(err.stack));
       }
     }
     process.exit(1);

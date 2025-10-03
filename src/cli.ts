@@ -87,7 +87,8 @@ program
   .command('translate')
   .description('Translate missing keys in your i18n files')
   .option('-v, --verbose', 'Show detailed progress information')
-  .option('-c, --commit', 'Automatically commit changes (useful for CI/CD)')
+  .option('-c, --commit', 'Automatically commit changes (for CI/CD)')
+  .option('--changed-only', 'Only translate keys changed in current branch (experimental)')
   .action(wrapCommandAction((options: TranslationOptions) => translate(options)));
 
 program

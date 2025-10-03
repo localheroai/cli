@@ -11,6 +11,7 @@ export interface TranslationFileConfig {
   ignore?: string[];
   localeRegex?: string;
   workflow?: 'default' | 'django';
+  baseBranch?: string;
 }
 
 // Translation file interface
