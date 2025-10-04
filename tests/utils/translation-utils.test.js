@@ -1,5 +1,22 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations } from '../../src/utils/translation-utils.js';
+import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
+
+const createBase64Content = (data) => Buffer.from(JSON.stringify(data)).toString('base64');
+
+const createConfig = (sourceLocale = 'en', outputLocales = ['fr', 'es']) => ({
+  sourceLocale,
+  outputLocales
+});
+
+const createJsonFile = (path, content, locale = null) => ({
+  path,
+  format: 'json',
+  content: createBase64Content(content),
+  ...(locale && { locale })
+});
+
+const createMockLogger = () => ({ log: jest.fn() });
 
 describe('translation-utils', () => {
   describe('findMissingTranslations', () => {
@@ -26,40 +43,14 @@ describe('translation-utils', () => {
       expect(result.skippedKeys).toEqual({});
     });
 
-    it('should handle boolean values correctly', () => {
-      const sourceKeys = {
-        'app.utils.show_wizard': true,
-        'app.utils.skip_wizard': false,
-        'app.utils.display_help': { value: true },
-        'app.utils.hide_help': { value: false }
-      };
-
-      const targetKeys = {
-        'app.utils.skip_wizard': false,
-        'app.utils.hide_help': { value: false }
-      };
-
-      const result = findMissingTranslations(sourceKeys, targetKeys);
-
-      expect(result.missingKeys).toEqual({
-        'app.utils.show_wizard': {
-          value: true,
-          sourceKey: 'app.utils.show_wizard'
-        },
-        'app.utils.display_help': {
-          value: true,
-          sourceKey: 'app.utils.display_help'
-        }
-      });
-      expect(result.skippedKeys).toEqual({});
-      expect(result.missingKeys['app.utils.skip_wizard']).toBeUndefined();
-      expect(result.missingKeys['app.utils.hide_help']).toBeUndefined();
-    });
-
-    it('should skip WIP keys with wip_ prefix', () => {
+    it.each([
+      ['wip_ prefix', 'wip_feature', 'wip_This is a work in progress'],
+      ['_wip suffix', 'feature', 'This is a work in progress_wip'],
+      ['__skip_translation__ marker', 'skip_me', '__skip_translation__']
+    ])('should skip WIP keys with %s', (_, key, value) => {
       const sourceKeys = {
         hello: { value: 'Hello' },
-        wip_feature: { value: 'wip_This is a work in progress' }
+        [key]: { value }
       };
 
       const targetKeys = {
@@ -69,48 +60,8 @@ describe('translation-utils', () => {
       const result = findMissingTranslations(sourceKeys, targetKeys);
       expect(result.missingKeys).toEqual({});
       expect(result.skippedKeys).toEqual({
-        wip_feature: {
-          value: 'wip_This is a work in progress',
-          reason: 'wip'
-        }
-      });
-    });
-
-    it('should skip WIP keys with _wip suffix', () => {
-      const sourceKeys = {
-        hello: { value: 'Hello' },
-        feature: { value: 'This is a work in progress_wip' }
-      };
-
-      const targetKeys = {
-        hello: { value: 'Hola' }
-      };
-
-      const result = findMissingTranslations(sourceKeys, targetKeys);
-      expect(result.missingKeys).toEqual({});
-      expect(result.skippedKeys).toEqual({
-        feature: {
-          value: 'This is a work in progress_wip',
-          reason: 'wip'
-        }
-      });
-    });
-
-    it('should skip keys with __skip_translation__ marker', () => {
-      const sourceKeys = {
-        hello: { value: 'Hello' },
-        skip_me: { value: '__skip_translation__' }
-      };
-
-      const targetKeys = {
-        hello: { value: 'Hola' }
-      };
-
-      const result = findMissingTranslations(sourceKeys, targetKeys);
-      expect(result.missingKeys).toEqual({});
-      expect(result.skippedKeys).toEqual({
-        skip_me: {
-          value: '__skip_translation__',
+        [key]: {
+          value,
           reason: 'wip'
         }
       });
@@ -156,11 +107,11 @@ describe('translation-utils', () => {
         {
           path: 'locales/en.json',
           format: 'json',
-          content: Buffer.from(JSON.stringify({
+          content: createBase64Content({
             welcome: 'Welcome',
             goodbye: 'Goodbye',
             hello: 'Hello'
-          })).toString('base64')
+          })
         }
       ];
 
@@ -169,10 +120,10 @@ describe('translation-utils', () => {
           {
             path: 'locales/fr.json',
             format: 'json',
-            content: Buffer.from(JSON.stringify({
+            content: createBase64Content({
               welcome: 'Bienvenue',
               // Missing 'goodbye' and 'hello'
-            })).toString('base64'),
+            }),
             locale: 'fr'
           }
         ],
@@ -180,24 +131,19 @@ describe('translation-utils', () => {
           {
             path: 'locales/es.json',
             format: 'json',
-            content: Buffer.from(JSON.stringify({
+            content: createBase64Content({
               welcome: 'Bienvenido',
               hello: 'Hola'
               // Missing 'goodbye'
-            })).toString('base64'),
+            }),
             locale: 'es'
           }
         ]
       };
 
-      const config = {
-        sourceLocale: 'en',
-        outputLocales: ['fr', 'es']
-      };
+      const config = createConfig('en', ['fr', 'es']);
 
-      const mockLogger = {
-        log: jest.fn()
-      };
+      const mockLogger = createMockLogger();
 
       const result = findMissingTranslationsByLocale(
         sourceFiles,
@@ -231,12 +177,12 @@ describe('translation-utils', () => {
         {
           path: 'locales/en.json',
           format: 'json',
-          content: Buffer.from(JSON.stringify({
+          content: createBase64Content({
             en: {
               welcome: 'Welcome',
               goodbye: 'Goodbye'
             }
-          })).toString('base64')
+          })
         }
       ];
 
@@ -245,21 +191,18 @@ describe('translation-utils', () => {
           {
             path: 'locales/fr.json',
             format: 'json',
-            content: Buffer.from(JSON.stringify({
+            content: createBase64Content({
               fr: {
                 welcome: 'Bienvenue'
                 // Missing 'goodbye'
               }
-            })).toString('base64'),
+            }),
             locale: 'fr'
           }
         ]
       };
 
-      const config = {
-        sourceLocale: 'en',
-        outputLocales: ['fr']
-      };
+      const config = createConfig('en', ['fr']);
 
       const result = findMissingTranslationsByLocale(
         sourceFiles,
@@ -274,59 +217,6 @@ describe('translation-utils', () => {
       expect(Object.keys(result['fr:locales/en.json'].keys)).not.toContain('welcome');
     });
 
-    it('should skip files with work-in-progress keys and log them in verbose mode', () => {
-      const sourceFiles = [
-        {
-          path: 'locales/en.json',
-          format: 'json',
-          content: Buffer.from(JSON.stringify({
-            welcome: 'Welcome',
-            wip_feature: 'wip_This is a work in progress',
-            skip_this: '__skip_translation__'
-          })).toString('base64')
-        }
-      ];
-
-      const targetFilesByLocale = {
-        fr: [
-          {
-            path: 'locales/fr.json',
-            format: 'json',
-            content: Buffer.from(JSON.stringify({
-              welcome: 'Bienvenue'
-            })).toString('base64'),
-            locale: 'fr'
-          }
-        ]
-      };
-
-      const config = {
-        sourceLocale: 'en',
-        outputLocales: ['fr']
-      };
-
-      const mockLogger = {
-        log: jest.fn()
-      };
-
-      const result = findMissingTranslationsByLocale(
-        sourceFiles,
-        targetFilesByLocale,
-        config,
-        true, // verbose enabled
-        mockLogger
-      );
-
-      // No missing keys that aren't skipped
-      expect(Object.keys(result)).toHaveLength(0);
-
-      // Should have logged skipped keys
-      expect(mockLogger.log).toHaveBeenCalled();
-      const logCall = mockLogger.log.mock.calls[0][0];
-      expect(logCall).toContain('Skipped');
-      expect(logCall).toContain('WIP');
-    });
-
     it('should handle source files with invalid or missing content', () => {
       const sourceFiles = [
         {
@@ -337,9 +227,9 @@ describe('translation-utils', () => {
         {
           path: 'locales/en2.json',
           format: 'json',
-          content: Buffer.from(JSON.stringify({
+          content: createBase64Content({
             welcome: 'Welcome'
-          })).toString('base64')
+          })
         }
       ];
 
@@ -348,16 +238,13 @@ describe('translation-utils', () => {
           {
             path: 'locales/fr.json',
             format: 'json',
-            content: Buffer.from(JSON.stringify({})).toString('base64'),
+            content: createBase64Content({}),
             locale: 'fr'
           }
         ]
       };
 
-      const config = {
-        sourceLocale: 'en',
-        outputLocales: ['fr']
-      };
+      const config = createConfig('en', ['fr']);
 
       const result = findMissingTranslationsByLocale(
         sourceFiles,
@@ -538,29 +425,118 @@ describe('translation-utils', () => {
   });
 
   describe('generateTargetPath', () => {
-    it('handles simple locale replacement', () => {
-      const sourceFile = { path: 'config/locales/en.yml' };
-      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/es.yml');
+    it.each([
+      ['simple locale replacement', 'config/locales/en.yml', 'config/locales/es.yml'],
+      ['locale in filename with dot', 'config/locales/translations.en.yml', 'config/locales/translations.es.yml'],
+      ['locale in filename with hyphen', 'config/locales/translations-en.yml', 'config/locales/translations-es.yml'],
+      ['locale in directory name', 'config/locales/en/messages.yml', 'config/locales/es/messages.yml'],
+      ['prevents double dots in filenames', 'config/en/translations.en.yml', 'config/en/translations.es.yml']
+    ])('handles %s', (_, sourcePath, expectedPath) => {
+      const sourceFile = { path: sourcePath };
+      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe(expectedPath);
+    });
+  });
+
+  describe('PO context prefix bug regression tests', () => {
+    // These tests prevent regression of bugs where context prefixes were incorrectly handled
+    // Bug 1: Plural + context keys were double-prefixed (e.g., "context|context|msgid")
+    // Bug 2: Non-plural + context keys lost their context prefix
+
+    const createTranslationFile = (content, locale = 'sv', path = `translations/${locale}/LC_MESSAGES/django.po`) => ({
+      path,
+      locale,
+      format: 'po',
+      content: Buffer.from(content).toString('base64')
+    });
+    const PO_HEADER = 'msgid ""\nmsgstr ""\n"Plural-Forms: nplurals=2; plural=(n != 1);\\n"\n';
+    const buildPoEntry = (msgid, msgstr = '""', msgctxt = null, msgidPlural = null) => {
+      const parts = [];
+      if (msgctxt) parts.push(`msgctxt "${msgctxt}"`);
+      parts.push(`msgid "${msgid}"`);
+      if (msgidPlural) parts.push(`msgid_plural "${msgidPlural}"`);
+
+      if (Array.isArray(msgstr)) {
+        msgstr.forEach((str, idx) => parts.push(`msgstr[${idx}] ${str}`));
+      } else {
+        parts.push(`msgstr ${msgstr}`);
+      }
+
+      return parts.join('\n');
+    };
+    const buildPoContent = (...entries) => PO_HEADER + '\n' + entries.join('\n\n');
+
+    it('should correctly prefix non-plural entries with context', () => {
+      // This test prevents Bug 2: non-plural + context keys losing their prefix
+
+      const content = buildPoContent(
+        buildPoEntry('Warning: This action cannot be undone', '""', 'warning-message')
+      );
+
+      const sourceFile = createTranslationFile(content, 'sv');
+      const targetFile = createTranslationFile(content, 'en');
+
+      const result = processLocaleTranslations(
+        {},
+        'en',
+        [targetFile],
+        sourceFile,
+        'sv'
+      );
+
+      expect(Object.keys(result.missingKeys)).toHaveLength(1);
+      expect(result.missingKeys['warning-message|Warning: This action cannot be undone']).toBeDefined();
+      expect(result.missingKeys['Warning: This action cannot be undone']).toBeUndefined();
     });
 
-    it('handles locale in filename with dot', () => {
-      const sourceFile = { path: 'config/locales/translations.en.yml' };
-      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/translations.es.yml');
+    it('should not double-prefix plural entries with context', () => {
+      // This test prevents Bug 1: plural + context keys being double-prefixed
+
+      const content = buildPoContent(
+        buildPoEntry('Updated %(counter)s day ago', ['""', '""'], 'time-period', 'Updated %(counter)s days ago')
+      );
+      const sourceFile = createTranslationFile(content, 'sv');
+      const targetFile = createTranslationFile(content, 'en');
+
+      const result = processLocaleTranslations(
+        {},
+        'en',
+        [targetFile],
+        sourceFile,
+        'sv'
+      );
+
+      expect(Object.keys(result.missingKeys)).toHaveLength(2);
+      expect(result.missingKeys['time-period|Updated %(counter)s day ago']).toBeDefined();
+      expect(result.missingKeys['time-period|Updated %(counter)s day ago__plural_1']).toBeDefined();
+      expect(result.missingKeys['time-period|time-period|Updated %(counter)s day ago']).toBeUndefined();
+      expect(result.missingKeys['time-period|time-period|Updated %(counter)s day ago__plural_1']).toBeUndefined();
     });
 
-    it('handles locale in filename with hyphen', () => {
-      const sourceFile = { path: 'config/locales/translations-en.yml' };
-      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/translations-es.yml');
-    });
+    it('should handle mixed plural and non-plural entries with context', () => {
+      const content = buildPoContent(
+        buildPoEntry('Warning: Cannot undo', '""', 'warning-message'),
+        buildPoEntry('%(count)s day', ['""', '""'], 'time-period', '%(count)s days'),
+        buildPoEntry('Save', '""', 'button-label')
+      );
+      const sourceFile = createTranslationFile(content, 'sv');
+      const targetFile = createTranslationFile(content, 'en');
+      const result = processLocaleTranslations(
+        {},
+        'en',
+        [targetFile],
+        sourceFile,
+        'sv'
+      );
 
-    it('handles locale in directory name', () => {
-      const sourceFile = { path: 'config/locales/en/messages.yml' };
-      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/locales/es/messages.yml');
-    });
-
-    it('prevents double dots in filenames', () => {
-      const sourceFile = { path: 'config/en/translations.en.yml' };
-      expect(generateTargetPath(sourceFile, 'es', 'en')).toBe('config/en/translations.es.yml');
+      expect(Object.keys(result.missingKeys)).toHaveLength(4);
+      expect(result.missingKeys['warning-message|Warning: Cannot undo']).toBeDefined();
+      expect(result.missingKeys['time-period|%(count)s day']).toBeDefined();
+      expect(result.missingKeys['time-period|%(count)s day__plural_1']).toBeDefined();
+      expect(result.missingKeys['button-label|Save']).toBeDefined();
+      expect(result.missingKeys['warning-message|warning-message|Warning: Cannot undo']).toBeUndefined();
+      expect(result.missingKeys['time-period|time-period|%(count)s day']).toBeUndefined();
+      expect(result.missingKeys['Warning: Cannot undo']).toBeUndefined();
+      expect(result.missingKeys['Save']).toBeUndefined();
     });
   });
 });

@@ -487,7 +487,9 @@ export function processLocaleTranslations(
 
       // Convert the .po missing results to the expected format
       missingPoTranslations.forEach(missing => {
-        const key = missing.context ? createUniqueKey(missing.key, missing.context) : missing.key;
+        const key = missing.isPlural
+          ? missing.key
+          : (missing.context ? createUniqueKey(missing.key, missing.context) : missing.key);
 
         // Extract plural index from key name (e.g., "book__plural_2" -> 2)
         const pluralMatch = missing.key.match(new RegExp(`${PLURAL_PREFIX.replace('_', '\\\\_')}(\\\\d+)$`));
