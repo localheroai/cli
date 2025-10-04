@@ -371,6 +371,131 @@ msgstr[1] "pages"
       expect(result['fr:locales/en.po'].keys['book']).toBeUndefined();
       expect(result['fr:locales/en.po'].keys['book__plural_1']).toBeUndefined();
     });
+
+    it('includes all target plural forms when source has fewer forms', () => {
+      // This tests the bug fix where Swedish (2 forms) changed, but Polish (4 forms) needs all forms
+      const poSourceFiles = [
+        { path: 'locales/sv.po', format: 'po', locale: 'sv' }
+      ];
+
+      const oldContent = `msgid ""
+msgstr ""
+`;
+
+      const newContent = `msgid ""
+msgstr ""
+
+msgctxt "time-period"
+msgid "Updated %(counter)s day ago"
+msgid_plural "Updated %(counter)s days ago"
+msgstr[0] "Uppdaterad för %(counter)s dag sedan"
+msgstr[1] "Uppdaterad för %(counter)s dagar sedan"
+`;
+
+      setupGitMock({ oldContent });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      // Swedish source has 2 plural forms, but Polish target needs 4
+      mockMissingByLocale['pl:locales/sv.po'] = {
+        locale: 'pl',
+        path: 'locales/sv.po',
+        targetPath: 'locales/pl.po',
+        keys: {
+          'time-period|Updated %(counter)s day ago': {
+            value: 'Uppdaterad för %(counter)s dag sedan',
+            sourceKey: 'time-period|Updated %(counter)s day ago',
+            context: 'time-period'
+          },
+          'time-period|Updated %(counter)s day ago__plural_1': {
+            value: 'Uppdaterad för %(counter)s dagar sedan',
+            sourceKey: 'time-period|Updated %(counter)s day ago__plural_1',
+            context: 'time-period'
+          },
+          'time-period|Updated %(counter)s day ago__plural_2': {
+            value: '',
+            sourceKey: 'time-period|Updated %(counter)s day ago__plural_2',
+            context: 'time-period'
+          },
+          'time-period|Updated %(counter)s day ago__plural_3': {
+            value: '',
+            sourceKey: 'time-period|Updated %(counter)s day ago__plural_3',
+            context: 'time-period'
+          }
+        },
+        keyCount: 4
+      };
+
+      const result = filterByGitChanges(poSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      // All 4 Polish plural forms should be included, even though Swedish only has 2
+      expect(result['pl:locales/sv.po'].keys['time-period|Updated %(counter)s day ago']).toBeDefined();
+      expect(result['pl:locales/sv.po'].keys['time-period|Updated %(counter)s day ago__plural_1']).toBeDefined();
+      expect(result['pl:locales/sv.po'].keys['time-period|Updated %(counter)s day ago__plural_2']).toBeDefined();
+      expect(result['pl:locales/sv.po'].keys['time-period|Updated %(counter)s day ago__plural_3']).toBeDefined();
+      expect(result['pl:locales/sv.po'].keyCount).toBe(4);
+    });
+
+    it('correctly handles context-prefixed plural keys with pipe character', () => {
+      // This verifies that the regex correctly strips __plural_N suffix from context|msgid__plural_N keys
+      const poSourceFiles = [
+        { path: 'locales/en.po', format: 'po', locale: 'en' }
+      ];
+
+      const oldContent = `msgid ""
+msgstr ""
+`;
+
+      const newContent = `msgid ""
+msgstr ""
+
+msgctxt "action-label"
+msgid "Delete item"
+msgid_plural "Delete items"
+msgstr[0] "Delete item"
+msgstr[1] "Delete items"
+`;
+
+      setupGitMock({ oldContent });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      // Spanish has 3 plural forms, English has 2
+      mockMissingByLocale['es:locales/en.po'] = {
+        locale: 'es',
+        path: 'locales/en.po',
+        targetPath: 'locales/es.po',
+        keys: {
+          'action-label|Delete item': {
+            value: 'Delete item',
+            sourceKey: 'action-label|Delete item',
+            context: 'action-label'
+          },
+          'action-label|Delete item__plural_1': {
+            value: 'Delete items',
+            sourceKey: 'action-label|Delete item__plural_1',
+            context: 'action-label'
+          },
+          'action-label|Delete item__plural_2': {
+            value: '',
+            sourceKey: 'action-label|Delete item__plural_2',
+            context: 'action-label'
+          }
+        },
+        keyCount: 3
+      };
+
+      const result = filterByGitChanges(poSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      // All 3 Spanish plural forms should be included
+      expect(result['es:locales/en.po']).toBeDefined();
+      expect(result['es:locales/en.po'].keys['action-label|Delete item']).toBeDefined();
+      expect(result['es:locales/en.po'].keys['action-label|Delete item__plural_1']).toBeDefined();
+      expect(result['es:locales/en.po'].keys['action-label|Delete item__plural_2']).toBeDefined();
+      expect(result['es:locales/en.po'].keyCount).toBe(3);
+
+      // Verify the context prefix (pipe character) doesn't interfere with plural suffix matching
+      const keys = Object.keys(result['es:locales/en.po'].keys);
+      expect(keys.every(k => k.startsWith('action-label|'))).toBe(true);
+    });
   });
 
   describe('new file handling', () => {

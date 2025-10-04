@@ -4,6 +4,7 @@ import chalk from 'chalk';
 import type { TranslationFile, ProjectConfig } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations } from './files.js';
+import { PLURAL_PREFIX } from './po-utils.js';
 
 /**
  * Git integration for --changed-only flag
@@ -217,12 +218,23 @@ function getChangedKeys(
 
 /**
  * Filter missing translations by changed keys
+ *
+ * For plural forms, if ANY variant changed, include ALL variants for the target language.
+ * This handles cases where source and target languages have different plural form counts.
  */
 function filterMissing(
   missingByLocale: Record<string, MissingLocaleEntry>,
   changedKeys: Set<string>
 ): Record<string, MissingLocaleEntry> {
   const filtered: Record<string, MissingLocaleEntry> = {};
+
+  // Extract base keys from plural forms in changedKeys
+  // E.g., "key__plural_1" -> "key"
+  const baseChangedKeys = new Set<string>();
+  for (const key of changedKeys) {
+    const baseKey = key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\_')}\\d+$`), '');
+    baseChangedKeys.add(baseKey);
+  }
 
   for (const [localeKey, entry] of Object.entries(missingByLocale)) {
     const filteredKeys: Record<string, any> = {};
@@ -232,6 +244,15 @@ function filterMissing(
       if (changedKeys.has(key)) {
         filteredKeys[key] = details;
         count++;
+      } else {
+        // For plural forms, check if base key changed
+        const baseKey = key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\_')}\\d+$`), '');
+        if (baseKey !== key && baseChangedKeys.has(baseKey)) {
+          // This is a plural variant of a changed key - include it
+          // even if the source language doesn't have this many plural forms
+          filteredKeys[key] = details;
+          count++;
+        }
       }
     }
 
