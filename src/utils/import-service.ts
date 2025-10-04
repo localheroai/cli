@@ -1,8 +1,10 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import chalk from 'chalk';
 import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations } from '../api/imports.js';
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
+import { filterFilesByGitChanges } from './git-changes.js';
 import {
   ProjectConfig,
   TranslationFile,
@@ -249,12 +251,28 @@ export const importService = {
    */
   async pushTranslations(
     config: ProjectConfig,
-    basePath = process.cwd()
+    basePath = process.cwd(),
+    options: { force?: boolean; verbose?: boolean } = {}
   ): Promise<ImportResult> {
-    const files = await this.findTranslationFiles(config, basePath);
+    let files = await this.findTranslationFiles(config, basePath);
 
     if (!files.length) {
       return { status: 'no_files' };
+    }
+
+    if (!options.force) {
+      const filteredFiles = filterFilesByGitChanges(files, config, options.verbose || false);
+      if (filteredFiles !== null) {
+        if (filteredFiles.length === 0) {
+          return {
+            status: 'no_changes',
+            files: { source: [], target: [] }
+          };
+        }
+        files = filteredFiles;
+      }
+    } else if (options.verbose) {
+      console.log(chalk.dim('--force flag set - pushing all files'));
     }
 
     const sourceFiles = files.filter(file => file.language === config.sourceLocale);

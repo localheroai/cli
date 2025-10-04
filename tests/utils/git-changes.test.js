@@ -603,4 +603,58 @@ msgstr[1] "Delete items"
       expect(result).toEqual({});
     });
   });
+
+  describe('file filtering', () => {
+    it('returns null when git not available', () => {
+      setupGitMock({ available: false });
+      const result = gitDiffModule.filterFilesByGitChanges(mockSourceFiles, mockConfig, false);
+      expect(result).toBeNull();
+    });
+
+    it('returns null when base branch does not exist', () => {
+      setupGitMock({ branchExists: false });
+      const result = gitDiffModule.filterFilesByGitChanges(mockSourceFiles, mockConfig, false);
+      expect(result).toBeNull();
+    });
+
+    it('returns empty array when no files changed', () => {
+      const fileContent = JSON.stringify({ user: { name: 'Name' } });
+      setupGitMock({ oldContent: fileContent });
+      mockReadFileSync.mockReturnValue(fileContent);
+      const result = gitDiffModule.filterFilesByGitChanges(mockSourceFiles, mockConfig, false);
+      expect(result).toEqual([]);
+    });
+
+    it('returns only changed files', () => {
+      const files = [
+        { path: 'locales/en.json', format: 'json', language: 'en' },
+        { path: 'locales/sv.json', format: 'json', language: 'sv' }
+      ];
+
+      mockExecSync.mockImplementation((cmd) => {
+        if (cmd.includes('git rev-parse')) return '';
+        if (cmd.includes('en.json')) return 'old content';
+        if (cmd.includes('sv.json')) return 'same content';
+        return '';
+      });
+
+      mockReadFileSync.mockImplementation((filePath) => {
+        if (filePath.includes('en.json')) return 'new content';
+        if (filePath.includes('sv.json')) return 'same content';
+        return '';
+      });
+
+      const result = gitDiffModule.filterFilesByGitChanges(files, mockConfig, false);
+      expect(result).toHaveLength(1);
+      expect(result[0].path).toBe('locales/en.json');
+    });
+
+    it('includes new files not in base branch', () => {
+      setupGitMock({ throwOnShow: true });
+      mockReadFileSync.mockReturnValue('new file content');
+      const result = gitDiffModule.filterFilesByGitChanges(mockSourceFiles, mockConfig, false);
+      expect(result).toHaveLength(1);
+      expect(result[0].path).toBe('locales/en.json');
+    });
+  });
 });

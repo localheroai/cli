@@ -118,4 +118,49 @@ describe('push command', () => {
       .rejects
       .toThrow('API error');
   });
+
+  it('handles no_changes status', async () => {
+    mockPrompt.confirm.mockResolvedValue(true);
+    mockImportService.pushTranslations.mockResolvedValue({
+      status: 'no_changes',
+      files: { source: [], target: [] }
+    });
+
+    await push(mockConfig, {}, createPushDeps());
+
+    expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('No translation changes detected'));
+    expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('--force'));
+  });
+
+  it('passes force flag to import service', async () => {
+    mockPrompt.confirm.mockResolvedValue(true);
+    mockImportService.pushTranslations.mockResolvedValue({
+      status: 'completed',
+      statistics: { updated_translations: 1, created_translations: 0 }
+    });
+
+    await push(mockConfig, { force: true }, createPushDeps());
+
+    expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
+      mockConfig,
+      process.cwd(),
+      expect.objectContaining({ force: true })
+    );
+  });
+
+  it('passes verbose flag to import service', async () => {
+    mockPrompt.confirm.mockResolvedValue(true);
+    mockImportService.pushTranslations.mockResolvedValue({
+      status: 'completed',
+      statistics: { updated_translations: 1, created_translations: 0 }
+    });
+
+    await push(mockConfig, { verbose: true }, createPushDeps());
+
+    expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
+      mockConfig,
+      process.cwd(),
+      expect.objectContaining({ verbose: true })
+    );
+  });
 });

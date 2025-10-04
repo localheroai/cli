@@ -14,7 +14,11 @@ const defaultPromptService = createPromptService({
 
 interface PushDependencies {
   importService: {
-    pushTranslations: (config: any, basePath?: string) => Promise<{
+    pushTranslations: (
+      config: any,
+      basePath?: string,
+      options?: { force?: boolean; verbose?: boolean }
+    ) => Promise<{
       status: string;
       error?: string;
       statistics?: {
@@ -37,7 +41,8 @@ interface PushDependencies {
 
 interface PushOptions {
   verbose?: boolean;
-  yes?: boolean;  // Skip confirmation prompt
+  yes?: boolean;
+  force?: boolean;
 }
 
 export async function push(
@@ -49,7 +54,7 @@ export async function push(
     console: console
   }
 ): Promise<void> {
-  const { verbose = false, yes = false } = options;
+  const { verbose = false, yes = false, force = false } = options;
   const { importService, prompt, console: consoleLog = console } = deps;
 
   if (!yes) {
@@ -64,10 +69,16 @@ export async function push(
     }
   }
 
-  const result = await importService.pushTranslations(config);
+  const result = await importService.pushTranslations(config, process.cwd(), { force, verbose });
 
   if (result.status === 'no_files') {
     consoleLog.log(chalk.yellow('No translation files found'));
+    return;
+  }
+
+  if (result.status === 'no_changes') {
+    consoleLog.log(chalk.green('✓ No translation changes detected'));
+    consoleLog.log(chalk.dim("Use 'npx localhero push --force' to push all files anyway"));
     return;
   }
 

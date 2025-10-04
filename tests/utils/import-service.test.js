@@ -40,6 +40,9 @@ describe('importService', () => {
     await jest.unstable_mockModule('fs', () => mockFs);
     await jest.unstable_mockModule('fs/promises', () => mockFs.promises);
     await jest.unstable_mockModule('../../src/api/imports.js', () => mockImportsApi);
+    await jest.unstable_mockModule('../../src/utils/git-changes.js', () => ({
+      filterFilesByGitChanges: jest.fn().mockReturnValue(null)
+    }));
 
     await jest.unstable_mockModule('../../src/utils/files.js', () => ({
       findTranslationFiles: jest.fn().mockImplementation((config, options) => {

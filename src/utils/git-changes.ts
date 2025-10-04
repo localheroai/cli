@@ -6,10 +6,62 @@ import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations } from './files.js';
 import { PLURAL_PREFIX } from './po-utils.js';
 
+type FileWithPath = { path: string };
+
 /**
  * Git integration for --changed-only flag
  * This module filters translations to only include keys that changed in the current branch
  */
+
+export function hasFileChanged(file: FileWithPath, baseBranch: string): boolean {
+  try {
+    const sanitizedPath = sanitizeGitPath(file.path);
+    const oldContent = execSync(`git show ${baseBranch}:"${sanitizedPath}"`, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'ignore']
+    });
+    const newContent = readFileSync(file.path, 'utf-8');
+    return oldContent !== newContent;
+  } catch {
+    return true;
+  }
+}
+
+export function filterFilesByGitChanges<T extends FileWithPath>(
+  files: T[],
+  config: ProjectConfig,
+  verbose: boolean
+): T[] | null {
+  if (!isGitAvailable()) {
+    if (verbose) {
+      console.log(chalk.dim('Git not available - pushing all files'));
+    }
+    return null;
+  }
+
+  const baseBranch = getBaseBranch(config);
+  if (!branchExists(baseBranch)) {
+    if (verbose) {
+      console.log(chalk.dim(`Base branch '${baseBranch}' not found - pushing all files`));
+    }
+    return null;
+  }
+
+  const changedFiles = files.filter(file => hasFileChanged(file, baseBranch));
+
+  if (verbose) {
+    const skipped = files.length - changedFiles.length;
+    if (changedFiles.length > 0) {
+      console.log(chalk.blue(`Detected ${changedFiles.length} changed file${changedFiles.length === 1 ? '' : 's'} (comparing against ${baseBranch})`));
+      if (skipped > 0) {
+        console.log(chalk.dim(`Skipped ${skipped} unchanged file${skipped === 1 ? '' : 's'}`));
+      }
+    }
+  }
+
+  return changedFiles;
+}
 
 export function filterByGitChanges(
   sourceFiles: TranslationFile[],
