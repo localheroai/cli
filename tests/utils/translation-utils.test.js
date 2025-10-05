@@ -422,6 +422,187 @@ describe('translation-utils', () => {
       });
       expect(allKeys.size).toBe(450);
     });
+
+    describe('metadata preservation', () => {
+      const createPoSourceFile = (path = 'locales/en.po') => ({ path, format: 'po' });
+      const extractBatchContent = (batch) => JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString());
+
+      it('should preserve context and metadata for .po files', () => {
+        const missingByLocale = {
+          'fr:locales/en.po': {
+            locale: 'fr',
+            path: 'locales/en.po',
+            targetPath: 'locales/fr.po',
+            keys: {
+              'greeting|Hello': {
+                value: 'Hello',
+                context: 'greeting',
+                metadata: {
+                  translator_comments: 'Used in welcome screen'
+                }
+              }
+            }
+          }
+        };
+
+        const { batches, errors } = batchKeysWithMissing([createPoSourceFile()], missingByLocale);
+
+        expect(errors).toEqual([]);
+        expect(batches).toHaveLength(1);
+
+        const content = extractBatchContent(batches[0]);
+        expect(content.keys['greeting|Hello']).toEqual({
+          value: 'Hello',
+          context: 'greeting',
+          metadata: {
+            translator_comments: 'Used in welcome screen'
+          }
+        });
+      });
+
+      it('should preserve plural form metadata (po_plural, plural_index, msgid_plural)', () => {
+        const missingByLocale = {
+          'fr:locales/en.po': {
+            locale: 'fr',
+            path: 'locales/en.po',
+            targetPath: 'locales/fr.po',
+            keys: {
+              '%(count)d item': {
+                value: '%(count)d item',
+                metadata: {
+                  po_plural: true,
+                  plural_index: 0,
+                  msgid_plural: '%(count)d items'
+                }
+              },
+              '%(count)d item__plural_1': {
+                value: '%(count)d items',
+                metadata: {
+                  po_plural: true,
+                  plural_index: 1,
+                  msgid: '%(count)d item'
+                }
+              }
+            }
+          }
+        };
+
+        const { batches, errors } = batchKeysWithMissing([createPoSourceFile()], missingByLocale);
+
+        expect(errors).toEqual([]);
+        const content = extractBatchContent(batches[0]);
+
+        expect(content.keys['%(count)d item']).toEqual({
+          value: '%(count)d item',
+          metadata: {
+            po_plural: true,
+            plural_index: 0,
+            msgid_plural: '%(count)d items'
+          }
+        });
+
+        expect(content.keys['%(count)d item__plural_1']).toEqual({
+          value: '%(count)d items',
+          metadata: {
+            po_plural: true,
+            plural_index: 1,
+            msgid: '%(count)d item'
+          }
+        });
+      });
+
+      it('should preserve context with plural forms', () => {
+        const missingByLocale = {
+          'fr:locales/en.po': {
+            locale: 'fr',
+            path: 'locales/en.po',
+            targetPath: 'locales/fr.po',
+            keys: {
+              'navigation|%(count)s page': {
+                value: '%(count)s page',
+                context: 'navigation',
+                metadata: {
+                  po_plural: true,
+                  plural_index: 0,
+                  msgid_plural: '%(count)s pages'
+                }
+              },
+              'navigation|%(count)s page__plural_1': {
+                value: '%(count)s pages',
+                context: 'navigation',
+                metadata: {
+                  po_plural: true,
+                  plural_index: 1,
+                  msgid: '%(count)s page'
+                }
+              }
+            }
+          }
+        };
+
+        const { batches, errors } = batchKeysWithMissing([createPoSourceFile()], missingByLocale);
+
+        expect(errors).toEqual([]);
+        const content = extractBatchContent(batches[0]);
+
+        expect(content.keys['navigation|%(count)s page']).toEqual({
+          value: '%(count)s page',
+          context: 'navigation',
+          metadata: {
+            po_plural: true,
+            plural_index: 0,
+            msgid_plural: '%(count)s pages'
+          }
+        });
+
+        expect(content.keys['navigation|%(count)s page__plural_1']).toEqual({
+          value: '%(count)s pages',
+          context: 'navigation',
+          metadata: {
+            po_plural: true,
+            plural_index: 1,
+            msgid: '%(count)s page'
+          }
+        });
+      });
+
+      it('should handle mixed content (with and without metadata)', () => {
+        const missingByLocale = {
+          'fr:locales/en.json': {
+            locale: 'fr',
+            path: 'locales/en.json',
+            targetPath: 'locales/fr.json',
+            keys: {
+              'simple': 'Simple text',
+              'with_metadata': {
+                value: 'Text with metadata',
+                context: 'ui',
+                metadata: { note: 'Important' }
+              },
+              'enabled': true,
+              'items': ['one', 'two']
+            }
+          }
+        };
+
+        const { batches, errors } = batchKeysWithMissing(
+          [{ path: 'locales/en.json', format: 'json' }],
+          missingByLocale
+        );
+
+        expect(errors).toEqual([]);
+        const content = extractBatchContent(batches[0]);
+
+        expect(content.keys['simple']).toEqual({ value: 'Simple text' });
+        expect(content.keys['with_metadata']).toEqual({
+          value: 'Text with metadata',
+          context: 'ui',
+          metadata: { note: 'Important' }
+        });
+        expect(content.keys['enabled']).toEqual({ value: true });
+        expect(content.keys['items']).toEqual({ value: ['one', 'two'] });
+      });
+    });
   });
 
   describe('generateTargetPath', () => {
@@ -434,6 +615,62 @@ describe('translation-utils', () => {
     ])('handles %s', (_, sourcePath, expectedPath) => {
       const sourceFile = { path: sourcePath };
       expect(generateTargetPath(sourceFile, 'es', 'en')).toBe(expectedPath);
+    });
+  });
+
+  describe('processLocaleTranslations', () => {
+    it('should correctly extract plural_index from .po file key names', () => {
+      const sourceKeys = {
+        'book': {
+          value: 'book',
+          metadata: { po_plural: true, msgid_plural: 'books', plural_index: 0 }
+        },
+        'book__plural_1': {
+          value: 'books',
+          metadata: { po_plural: true, msgid: 'book', plural_index: 1 }
+        },
+        'book__plural_2': {
+          value: 'books',
+          metadata: { po_plural: true, msgid: 'book', plural_index: 2 }
+        }
+      };
+
+      const sourceFile = {
+        path: 'locales/en.po',
+        format: 'po',
+        content: Buffer.from(`
+msgid "book"
+msgid_plural "books"
+msgstr[0] "book"
+msgstr[1] "books"
+msgstr[2] "books"
+        `.trim()).toString('base64')
+      };
+
+      const targetFile = {
+        path: 'locales/pl.po',
+        format: 'po',
+        content: Buffer.from(`
+msgid "book"
+msgid_plural "books"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+        `.trim()).toString('base64')
+      };
+
+      const result = processLocaleTranslations(
+        sourceKeys,
+        'pl',
+        [targetFile],
+        sourceFile,
+        'en'
+      );
+
+      // Verify plural_index is correctly extracted from key names
+      expect(result.missingKeys['book'].metadata.plural_index).toBe(0);
+      expect(result.missingKeys['book__plural_1'].metadata.plural_index).toBe(1);
+      expect(result.missingKeys['book__plural_2'].metadata.plural_index).toBe(2);
     });
   });
 

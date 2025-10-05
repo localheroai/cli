@@ -42,15 +42,57 @@ interface TranslationKeysResult {
   skippedKeys: Record<string, SkippedKeyDetails>;
 }
 
-interface SourceKeyDetails {
-  value: any;
+export type TranslationPrimitiveValue = string | boolean | string[];
+
+export interface TranslationWithMetadata {
+  value: TranslationPrimitiveValue;
+  context?: string;
+  metadata?: {
+    po_plural?: boolean;
+    plural_index?: number;
+    msgid_plural?: string;
+    msgid?: string;
+    translator_comments?: string;
+    [key: string]: unknown;
+  };
   sourceKey?: string;
-  [key: string]: any;
+}
+
+export type TranslationValue = TranslationPrimitiveValue | TranslationWithMetadata;
+
+interface SourceKeyDetails {
+  value: TranslationPrimitiveValue;
+  sourceKey?: string;
+  context?: string;
+  metadata?: {
+    po_plural?: boolean;
+    plural_index?: number;
+    msgid_plural?: string;
+    msgid?: string;
+    translator_comments?: string;
+    [key: string]: unknown;
+  };
 }
 
 interface SkippedKeyDetails {
   reason: string;
-  value?: any;
+  value?: TranslationPrimitiveValue;
+}
+
+/**
+ * Extract primitive value from any value type
+ */
+function extractPrimitiveValue(value: unknown): TranslationPrimitiveValue {
+  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'string') {
+    return value;
+  }
+
+  if (typeof value === 'object' && value !== null) {
+    console.warn('Unexpected object format in translation value, stringifying:', value);
+    return JSON.stringify(value);
+  }
+
+  return String(value);
 }
 
 /**
@@ -257,38 +299,21 @@ export function batchKeysWithMissing(
     }
 
     const allKeys = Object.entries(data.keys);
-    const chunkedKeys: Array<Array<[string, Record<string, any>]>> = [];
+    const chunkedKeys: Array<Array<[string, Record<string, TranslationValue>]>> = [];
 
     for (let i = 0; i < allKeys.length; i += MAX_BATCH_SIZE) {
       chunkedKeys.push(allKeys.slice(i, i + MAX_BATCH_SIZE));
     }
 
     for (const keyChunk of chunkedKeys) {
-      const contentObj = { keys: {} };
+      const contentObj: { keys: Record<string, TranslationWithMetadata | { value: TranslationPrimitiveValue }> } = { keys: {} };
 
       for (const [key, translations] of keyChunk) {
-        const value = Object.values(translations)[0];
-        let extractedValue: any;
+        const value: TranslationValue = Object.values(translations)[0];
 
-        if (Array.isArray(value)) {
-          extractedValue = value;
-        } else if (typeof value === 'boolean') {
-          extractedValue = value;
-        } else if (typeof value === 'string') {
-          extractedValue = value;
-        } else if (typeof value === 'object' && value !== null) {
-          if ('value' in value) {
-            extractedValue = value.value;
-          } else {
-            extractedValue = JSON.stringify(value);
-          }
-        } else {
-          extractedValue = String(value);
-        }
-
-        contentObj.keys[key] = {
-          value: extractedValue
-        };
+        contentObj.keys[key] = typeof value === 'object' && value !== null && 'value' in value
+          ? value
+          : { value: extractPrimitiveValue(value) };
       }
 
       batches.push({
@@ -492,11 +517,11 @@ export function processLocaleTranslations(
           : (missing.context ? createUniqueKey(missing.key, missing.context) : missing.key);
 
         // Extract plural index from key name (e.g., "book__plural_2" -> 2)
-        const pluralMatch = missing.key.match(new RegExp(`${PLURAL_PREFIX.replace('_', '\\\\_')}(\\\\d+)$`));
+        const pluralMatch = missing.key.match(new RegExp(`${PLURAL_PREFIX}(\\d+)$`));
         const pluralIndex = pluralMatch ? parseInt(pluralMatch[1]) : 0;
 
         // Extract base msgid for plural forms (remove __plural_X suffix)
-        const baseMsgid = missing.key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\\\_')}\\\\d+$`), '');
+        const baseMsgid = missing.key.replace(new RegExp(`${PLURAL_PREFIX}\\d+$`), '');
 
         const entryData: any = {
           value: missing.value,
