@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.20] - 2025-10-05
+
+### Fixed
+- [.po files] Fixed metadata loss bug in translation batching that incorrectly stripped context, plural forms, and comments.
+- [.po files] Improved consistency in metadata handling across import operations
+
+### Added
+- Git-based file filtering for push command to avoid unnecessary uploads
+- --force flag for push command to override change detection and push all files
+- Loading spinner on import operations for better user feedback
+
 ## [0.0.19] - 2025-10-03
 
 ### Added
