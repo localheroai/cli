@@ -57,10 +57,14 @@ describe('github module', () => {
       // Verify file content
       expect(mockFs.writeFile).toHaveBeenCalledTimes(1);
       const fileContent = mockFs.writeFile.mock.calls[0][1];
+
       expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
-      expect(fileContent).toContain('run: npx -y @localheroai/cli translate');
+      expect(fileContent).toContain("github.event.head_commit.author.username != 'LocalHero-ai-bot'");
+
+      expect(fileContent).toContain('git fetch --no-tags --depth=1');
+      expect(fileContent).toContain('npx -y @localheroai/cli translate --changed-only');
 
       // Verify return value is the workflow file path
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');

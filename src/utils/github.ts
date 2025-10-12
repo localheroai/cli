@@ -88,10 +88,17 @@ on:
     const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
     return `- "${formattedPath}"`;
   }).join('\n      ')}
+  workflow_dispatch:
+
+concurrency:
+  group: translate-\${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   translate:
-    if: \${{ !contains(github.event.pull_request.labels.*.name, 'skip-translation') }}
+    if: |
+      !contains(github.event.pull_request.labels.*.name, 'skip-translation') &&
+      github.event.head_commit.author.username != 'LocalHero-ai-bot'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -99,20 +106,32 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         ref: \${{ github.head_ref }}
 
+    - name: Fetch base branch for comparison
+      if: github.event_name == 'pull_request'
+      run: |
+        git fetch --no-tags --depth=1 origin \${{ github.base_ref || 'main' }}
+
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v5
       with:
         node-version: 22
 
-    - name: Run LocalHero CLI
+    - name: Translate strings
       env:
         LOCALHERO_API_KEY: \${{ secrets.LOCALHERO_API_KEY }}
         GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-      run: npx -y @localheroai/cli translate`;
+      run: |
+        # Translate all strings on main/master
+        # Translate only changed strings in bransh for PRs
+        if [[ "\${{ github.base_ref }}" == "main" || "\${{ github.base_ref }}" == "master" ]]; then
+          npx -y @localheroai/cli translate
+        else
+          npx -y @localheroai/cli translate --changed-only
+        fi`;
 
     await fs.writeFile(workflowFile, actionContent);
     return workflowFile;
