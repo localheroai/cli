@@ -113,9 +113,9 @@ describe('init command', () => {
     projectApi.listProjects.mockResolvedValue([]);
     promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
-      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
       .mockResolvedValueOnce('fr,es')
+      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('locales/')
       .mockResolvedValueOnce('');
     projectApi.createProject.mockResolvedValue({
@@ -152,9 +152,9 @@ describe('init command', () => {
     projectApi.listProjects.mockResolvedValue([]);
     promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
-      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
       .mockResolvedValueOnce('fr,es')
+      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('locales/')
       .mockResolvedValueOnce('');
     projectApi.createProject.mockRejectedValue(new Error('API failure'));
@@ -205,9 +205,9 @@ describe('init command', () => {
     projectApi.listProjects.mockResolvedValue([]);
     promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
-      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
       .mockResolvedValueOnce('fr,es')
+      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('locales/')
       .mockResolvedValueOnce('');
     projectApi.createProject.mockResolvedValue({
@@ -235,9 +235,9 @@ describe('init command', () => {
     projectApi.listProjects.mockResolvedValue([]);
     promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
-      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('en')
       .mockResolvedValueOnce('fr,es')
+      .mockResolvedValueOnce('test-project')
       .mockResolvedValueOnce('locales/')
       .mockResolvedValueOnce('');
     projectApi.createProject.mockResolvedValue({
@@ -269,15 +269,48 @@ describe('init command', () => {
     expect(allConsoleOutput).toContain('View your translations at: https://localhero.ai/projects/proj_123/translations');
   });
 
+  it('filters source language from target languages with warning', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('fr,en,es')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    expect(configUtils.saveProjectConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceLocale: 'en',
+        outputLocales: ['fr', 'es']
+      }),
+      expect.any(String)
+    );
+
+    const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+    expect(allConsoleOutput).toContain('⚠️  Source language \'en\' removed from target languages');
+  });
+
   it('configures Django workflow for Django projects', async () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
     projectApi.listProjects.mockResolvedValue([]);
     promptService.selectProject.mockResolvedValue({ choice: 'new' });
     promptService.input
-      .mockResolvedValueOnce('django-project')
       .mockResolvedValueOnce('sv')
       .mockResolvedValueOnce('en,da,no')
+      .mockResolvedValueOnce('django-project')
       .mockResolvedValueOnce('translations/')
       .mockResolvedValueOnce('**/sources/**');
     projectApi.createProject.mockResolvedValue({

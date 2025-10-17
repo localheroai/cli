@@ -696,20 +696,30 @@ async function promptForConfig(
   };
 
   if (!existingProject) {
+    const sourceLocale = await promptService.input({
+      message: 'Source language locale:',
+      default: 'en',
+      hint: '\nThis is the language we will translate FROM. Enter the locale code as it appears in your I18n files. Examples:\n\n  Framework    File Structure                   Enter\n  -----------  --------------------------------  --------\n  Rails        config/locales/en.yml             en\n  React        locales/en_GB.json                en_GB\n  Next.js      public/locales/en-US/common.json  en-US\n'
+    });
+
+    const rawOutputLocales = (await promptService.input({
+      message: 'Target language locales (comma-separated):',
+      hint: '\nThese are the languages we will translate TO. Enter locale codes as they appear in your files:\n\n  Pattern Type        Target Files                      Enter\n  ------------------  --------------------------------  --------------------\n  Basic               de.json, fr.json, es.json          de,fr,es\n  Region-specific     fr-CA.json, es-MX.json, de-AT.json fr-CA,es-MX,de-AT\n  Directory-based     /locales/ja/, /locales/zh/         ja,zh\n'
+    })).split(',').map(lang => lang.trim()).filter(Boolean);
+
+    const outputLocales = rawOutputLocales.filter(lang => lang !== sourceLocale);
+
+    if (outputLocales.length < rawOutputLocales.length) {
+      console.log(chalk.yellow(`⚠️  Source language '${sourceLocale}' removed from target languages`));
+    }
+
     config = {
       projectName: await promptService.input({
         message: 'Project name:',
         default: path.basename(process.cwd()),
       }),
-      sourceLocale: await promptService.input({
-        message: 'Source language locale:',
-        default: 'en',
-        hint: '\nThis is the language we will translate FROM. Enter the locale code as it appears in your I18n files. Examples:\n\n  Framework    File Structure                   Enter\n  -----------  --------------------------------  --------\n  Rails        config/locales/en.yml             en\n  React        locales/en_GB.json                en_GB\n  Next.js      public/locales/en-US/common.json  en-US\n'
-      }),
-      outputLocales: (await promptService.input({
-        message: 'Target language locales (comma-separated):',
-        hint: '\nThese are the languages we will translate TO. Enter locale codes as they appear in your files:\n\n  Pattern Type        Target Files                      Enter\n  ------------------  --------------------------------  --------------------\n  Basic               de.json, fr.json, es.json          de,fr,es\n  Region-specific     fr-CA.json, es-MX.json, de-AT.json fr-CA,es-MX,de-AT\n  Directory-based     /locales/ja/, /locales/zh/         ja,zh\n'
-      })).split(',').map(lang => lang.trim()).filter(Boolean)
+      sourceLocale,
+      outputLocales
     };
   } else {
     // existingProject is guaranteed to exist here since !existingProject was false
