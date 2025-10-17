@@ -100,6 +100,16 @@ npx @localheroai/cli pull
 
 Pull the latest translation updates from LocalHero.ai to your local files. This command will download any new or modified translations from the service to your local files.
 
+#### Options
+
+**`--changed-only`**: Only pull translations for keys that changed in the current branch _[experimental]_
+
+```bash
+npx @localheroai/cli pull --changed-only
+```
+
+Uses git to identify which keys changed in your branch, then only applies translations for those specific keys. Useful for feature branches to avoid pulling unrelated translation updates and keep PRs focused.
+
 ```bash
 npx @localheroai/cli push
 ```
