@@ -15,8 +15,12 @@ type FileWithPath = { path: string };
 
 export function hasFileChanged(file: FileWithPath, baseBranch: string): boolean {
   try {
+    const resolvedRef = resolveBranchRef(baseBranch);
+    if (!resolvedRef) {
+      return true;
+    }
     const sanitizedPath = sanitizeGitPath(file.path);
-    const oldContent = execSync(`git show ${baseBranch}:"${sanitizedPath}"`, {
+    const oldContent = execSync(`git show ${resolvedRef}:"${sanitizedPath}"`, {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'ignore']
@@ -203,14 +207,33 @@ function sanitizeGitPath(path: string): string {
 
 /**
  * Check if a branch exists (local or remote)
+ * Tries multiple resolution strategies to handle various git scenarios
  */
 function branchExists(branch: string): boolean {
-  try {
-    execSync(`git rev-parse --verify ${branch}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+  return resolveBranchRef(branch) !== null;
+}
+
+/**
+ * Resolve a branch name to its full ref, trying multiple strategies
+ * Returns the resolved ref or null if not found
+ */
+function resolveBranchRef(branch: string): string | null {
+  const strategies = [
+    branch,
+    `origin/${branch}`,
+    `refs/remotes/origin/${branch}`
+  ];
+
+  for (const ref of strategies) {
+    try {
+      execSync(`git rev-parse --verify ${ref}`, { stdio: 'ignore' });
+      return ref;
+    } catch {
+      continue;
+    }
   }
+
+  return null;
 }
 
 /**
@@ -222,6 +245,11 @@ function getChangedKeys(
   baseBranch: string,
   verbose: boolean
 ): Set<string> | null {
+  const resolvedRef = resolveBranchRef(baseBranch);
+  if (!resolvedRef) {
+    return null;
+  }
+
   const allChangedKeys = new Set<string>();
   const MAX_CHANGED_KEYS = 10000; // Safety limit to prevent memory issues
 
@@ -233,7 +261,7 @@ function getChangedKeys(
 
       try {
         const oldContent = execSync(
-          `git show ${baseBranch}:"${sanitizedPath}"`,
+          `git show ${resolvedRef}:"${sanitizedPath}"`,
           {
             encoding: 'utf-8',
             maxBuffer: 10 * 1024 * 1024,

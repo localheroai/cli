@@ -63,7 +63,10 @@ describe('github module', () => {
       expect(fileContent).toContain('- "translations/*.yml"');
       expect(fileContent).toContain("github.event.head_commit.author.username != 'LocalHero-ai-bot'");
 
-      expect(fileContent).toContain('git fetch --no-tags --depth=1');
+      expect(fileContent).toContain('fetch-depth: 0');
+      expect(fileContent).toContain('git fetch --no-tags origin');
+      expect(fileContent).toContain('GITHUB_BASE_REF:');
+      expect(fileContent).toContain('if [[ "${{ github.base_ref }}" == "main" || "${{ github.base_ref }}" == "master" ]]; then');
       expect(fileContent).toContain('npx -y @localheroai/cli translate --changed-only');
 
       // Verify return value is the workflow file path

@@ -109,11 +109,12 @@ jobs:
       uses: actions/checkout@v5
       with:
         ref: \${{ github.head_ref }}
+        fetch-depth: 0
 
     - name: Fetch base branch for comparison
       if: github.event_name == 'pull_request'
       run: |
-        git fetch --no-tags --depth=1 origin \${{ github.base_ref || 'main' }}
+        git fetch --no-tags origin \${{ github.base_ref }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v5
@@ -124,9 +125,10 @@ jobs:
       env:
         LOCALHERO_API_KEY: \${{ secrets.LOCALHERO_API_KEY }}
         GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        GITHUB_BASE_REF: \${{ github.base_ref }}
       run: |
         # Translate all strings on main/master
-        # Translate only changed strings in bransh for PRs
+        # Translate only changed strings in branch for PRs
         if [[ "\${{ github.base_ref }}" == "main" || "\${{ github.base_ref }}" == "master" ]]; then
           npx -y @localheroai/cli translate
         else
