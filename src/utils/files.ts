@@ -17,7 +17,12 @@ import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from '.
 /**
  * Parse file content based on format
  */
-export function parseFile(content: string, format: string, filePath: string = ''): Record<string, any> {
+export function parseFile(
+  content: string,
+  format: string,
+  filePath: string = '',
+  options?: { sourceLanguage?: string; currentLanguage?: string }
+): Record<string, any> {
   try {
     if (format === 'json') {
       try {
@@ -29,9 +34,9 @@ export function parseFile(content: string, format: string, filePath: string = ''
         throw new Error(errorInfo);
       }
     }
-    if (format === 'po') {
+    if (format === 'po' || format === 'pot') {
       const parsed = parsePoFile(content);
-      return poEntriesToApiFormat(parsed);
+      return poEntriesToApiFormat(parsed, options);
     }
     return yaml.parse(content);
   } catch (error: any) {
@@ -303,7 +308,7 @@ export async function findTranslationFiles(
   const { translationFiles } = config;
   const {
     paths = [],
-    pattern = '**/*.{json,yml,yaml,po}',
+    pattern = '**/*.{json,yml,yaml,po,pot}',
     ignore = [],
     localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
   } = translationFiles || {};
@@ -356,7 +361,13 @@ export async function findTranslationFiles(
       try {
         const filePath = file;
         const format = path.extname(file).slice(1);
-        const locale = extractLocaleFromPath(file, localeRegex, knownLocales);
+
+        let locale: string;
+        if (format === 'pot') {
+          locale = sourceLocale;
+        } else {
+          locale = extractLocaleFromPath(file, localeRegex, knownLocales);
+        }
 
         const result: TranslationFile = {
           path: filePath,
@@ -375,7 +386,10 @@ export async function findTranslationFiles(
           }
 
           const content = await readFile(filePath, 'utf8');
-          const parsedContent = parseFile(content, format, filePath);
+          const parsedContent = parseFile(content, format, filePath, {
+            sourceLanguage: sourceLocale,
+            currentLanguage: locale
+          });
 
           if (includeContent) {
             result.content = Buffer.from(content).toString('base64');
