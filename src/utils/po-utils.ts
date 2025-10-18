@@ -2,6 +2,20 @@ import { po } from 'gettext-parser';
 
 export const PLURAL_PREFIX = '__plural_';
 export const MAX_PLURAL_FORMS = 10; // Covers MANY languages: Arabic=6, Russian=3, etc.
+export const PLURAL_SUFFIX_REGEX = new RegExp(`${PLURAL_PREFIX}\\d+$`);
+
+/**
+ * Extract base keys from a set of keys (removing plural suffixes)
+ * For example: "item__plural_1" -> "item", "item" -> "item"
+ */
+export function extractBaseKeys(keys: Set<string>): Set<string> {
+  const baseKeys = new Set<string>();
+  for (const key of keys) {
+    const baseKey = key.replace(PLURAL_SUFFIX_REGEX, '');
+    baseKeys.add(baseKey);
+  }
+  return baseKeys;
+}
 
 /**
  * Extract the number of plural forms from PO file headers

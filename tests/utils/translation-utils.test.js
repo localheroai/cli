@@ -345,6 +345,8 @@ describe('translation-utils', () => {
     });
 
     it('should handle complex values', () => {
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
       const sourceFiles = [
         {
           path: 'locales/en.json',
@@ -372,6 +374,13 @@ describe('translation-utils', () => {
       expect(content.keys.boolean.value).toBe(true);
       expect(content.keys.object.value).toBe('test');
       expect(content.keys.complex.value).toBe('{"nested":{"deep":"value"}}');
+
+      // Verify warning was called (but suppressed from output)
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        'Unexpected object format in translation value, stringifying:',
+        { nested: { deep: 'value' } }
+      );
+      consoleWarnSpy.mockRestore();
     });
 
     it('splits large batches into chunks of max 100 items', async () => {

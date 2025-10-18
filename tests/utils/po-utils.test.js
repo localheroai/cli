@@ -480,6 +480,8 @@ msgstr[1] "%d filer"
     });
 
     it('should handle invalid nplurals values gracefully', () => {
+      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
       const invalidHeaderPoFile = `msgid ""
 msgstr ""
 "Plural-Forms: nplurals=999; plural=(n==1 ? 0 : 1);\\n"
@@ -498,6 +500,9 @@ msgstr[1] "%d artiklar"
       expect(apiFormat['%d item']).toBeTruthy();
       expect(apiFormat['%d item__plural_1']).toBeTruthy();
       expect(apiFormat['%d item__plural_2']).toBeFalsy();
+
+      expect(consoleWarnSpy).toHaveBeenCalledWith('Invalid nplurals value: 999, using default of 2');
+      consoleWarnSpy.mockRestore();
     });
 
     it('should use msgid/msgid_plural as fallback in source language', () => {
