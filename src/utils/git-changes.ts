@@ -136,14 +136,14 @@ export function filterByGitChanges(
 }
 
 /**
- * Extract keys from PO file parsed object
- * PO files have structure: { msgid: { value: '...', metadata: ... } }
+ * Extract keys from PO/POT file parsed object
+ * PO/POT files have structure: { msgid: { value: '...', metadata: ... } }
  * We extract just msgid -> value for comparison
  */
 function extractPoKeys(poObject: Record<string, any>): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, data] of Object.entries(poObject)) {
-    // For PO files, extract the value without creating nested .value keys
+    // For PO/POT files, extract the value without creating nested .value keys
     result[key] = typeof data === 'object' && data !== null && data.value !== undefined ? data.value : data;
   }
   return result;
@@ -256,7 +256,7 @@ function getChangedKeys(
   for (const file of sourceFiles) {
     try {
       const sanitizedPath = sanitizeGitPath(file.path);
-      const isPo = file.format === 'po';
+      const isPo = file.format === 'po' || file.format === 'pot';
       let oldFlat: Record<string, any> = {};
 
       try {

@@ -500,8 +500,9 @@ export function processLocaleTranslations(
       targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
     }
 
-    // Use .po-specific missing detection for .po files
-    const isPoFile = sourceFile.path.endsWith('.po') || targetPath.endsWith('.po');
+    // Use .po-specific missing detection for .po/.pot files
+    const isPoFile = sourceFile.path.endsWith('.po') || sourceFile.path.endsWith('.pot') ||
+                      targetPath.endsWith('.po') || targetPath.endsWith('.pot');
     let missingKeys: Record<string, SourceKeyDetails> = {};
     let skippedKeys: Record<string, SkippedKeyDetails> = {};
 

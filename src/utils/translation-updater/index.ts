@@ -69,7 +69,7 @@ async function _updateTranslationFile(
     };
   }
 
-  if (fileExt === 'po') {
+  if (fileExt === 'po' || fileExt === 'pot') {
     const poResult = await updatePoFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);
 
     if (config && isDjangoWorkflow(config) && Object.keys(filteredTranslations).length > 0) {
@@ -113,7 +113,7 @@ export async function deleteKeysFromTranslationFile(
     return deleteKeysFromJsonFile(filePath, keysToDelete, languageCode);
   }
 
-  if (fileExt === 'po') {
+  if (fileExt === 'po' || fileExt === 'pot') {
     await deleteKeysFromPoFile(filePath, keysToDelete);
     return keysToDelete;
   }

@@ -32,13 +32,13 @@ export async function clone(
   const { findTranslationFiles } = await import('../utils/files.js');
   const config = await configService.getProjectConfig();
 
-  // Check if project uses .po files, we don't support cloning them yet
-  if (config?.translationFiles?.pattern?.includes('.po')) {
+  // Check if project uses .po/.pot files, we don't support cloning them yet
+  if (config?.translationFiles?.pattern?.includes('.po') || config?.translationFiles?.pattern?.includes('.pot')) {
     const files = await findTranslationFiles(config, { parseContent: false, includeContent: false, extractKeys: false });
-    const hasPoFiles = Array.isArray(files) ? files.some(file => file.path.endsWith('.po')) : false;
+    const hasPoFiles = Array.isArray(files) ? files.some(file => file.path.endsWith('.po') || file.path.endsWith('.pot')) : false;
 
     if (hasPoFiles) {
-      console.log(chalk.yellow('⚠️  Clone command is not yet supported for .po (gettext) files.'));
+      console.log(chalk.yellow('⚠️  Clone command is not yet supported for .po/.pot (gettext) files.'));
       console.log(chalk.gray('   Use the translate and pull commands instead.'));
       return;
     }
