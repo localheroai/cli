@@ -263,9 +263,17 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     await configUtils.updateLastSyncedAt();
 
-    console.log(chalk.green('✓ Translations complete!'));
-    if (translationResult.uniqueKeysTranslated.size > 0) {
-      console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+    if (translationResult.failedLanguages.length > 0) {
+      console.error(chalk.red('⚠️  Some translations failed!'));
+      console.error(chalk.red(`» ${translationResult.failedLanguages.length} language(s) failed: ${translationResult.failedLanguages.join(', ')}`));
+      if (translationResult.uniqueKeysTranslated.size > 0) {
+        console.log(`» Successfully updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+      }
+    } else {
+      console.log(chalk.green('✓ Translations complete!'));
+      if (translationResult.uniqueKeysTranslated.size > 0) {
+        console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+      }
     }
 
 
@@ -302,6 +310,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         const err = error as Error;
         console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
       }
+    }
+
+    if (translationResult.failedLanguages.length > 0 && translationResult.uniqueKeysTranslated.size === 0) {
+      process.exit(1);
+      return;
     }
   } catch (error) {
     if (error instanceof ApiResponseError) {
