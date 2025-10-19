@@ -14,7 +14,7 @@ import {
 /**
  * File format supported by the import service
  */
-export type FileFormat = 'json' | 'yaml' | 'po' | null;
+export type FileFormat = 'json' | 'yaml' | 'po' | 'pot' | null;
 
 /**
  * File details for import operations
@@ -67,7 +67,19 @@ function getFileFormat(filePath: string): FileFormat {
   if (ext === '.json') return 'json';
   if (ext === '.yml' || ext === '.yaml') return 'yaml';
   if (ext === '.po') return 'po';
+  if (ext === '.pot') return 'pot';
   return null;
+}
+
+/**
+ * Normalize file format for API compatibility
+ * @param format The file format from files.ts
+ * @returns The normalized format for the API
+ */
+function normalizeFormat(format: string): string {
+  if (format === 'yml') return 'yaml';
+  if (format === 'pot') return 'po';
+  return format;
 }
 
 /**
@@ -94,7 +106,7 @@ async function readFileContent(
     }
   }
 
-  if (format === 'po') {
+  if (format === 'po' || format === 'pot') {
     try {
       const parsed = parsePoFile(content);
       const apiFormat = poEntriesToApiFormat(parsed, options);
@@ -133,7 +145,7 @@ export const importService = {
     return files.map(file => ({
       path: path.isAbsolute(file.path) ? path.relative(basePath, file.path) : file.path,
       language: file.locale,
-      format: file.format === 'yml' ? 'yaml' : file.format,
+      format: normalizeFormat(file.format),
       namespace: file.namespace || ''
     }));
   },
@@ -175,7 +187,7 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format === 'yml' ? 'yaml' : file.format,
+        format: normalizeFormat(file.format),
         filename: file.path,
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
@@ -188,7 +200,7 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format === 'yml' ? 'yaml' : file.format,
+        format: normalizeFormat(file.format),
         filename: file.path,
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
@@ -283,7 +295,7 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format === 'yml' ? 'yaml' : file.format,
+        format: normalizeFormat(file.format),
         filename: file.path,
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
@@ -296,12 +308,19 @@ export const importService = {
       const fullPath = path.join(basePath, file.path);
       allTranslations.push({
         language: file.language,
-        format: file.format === 'yml' ? 'yaml' : file.format,
+        format: normalizeFormat(file.format),
         filename: file.path,
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
         })
+      });
+    }
+
+    if (options.verbose) {
+      console.log(chalk.blue(`Sending ${allTranslations.length} translation files to API`));
+      allTranslations.forEach(t => {
+        console.log(chalk.gray(`  - ${t.language} ${t.format} ${t.filename} (${t.content?.length || 0} bytes)`));
       });
     }
 

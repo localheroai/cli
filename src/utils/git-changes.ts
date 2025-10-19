@@ -4,7 +4,7 @@ import chalk from 'chalk';
 import type { TranslationFile, ProjectConfig } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations } from './files.js';
-import { PLURAL_PREFIX } from './po-utils.js';
+import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
 
 type FileWithPath = { path: string };
 
@@ -15,8 +15,12 @@ type FileWithPath = { path: string };
 
 export function hasFileChanged(file: FileWithPath, baseBranch: string): boolean {
   try {
+    const resolvedRef = resolveBranchRef(baseBranch);
+    if (!resolvedRef) {
+      return true;
+    }
     const sanitizedPath = sanitizeGitPath(file.path);
-    const oldContent = execSync(`git show ${baseBranch}:"${sanitizedPath}"`, {
+    const oldContent = execSync(`git show ${resolvedRef}:"${sanitizedPath}"`, {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'ignore']
@@ -93,6 +97,13 @@ export function filterByGitChanges(
     // Get changed keys from source files
     const changedKeys = getChangedKeys(sourceFiles, baseBranch, verbose);
 
+    if (changedKeys === null) {
+      if (verbose) {
+        console.log(chalk.yellow('Could not determine changed keys (limit exceeded or error)'));
+      }
+      return null;
+    }
+
     if (changedKeys.size === 0) {
       if (verbose) {
         console.log(chalk.dim('No changes detected in source files'));
@@ -125,14 +136,14 @@ export function filterByGitChanges(
 }
 
 /**
- * Extract keys from PO file parsed object
- * PO files have structure: { msgid: { value: '...', metadata: ... } }
+ * Extract keys from PO/POT file parsed object
+ * PO/POT files have structure: { msgid: { value: '...', metadata: ... } }
  * We extract just msgid -> value for comparison
  */
 function extractPoKeys(poObject: Record<string, any>): Record<string, any> {
   const result: Record<string, any> = {};
   for (const [key, data] of Object.entries(poObject)) {
-    // For PO files, extract the value without creating nested .value keys
+    // For PO/POT files, extract the value without creating nested .value keys
     result[key] = typeof data === 'object' && data !== null && data.value !== undefined ? data.value : data;
   }
   return result;
@@ -148,6 +159,33 @@ export function isGitAvailable(): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Get changed keys for a project by comparing current branch to base branch
+ * Returns Set of changed keys, or null if git is unavailable or base branch not found
+ *
+ * @param sourceFiles - Source translation files to compare
+ * @param config - Project configuration
+ * @param verbose - Whether to show verbose output
+ * @returns Set of changed keys, or null if git unavailable/base branch not found
+ */
+export function getChangedKeysForProject(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Set<string> | null {
+  if (!isGitAvailable()) {
+    return null;
+  }
+
+  const baseBranch = getBaseBranch(config);
+
+  if (!branchExists(baseBranch)) {
+    return null;
+  }
+
+  return getChangedKeys(sourceFiles, baseBranch, verbose);
 }
 
 /**
@@ -169,14 +207,33 @@ function sanitizeGitPath(path: string): string {
 
 /**
  * Check if a branch exists (local or remote)
+ * Tries multiple resolution strategies to handle various git scenarios
  */
 function branchExists(branch: string): boolean {
-  try {
-    execSync(`git rev-parse --verify ${branch}`, { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
+  return resolveBranchRef(branch) !== null;
+}
+
+/**
+ * Resolve a branch name to its full ref, trying multiple strategies
+ * Returns the resolved ref or null if not found
+ */
+function resolveBranchRef(branch: string): string | null {
+  const strategies = [
+    branch,
+    `origin/${branch}`,
+    `refs/remotes/origin/${branch}`
+  ];
+
+  for (const ref of strategies) {
+    try {
+      execSync(`git rev-parse --verify ${ref}`, { stdio: 'ignore' });
+      return ref;
+    } catch {
+      continue;
+    }
   }
+
+  return null;
 }
 
 /**
@@ -187,18 +244,24 @@ function getChangedKeys(
   sourceFiles: TranslationFile[],
   baseBranch: string,
   verbose: boolean
-): Set<string> {
+): Set<string> | null {
+  const resolvedRef = resolveBranchRef(baseBranch);
+  if (!resolvedRef) {
+    return null;
+  }
+
   const allChangedKeys = new Set<string>();
+  const MAX_CHANGED_KEYS = 10000; // Safety limit to prevent memory issues
 
   for (const file of sourceFiles) {
     try {
       const sanitizedPath = sanitizeGitPath(file.path);
-      const isPo = file.format === 'po';
+      const isPo = file.format === 'po' || file.format === 'pot';
       let oldFlat: Record<string, any> = {};
 
       try {
         const oldContent = execSync(
-          `git show ${baseBranch}:"${sanitizedPath}"`,
+          `git show ${resolvedRef}:"${sanitizedPath}"`,
           {
             encoding: 'utf-8',
             maxBuffer: 10 * 1024 * 1024,
@@ -234,6 +297,13 @@ function getChangedKeys(
       for (const [key, value] of Object.entries(newFlat)) {
         const keyExistsInOld = key in oldFlat;
         if (!keyExistsInOld || oldFlat[key] !== value) {
+          if (allChangedKeys.size >= MAX_CHANGED_KEYS) {
+            if (verbose) {
+              console.log(chalk.yellow(`⚠ Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
+            }
+            return null;
+          }
+
           allChangedKeys.add(key);
           totalChangedInFile++;
 
@@ -282,11 +352,7 @@ function filterMissing(
 
   // Extract base keys from plural forms in changedKeys
   // E.g., "key__plural_1" -> "key"
-  const baseChangedKeys = new Set<string>();
-  for (const key of changedKeys) {
-    const baseKey = key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\_')}\\d+$`), '');
-    baseChangedKeys.add(baseKey);
-  }
+  const baseChangedKeys = extractBaseKeys(changedKeys);
 
   for (const [localeKey, entry] of Object.entries(missingByLocale)) {
     const filteredKeys: Record<string, any> = {};
@@ -298,7 +364,7 @@ function filterMissing(
         count++;
       } else {
         // For plural forms, check if base key changed
-        const baseKey = key.replace(new RegExp(`${PLURAL_PREFIX.replace('_', '\\_')}\\d+$`), '');
+        const baseKey = key.replace(PLURAL_SUFFIX_REGEX, '');
         if (baseKey !== key && baseChangedKeys.has(baseKey)) {
           // This is a plural variant of a changed key - include it
           // even if the source language doesn't have this many plural forms

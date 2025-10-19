@@ -95,7 +95,8 @@ program
   .command('pull')
   .description('Pull updates from LocalHero.ai to your local files')
   .option('-v, --verbose', 'Show detailed progress information')
-  .action(wrapCommandAction((options: { verbose?: boolean }) => pull(options)));
+  .option('--changed-only', 'Only pull translations for keys changed in current branch')
+  .action(wrapCommandAction((options: { verbose?: boolean; changedOnly?: boolean }) => pull(options)));
 
 program
   .command('push')

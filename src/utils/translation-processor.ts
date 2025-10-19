@@ -10,6 +10,7 @@ export interface TranslationStats {
   languages: Set<string>;
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
+  failedLanguages: Set<string>;
 }
 
 export interface TranslationJob {
@@ -86,6 +87,7 @@ export interface TranslationResult {
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
   uniqueKeysTranslated: Set<string>;
+  failedLanguages: string[];
 }
 
 export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 35;
@@ -235,6 +237,16 @@ async function applyTranslations(
   const { jobId, data } = jobStatus;
 
   if (!data?.translations?.data || !data.language?.code) {
+    if (data?.status === 'completed' && data?.language?.code) {
+      const languageCode = data.language.code;
+
+      stats.failedLanguages.add(languageCode);
+      console.error(chalk.red(`  ❌ Job ${jobId} (${languageCode}) completed with no translations`));
+      if (data.error_details) {
+        console.error(chalk.gray(`     Error: ${data.error_details}`));
+      }
+    }
+
     return false;
   }
 
@@ -429,7 +441,8 @@ export async function processTranslationBatches(
     totalLanguages: 0,
     languages: new Set<string>(),
     resultsBaseUrl: null,
-    jobGroupShortUrl: null
+    jobGroupShortUrl: null,
+    failedLanguages: new Set<string>()
   };
   const processedEntries = new Set<string>();
   const allJobIds: string[] = [];
@@ -463,6 +476,7 @@ export async function processTranslationBatches(
     allJobIds,
     resultsBaseUrl: stats.resultsBaseUrl,
     jobGroupShortUrl: stats.jobGroupShortUrl,
-    uniqueKeysTranslated
+    uniqueKeysTranslated,
+    failedLanguages: Array.from(stats.failedLanguages)
   };
 }
