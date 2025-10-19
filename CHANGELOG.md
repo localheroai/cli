@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.21] - 2025-10-19
+
+### Added
+- Failed translation job detection with error reporting when jobs complete without translations
+- `.pot` file support for gettext with source key resolution
+- `--changed-only` flag for pull command to apply updates only for keys changed in current branch
+
+### Changed
+- Better GitHub Actions workflow with concurrency control, bot detection, and manual trigger
+- GitHub Actions now uses `--changed-only` for pull requests and full translation for main/master branches
+
 ## [0.0.20] - 2025-10-05
 
 ### Fixed
