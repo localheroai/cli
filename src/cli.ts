@@ -103,7 +103,8 @@ program
   .description('Push updates from your local files to LocalHero.ai')
   .option('-v, --verbose', 'Show detailed progress information')
   .option('-y, --yes', 'Skip confirmation prompt')
-  .action(wrapCommandAction(async (options: { verbose?: boolean; yes?: boolean }) => {
+  .option('-f, --force', 'Push all files regardless of git changes')
+  .action(wrapCommandAction(async (options: { verbose?: boolean; yes?: boolean; force?: boolean }) => {
     const config = await configService.getValidProjectConfig();
     return push(config, options);
   }));
