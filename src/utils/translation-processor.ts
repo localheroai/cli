@@ -90,7 +90,7 @@ export interface TranslationResult {
   failedLanguages: string[];
 }
 
-export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 35;
+export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 60;
 
 /**
  * Creates a job request object for a batch of translations
