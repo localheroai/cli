@@ -7,6 +7,8 @@ import {
 import { TranslationBatch } from './translation-processor.js';
 import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX } from './po-utils.js';
 
+const POT_EXTENSION = '.pot';
+
 export function isDjangoWorkflow(config: ProjectConfig): boolean {
   return config.translationFiles?.workflow === 'django';
 }
@@ -356,17 +358,34 @@ export function findTargetFile(
   if (found) return found;
 
   // Then try filename-based matching regardless of directory (existing logic)
-  found = targetFiles.find(f =>
-    f.locale === targetLocale &&
-    path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale)
-  );
+  found = targetFiles.find(f => {
+    if (f.locale !== targetLocale) return false;
+
+    const basenameMatches = path.basename(f.path, path.extname(f.path)) ===
+      path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale);
+
+    if (!basenameMatches) return false;
+
+    // .pot template files are special: they can live in a different directory
+    // than their .po counterparts (e.g., locales/base.pot → locales/sv/LC_MESSAGES/base.po)
+    const isTemplateFile = path.extname(sourceFile.path).toLowerCase() === POT_EXTENSION;
+    if (isTemplateFile) {
+      return true;
+    }
+
+    // For all other files, require exact directory structure matching
+    return path.dirname(f.path) === path.dirname(sourceFile.path);
+  });
 
   if (found) return found;
 
   const sourceDirParts = path.dirname(sourceFile.path).split(path.sep);
   const sourceFileBaseName = path.basename(sourceFile.path, path.extname(sourceFile.path));
 
-  // Check for corresponding file in subdirectories or parent directories
+  // Third fallback: Handle locale-in-path patterns (e.g., translations/sv/LC_MESSAGES/django.po)
+  // 1. Locale must be part of the directory path
+  // 2. Base paths (before locale) must match exactly
+  // 3. Filenames must match
   return targetFiles.find(f => {
     if (f.locale !== targetLocale) return false;
 
@@ -454,6 +473,10 @@ export function processTargetContent(
   targetContent: Record<string, any>,
   targetLocale: string
 ): Record<string, any> {
+  // Check null, undefined, non-objects, and arrays
+  if (!targetContent || typeof targetContent !== 'object' || Array.isArray(targetContent)) {
+    return {};
+  }
   if (targetContent[targetLocale]) {
     return flattenTranslations(targetContent[targetLocale]);
   }
@@ -524,7 +547,7 @@ export function processLocaleTranslations(
         // Extract base msgid for plural forms (remove __plural_X suffix)
         const baseMsgid = missing.key.replace(new RegExp(`${PLURAL_PREFIX}\\d+$`), '');
 
-        const entryData: any = {
+        const entryData: SourceKeyDetails = {
           value: missing.value,
           sourceKey: key,
           context: missing.context

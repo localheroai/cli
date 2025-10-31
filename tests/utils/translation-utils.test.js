@@ -785,4 +785,92 @@ msgstr[2] ""
       expect(result.missingKeys['Save']).toBeUndefined();
     });
   });
+
+  describe('findTargetFile matching', () => {
+    const createYamlFile = (path, content, locale) => ({
+      path,
+      format: 'yml',
+      locale,
+      content: Buffer.from(content || '').toString('base64'),
+      keys: content ? { hello: 'Hello' } : {}
+    });
+
+    const createPoFile = (path, content, locale, format = 'po') => ({
+      path,
+      format,
+      locale,
+      content: Buffer.from(content || '').toString('base64'),
+      keys: content ? { greeting: 'Hello' } : {}
+    });
+
+    it('should find target file when directory structure matches', () => {
+      const sourceFile = createYamlFile('config/locales/app/en.yml', 'en:\n  hello: Hello', 'en');
+      const targetFile = createYamlFile('config/locales/app/sv.yml', '', 'sv');
+      const wrongTargetFile = createYamlFile('config/locales/sv.yml', '', 'sv');
+      const targetFiles = [wrongTargetFile, targetFile];
+
+      const result = processLocaleTranslations(
+        { hello: { value: 'Hello' } },
+        'sv',
+        targetFiles,
+        sourceFile,
+        'en'
+      );
+
+      expect(result.targetFile).toBeDefined();
+      expect(result.targetFile.path).toBe('config/locales/app/sv.yml');
+      expect(result.targetPath).toBe('config/locales/app/sv.yml');
+    });
+
+    it('should NOT find target file when directory structure mismatches (strict matching)', () => {
+      const sourceFile = createYamlFile('config/locales/en.yml', 'en:\n  hello: Hello', 'en');
+      const targetFile = createYamlFile('config/locales/app/sv.yml', 'sv:\n  hello: Hej', 'sv');
+      const targetFiles = [targetFile];
+
+      const result = processLocaleTranslations(
+        { hello: { value: 'Hello' } },
+        'sv',
+        targetFiles,
+        sourceFile,
+        'en'
+      );
+
+      expect(result.targetFile).toBeUndefined();
+      expect(result.targetPath).toBe('config/locales/sv.yml');
+    });
+
+    it('should find .po target file for .pot template in different directory (gettext pattern)', () => {
+      const sourceFile = createPoFile('locales/base.pot', 'msgid "greeting"\nmsgstr ""', 'en', 'pot');
+      const targetFile = createPoFile('locales/sv/LC_MESSAGES/base.po', 'msgid "greeting"\nmsgstr "Hej"', 'sv', 'po');
+      const targetFiles = [targetFile];
+
+      const result = processLocaleTranslations(
+        { greeting: { value: 'Hello' } },
+        'sv',
+        targetFiles,
+        sourceFile,
+        'en'
+      );
+
+      expect(result.targetFile).toBeDefined();
+      expect(result.targetFile.path).toBe('locales/sv/LC_MESSAGES/base.po');
+      expect(result.targetPath).toBe('locales/sv/LC_MESSAGES/base.po');
+    });
+
+    it('should use generateTargetPath when no matching file exists', () => {
+      const sourceFile = createYamlFile('config/locales/app/en.yml', 'en:\n  hello: Hello', 'en');
+      const targetFiles = [];
+
+      const result = processLocaleTranslations(
+        { hello: { value: 'Hello' } },
+        'sv',
+        targetFiles,
+        sourceFile,
+        'en'
+      );
+
+      expect(result.targetFile).toBeUndefined();
+      expect(result.targetPath).toBe('config/locales/app/sv.yml');
+    });
+  });
 });
