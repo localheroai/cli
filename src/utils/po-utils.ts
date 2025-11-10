@@ -109,6 +109,25 @@ export function parseUniqueKey(key: string): { msgid: string; context?: string }
 }
 
 /**
+ * Normalize reference comments from PO files into an array of individual file references
+ */
+export function normalizeReferences(reference: string | string[]): string[] {
+  const referenceArray = Array.isArray(reference) ? reference : [reference];
+
+  const normalized: string[] = [];
+  for (const ref of referenceArray) {
+    const parts = ref
+      .split(/[\n\s]+/)
+      .map(part => part.trim())
+      .filter(part => part.length > 0);
+
+    normalized.push(...parts);
+  }
+
+  return normalized;
+}
+
+/**
  * Convert .po file to API compatible format
  */
 export function poEntriesToApiFormat(
@@ -166,6 +185,13 @@ export function poEntriesToApiFormat(
           keyData.metadata.translator_comments = translatorComments;
         }
 
+        if (entry.comments?.reference) {
+          const references = normalizeReferences(entry.comments.reference);
+          if (references.length > 0) {
+            keyData.metadata.source_references = references;
+          }
+        }
+
         if (entry.msgctxt) {
           keyData.context = entry.msgctxt;
         }
@@ -183,10 +209,19 @@ export function poEntriesToApiFormat(
         value: value
       };
 
-      if (translatorComments) {
-        keyData.metadata = {
-          translator_comments: translatorComments
-        };
+      if (translatorComments || entry.comments?.reference) {
+        keyData.metadata = {};
+
+        if (translatorComments) {
+          keyData.metadata.translator_comments = translatorComments;
+        }
+
+        if (entry.comments?.reference) {
+          const references = normalizeReferences(entry.comments.reference);
+          if (references.length > 0) {
+            keyData.metadata.source_references = references;
+          }
+        }
       }
 
       if (entry.msgctxt) {
@@ -248,6 +283,11 @@ export interface MissingTranslation {
   value: string;
   isPlural: boolean;
   pluralForm?: string;
+  metadata?: {
+    source_references?: string[];
+    translator_comments?: string;
+    [key: string]: unknown;
+  };
 }
 
 export function findMissingPoTranslations(
@@ -274,6 +314,19 @@ export function findMissingPoTranslations(
     const key = createUniqueKey(entry.msgid, entry.msgctxt);
     const targetEntry = targetMap.get(key);
 
+    const metadata: { source_references?: string[]; translator_comments?: string } = {};
+    if (entry.comments?.reference) {
+      const references = normalizeReferences(entry.comments.reference);
+      if (references.length > 0) {
+        metadata.source_references = references;
+      }
+    }
+    if (entry.comments?.extracted && entry.comments.extracted.length > 0) {
+      metadata.translator_comments = entry.comments.extracted.join('\n');
+    }
+
+    const hasMetadata = Object.keys(metadata).length > 0;
+
     if (entry.msgid_plural) {
       for (let i = 0; i < targetNplurals; i++) {
         const isEmpty = !targetEntry ||
@@ -290,7 +343,8 @@ export function findMissingPoTranslations(
             context: entry.msgctxt,
             value: i === 0 ? entry.msgid : entry.msgid_plural,
             isPlural: true,
-            pluralForm: entry.msgid_plural
+            pluralForm: entry.msgid_plural,
+            ...(hasMetadata && { metadata })
           });
         }
       }
@@ -307,7 +361,8 @@ export function findMissingPoTranslations(
           context: entry.msgctxt,
           value: entry.msgid,
           isPlural: false,
-          pluralForm: entry.msgid_plural
+          pluralForm: entry.msgid_plural,
+          ...(hasMetadata && { metadata })
         });
       }
     }

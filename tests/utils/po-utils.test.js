@@ -262,6 +262,75 @@ msgstr[1] "%(count)d items"
       });
       expect(result['Hello'].metadata).toBeUndefined();
     });
+
+    it('should include source_references from #: comments', () => {
+      const entries = [
+        {
+          msgid: 'Edit item',
+          msgstr: ['Redigera objekt'],
+          msgctxt: undefined,
+          msgid_plural: undefined,
+          comments: {
+            reference: ['app/views/items/show.html.erb:15', 'app/controllers/items_controller.rb:42']
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Edit item']).toEqual({
+        value: 'Redigera objekt',
+        metadata: {
+          source_references: ['app/views/items/show.html.erb:15', 'app/controllers/items_controller.rb:42']
+        }
+      });
+    });
+
+    it('should include source_references in plural forms', () => {
+      const entries = [
+        {
+          msgid: '%(count)d item',
+          msgstr: ['%(count)d objekt', '%(count)d objekt'],
+          msgid_plural: '%(count)d items',
+          comments: {
+            reference: ['app/views/items/index.html.erb:8']
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['%(count)d item'].metadata.source_references).toEqual(['app/views/items/index.html.erb:8']);
+      expect(result['%(count)d item__plural_1'].metadata.source_references).toEqual(['app/views/items/index.html.erb:8']);
+    });
+
+    it('should include both translator comments and source references', () => {
+      const entries = [
+        {
+          msgid: 'Save changes',
+          msgstr: ['Spara ändringar'],
+          msgctxt: undefined,
+          msgid_plural: undefined,
+          comments: {
+            extracted: ['Translators: Button text for saving form'],
+            reference: ['app/views/forms/edit.html.erb:42']
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Save changes']).toEqual({
+        value: 'Spara ändringar',
+        metadata: {
+          translator_comments: 'Button text for saving form',
+          source_references: ['app/views/forms/edit.html.erb:42']
+        }
+      });
+    });
   });
 
   describe('Multi-plural forms', () => {
@@ -303,7 +372,8 @@ msgstr "Cześć"
         metadata: {
           po_plural: true,
           msgid_plural: '%d files',
-          plural_index: 0
+          plural_index: 0,
+          source_references: ['templates/file_count.html']
         }
       });
 
@@ -312,7 +382,8 @@ msgstr "Cześć"
         metadata: {
           po_plural: true,
           msgid: '%d file',
-          plural_index: 1
+          plural_index: 1,
+          source_references: ['templates/file_count.html']
         }
       });
 
@@ -321,7 +392,8 @@ msgstr "Cześć"
         metadata: {
           po_plural: true,
           msgid: '%d file',
-          plural_index: 2
+          plural_index: 2,
+          source_references: ['templates/file_count.html']
         }
       });
 

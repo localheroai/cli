@@ -72,6 +72,7 @@ interface SourceKeyDetails {
     msgid_plural?: string;
     msgid?: string;
     translator_comments?: string;
+    source_references?: string[];
     [key: string]: unknown;
   };
 }
@@ -553,18 +554,21 @@ export function processLocaleTranslations(
           context: missing.context
         };
 
-        if (missing.isPlural) {
-          entryData.metadata = {
-            po_plural: true,
-            plural_index: pluralIndex
-          };
+        if (missing.isPlural || missing.metadata) {
+          const pluralMetadata = missing.isPlural
+            ? {
+              po_plural: true,
+              plural_index: pluralIndex,
+              ...(pluralIndex === 0
+                ? { msgid_plural: missing.pluralForm }
+                : { msgid: baseMsgid })
+            }
+            : {};
 
-          // Add msgid_plural to first form (index 0), msgid to others
-          if (pluralIndex === 0) {
-            entryData.metadata.msgid_plural = missing.pluralForm;
-          } else {
-            entryData.metadata.msgid = baseMsgid;
-          }
+          entryData.metadata = {
+            ...pluralMetadata,
+            ...missing.metadata
+          };
         }
 
         missingKeys[key] = entryData;
