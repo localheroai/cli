@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.22] - 2025-11-11
+
+### Fixed
+- Fixed PO file source reference handling to properly split multi-line file references from gettext-parser
+- Improved file name matching to prevent cross-context writes between different directories (e.g., server/ vs client/)
+- Added null/array guards to processTargetContent for better error handling
+
+### Changed
+- Made .pot file detection case-insensitive for more flexible file handling
+- Increased retry attempt limits for reliability in slow network conditions
+
 ## [0.0.21] - 2025-10-19
 
 ### Added
