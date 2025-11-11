@@ -1,8 +1,0 @@
----
-description: How handle new feature requests
-globs: 
-alwaysApply: false
----
-- Carefully read through the request and analyze the requirements.
-- Ask any followup questions before starting to write any code.
-- Create a highlevel plan for the implementation, that you let the requester approve before writing any code.
