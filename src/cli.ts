@@ -10,6 +10,7 @@ import { pull } from './commands/pull.js';
 import { push } from './commands/push.js';
 import { init } from './commands/init.js';
 import { translate, TranslationOptions } from './commands/translate.js';
+import { ci, CiOptions } from './commands/ci.js';
 import { clone } from './commands/clone.js';
 import { configService } from './utils/config.js';
 
@@ -90,6 +91,12 @@ program
   .option('-c, --commit', 'Automatically commit changes (for CI/CD)')
   .option('--changed-only', 'Only translate keys changed in current branch (experimental)')
   .action(wrapCommandAction((options: TranslationOptions) => translate(options)));
+
+program
+  .command('ci')
+  .description('Run translations in CI/CD (auto-detects PR vs main context)')
+  .option('-v, --verbose', 'Show detailed progress information')
+  .action(wrapCommandAction((options: CiOptions) => ci(options)));
 
 program
   .command('pull')

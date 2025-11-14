@@ -78,7 +78,7 @@ Translating your missing keys:
 npx @localheroai/cli translate --changed-only
 ```
 
-The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them. 
+The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them.
 
 You can customize the base branch in your `localhero.json`:
 
@@ -90,6 +90,35 @@ You can customize the base branch in your `localhero.json`:
   }
 }
 ```
+
+### CI
+
+```bash
+npx @localheroai/cli ci
+```
+
+A specialized command for running translations in CI/CD environments (GitHub Actions etc.). This command automatically detects the context (PR vs main branch) and optimizes translation behavior accordingly:
+
+- **On main/master branch**: Translates all missing keys
+- **On feature branch PRs**: Only translates changed keys (using `--changed-only` mode)
+- **Always commits changes** when running in CI/CD
+
+#### Options
+
+**`--verbose`**: Show detailed progress and context detection information.
+
+```bash
+npx @localheroai/cli ci --verbose
+```
+
+#### Environment Variables
+
+The command uses these environment variables for auto-detection:
+
+- `GITHUB_ACTIONS`: Confirms running in GitHub Actions (set to `"true"`)
+- `GITHUB_BASE_REF`: Used to detect PR context and base branch (main/master)
+- `GITHUB_TOKEN`: Used for auto-committing changes
+- `LOCALHERO_API_KEY`: Your API key (from repository secrets)
 
 
 ### Pull / push
