@@ -134,14 +134,7 @@ jobs:
         LOCALHERO_API_KEY: \${{ secrets.LOCALHERO_API_KEY }}
         GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
         GITHUB_BASE_REF: \${{ github.base_ref }}
-      run: |
-        # Translate all strings on main/master
-        # Translate only changed strings in branch for PRs
-        if [[ "\${{ github.base_ref }}" == "main" || "\${{ github.base_ref }}" == "master" ]]; then
-          npx -y @localheroai/cli translate
-        else
-          npx -y @localheroai/cli translate --changed-only
-        fi`;
+      run: npx -y @localheroai/cli ci`;
 
     await fs.writeFile(workflowFile, actionContent);
     return workflowFile;

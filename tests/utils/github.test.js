@@ -66,8 +66,7 @@ describe('github module', () => {
       expect(fileContent).toContain('fetch-depth: 0');
       expect(fileContent).toContain('git fetch --no-tags origin');
       expect(fileContent).toContain('GITHUB_BASE_REF:');
-      expect(fileContent).toContain('if [[ "${{ github.base_ref }}" == "main" || "${{ github.base_ref }}" == "master" ]]; then');
-      expect(fileContent).toContain('npx -y @localheroai/cli translate --changed-only');
+      expect(fileContent).toContain('npx -y @localheroai/cli ci');
 
       // Verify return value is the workflow file path
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');
