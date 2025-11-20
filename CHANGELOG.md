@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.23] - 2025-11-20
+
+### Added
+- GitHub App installation token integration for workflow triggering
+  - Automatic fallback to GITHUB_TOKEN when App is not installed or unavailable
+  - Error handling with specific warnings for authentication failures
+
 ## [0.0.22] - 2025-11-11
 
 ### Fixed
