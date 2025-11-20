@@ -217,7 +217,9 @@ jobs:
         throw new Error('GITHUB_TOKEN is not set');
       }
 
-      if (!appToken) {
+      if (appToken) {
+        console.log('✓ Using GitHub App token');
+      } else {
         if (errorCode === 'invalid_api_key') {
           console.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
         } else if (errorCode !== 'github_app_not_installed') {

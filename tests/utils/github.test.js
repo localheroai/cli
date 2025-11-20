@@ -374,6 +374,7 @@ describe('github module', () => {
         'git remote set-url origin https://x-access-token:ghs_app_token_123@github.com/owner/repo.git',
         { stdio: 'pipe' }
       );
+      expect(console.log).toHaveBeenCalledWith('✓ Using GitHub App token');
       expect(console.warn).not.toHaveBeenCalled();
     });
 
