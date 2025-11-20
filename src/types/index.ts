@@ -91,6 +91,11 @@ export class ApiResponseError extends Error {
   }
 }
 
+export interface GitHubInstallationTokenResponse {
+  token: string;
+  expires_at: string;
+}
+
 export interface Project {
   id: string;
   name: string;

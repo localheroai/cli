@@ -1,6 +1,8 @@
 import { execSync, ExecSyncOptions } from 'child_process';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
+import { fetchGitHubInstallationToken } from '../api/github.js';
+import { configService } from './config.js';
 
 /**
  * Dependencies for the GitHub service
@@ -10,6 +12,10 @@ interface GitHubDependencies {
   fs: typeof fs & { existsSync: typeof existsSync };
   path: typeof path;
   env: NodeJS.ProcessEnv;
+  fetchGitHubInstallationToken?: (projectId: string) => Promise<string>;
+  configService?: {
+    getProjectConfig: (basePath?: string) => Promise<any>;
+  };
   [key: string]: unknown;
 }
 
@@ -17,7 +23,9 @@ const defaultDependencies: GitHubDependencies = {
   exec: (cmd: string, options?: ExecSyncOptions) => execSync(cmd, options),
   fs: { ...fs, existsSync },
   path,
-  env: process.env
+  env: process.env,
+  fetchGitHubInstallationToken,
+  configService
 };
 
 const workflowFileName = 'localhero-translate.yml';
@@ -139,16 +147,28 @@ jobs:
     return workflowFile;
   },
 
+  async fetchActionToken(): Promise<{ token: string | null; errorCode?: string }> {
+    try {
+      const config = await this.deps.configService!.getProjectConfig();
+      const token = await this.deps.fetchGitHubInstallationToken!(config.projectId);
+      return { token };
+
+    } catch (error: unknown) {
+      const err = error as Error & { code?: string };
+      return { token: null, errorCode: err.code };
+    }
+  },
+
   /**
    * Automatically commit and push changes when running in GitHub Actions
    * @param filesPath Path pattern for files to commit
    * @param translationSummary Optional summary of translation results
    */
-  autoCommitChanges(filesPath: string, translationSummary?: {
+  async autoCommitChanges(filesPath: string, translationSummary?: {
     keysTranslated: number;
     languages: string[];
     viewUrl?: string;
-  }): void {
+  }): Promise<void> {
     const { exec, env } = this.deps;
 
     if (!this.isGitHubAction()) return;
@@ -190,9 +210,19 @@ jobs:
 
       exec(`git commit -m "${commitMessage}"`, { stdio: 'inherit' });
 
-      const token = env.GITHUB_TOKEN;
-      if (!token) {
+      const { token: appToken, errorCode } = await this.fetchActionToken();
+      const finalToken = appToken || env.GITHUB_TOKEN;
+
+      if (!finalToken) {
         throw new Error('GITHUB_TOKEN is not set');
+      }
+
+      if (!appToken) {
+        if (errorCode === 'invalid_api_key') {
+          console.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
+        } else if (errorCode !== 'github_app_not_installed') {
+          console.warn('⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).');
+        }
       }
 
       const repository = env.GITHUB_REPOSITORY;
@@ -200,13 +230,27 @@ jobs:
         throw new Error('GITHUB_REPOSITORY is not set');
       }
 
-      const remoteUrl = `https://x-access-token:${token}@github.com/${repository}.git`;
+      const remoteUrl = `https://x-access-token:${finalToken}@github.com/${repository}.git`;
 
-      exec(`git remote set-url origin ${remoteUrl}`, { stdio: 'inherit' });
+      try {
+        const result = exec(`git remote set-url origin ${remoteUrl}`, { stdio: 'pipe' });
+        if (result) {
+          const maskedOutput = result.toString().replace(finalToken, '***TOKEN***');
+          if (maskedOutput.trim()) {
+            console.log(maskedOutput);
+          }
+        }
+      } catch (error: unknown) {
+        const err = error as Error;
+        const maskedMessage = err.message.replace(finalToken, '***TOKEN***');
+        throw new Error(maskedMessage);
+      }
+
       exec(`git push origin HEAD:${branchName}`, { stdio: 'inherit' });
       console.log('Changes committed and pushed successfully.');
-    } catch (error: any) {
-      console.error('Auto-commit failed:', error.message);
+    } catch (error: unknown) {
+      const err = error as Error;
+      console.error('Auto-commit failed:', err.message);
       throw error;
     }
   }
@@ -230,6 +274,14 @@ export function workflowExists(basePath: string): boolean {
 }
 
 /**
+ * Fetch GitHub App installation token from backend
+ * @returns Object with token (string or null) and optional errorCode
+ */
+export function fetchActionToken(): Promise<{ token: string | null; errorCode?: string }> {
+  return githubService.fetchActionToken();
+}
+
+/**
  * Automatically commit and push changes when running in GitHub Actions
  * @param filesPath Path pattern for files to commit
  * @param translationSummary Optional summary of translation results
@@ -238,6 +290,6 @@ export function autoCommitChanges(filesPath: string, translationSummary?: {
   keysTranslated: number;
   languages: string[];
   viewUrl?: string;
-}): void {
+}): Promise<void> {
   return githubService.autoCommitChanges(filesPath, translationSummary);
 }
