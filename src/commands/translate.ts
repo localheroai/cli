@@ -90,7 +90,7 @@ interface TranslationDependencies {
       keysTranslated: number;
       languages: string[];
       viewUrl?: string;
-    }) => void;
+    }) => Promise<void>;
   };
   execUtils: {
     execSync: (command: string, options?: any) => Buffer | string;
@@ -301,7 +301,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
 
       try {
-        gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
+        await gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
           keysTranslated: translationResult.uniqueKeysTranslated.size,
           languages: translationResult.languages,
           viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined

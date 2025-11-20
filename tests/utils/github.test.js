@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists } from '../../src/utils/github.js';
+import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists, fetchActionToken } from '../../src/utils/github.js';
 
 describe('github module', () => {
   let mockExec;
@@ -120,6 +120,73 @@ describe('github module', () => {
     });
   });
 
+  describe('fetchActionToken', () => {
+    let mockFetchGitHubInstallationToken;
+    let mockConfigService;
+
+    beforeEach(() => {
+      mockFetchGitHubInstallationToken = jest.fn();
+      mockConfigService = {
+        getProjectConfig: jest.fn()
+      };
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        fetchGitHubInstallationToken: mockFetchGitHubInstallationToken,
+        configService: mockConfigService
+      });
+    });
+
+    it('returns token when backend responds successfully', async () => {
+      mockConfigService.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project'
+      });
+
+      mockFetchGitHubInstallationToken.mockResolvedValue('ghs_test_token_123');
+
+      const result = await fetchActionToken();
+
+      expect(result.token).toBe('ghs_test_token_123');
+      expect(result.errorCode).toBeUndefined();
+      expect(mockConfigService.getProjectConfig).toHaveBeenCalled();
+      expect(mockFetchGitHubInstallationToken).toHaveBeenCalledWith('test-project');
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('returns null with error code when GitHub App not installed (404 error)', async () => {
+      mockConfigService.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project'
+      });
+
+      const error = new Error('GitHub App not installed');
+      error.code = 'github_app_not_installed';
+      mockFetchGitHubInstallationToken.mockRejectedValue(error);
+
+      const result = await fetchActionToken();
+
+      expect(result.token).toBeNull();
+      expect(result.errorCode).toBe('github_app_not_installed');
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('returns null with undefined error code on any unexpected error', async () => {
+      mockConfigService.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project'
+      });
+
+      const error = new Error('Unexpected error');
+      mockFetchGitHubInstallationToken.mockRejectedValue(error);
+
+      const result = await fetchActionToken();
+
+      expect(result.token).toBeNull();
+      expect(result.errorCode).toBeUndefined();
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('autoCommitChanges', () => {
     it('does nothing when not in GitHub Actions', () => {
       mockEnv.GITHUB_ACTIONS = 'false';
@@ -128,7 +195,7 @@ describe('github module', () => {
       expect(mockExec).not.toHaveBeenCalled();
     });
 
-    it('commits and pushes changes when in GitHub Actions and changes exist', () => {
+    it('commits and pushes changes when in GitHub Actions and changes exist', async () => {
       // Setup GitHub environment
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -143,7 +210,7 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      autoCommitChanges('locales/**/*.json');
+      await autoCommitChanges('locales/**/*.json');
 
       // Verify git commands were executed in the correct order
       expect(mockExec).toHaveBeenCalledWith('git config --global user.name "LocalHero Bot"', { stdio: "inherit" });
@@ -151,7 +218,7 @@ describe('github module', () => {
       expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: "inherit" });
       expect(mockExec).toHaveBeenCalledWith('git status --porcelain');
       expect(mockExec).toHaveBeenCalledWith('git commit -m "Update translations"', { stdio: "inherit" });
-      expect(mockExec).toHaveBeenCalledWith('git remote set-url origin https://x-access-token:fake-token@github.com/owner/repo.git', { stdio: "inherit" });
+      expect(mockExec).toHaveBeenCalledWith('git remote set-url origin https://x-access-token:fake-token@github.com/owner/repo.git', { stdio: "pipe" });
       expect(mockExec).toHaveBeenCalledWith('git push origin HEAD:feature-branch', { stdio: "inherit" });
 
       // Verify log messages
@@ -159,7 +226,7 @@ describe('github module', () => {
       expect(console.log).toHaveBeenCalledWith("Changes committed and pushed successfully.");
     });
 
-    it('commits with enhanced message when translation summary is provided', () => {
+    it('commits with enhanced message when translation summary is provided', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockEnv.GITHUB_TOKEN = 'fake-token';
@@ -178,13 +245,13 @@ describe('github module', () => {
         viewUrl: 'https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ'
       };
 
-      autoCommitChanges('locales/**/*.json', translationSummary);
+      await autoCommitChanges('locales/**/*.json', translationSummary);
 
       const expectedMessage = 'Update translations\n\nTranslated 15 keys in German, French, Spanish\nView results at https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
       expect(mockExec).toHaveBeenCalledWith(`git commit -m "${expectedMessage}"`, { stdio: "inherit" });
     });
 
-    it('does not commit when there are no changes', () => {
+    it('does not commit when there are no changes', async () => {
       // Setup GitHub environment
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -197,7 +264,7 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      autoCommitChanges('locales/**/*.json');
+      await autoCommitChanges('locales/**/*.json');
 
       // Verify git commands were executed but not commit or push
       expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: "inherit" });
@@ -209,17 +276,15 @@ describe('github module', () => {
       expect(console.log).toHaveBeenCalledWith("No changes to commit.");
     });
 
-    it('throws error when branch name is missing', () => {
+    it('throws error when branch name is missing', async () => {
       // Setup GitHub environment without branch name
       mockEnv.GITHUB_ACTIONS = 'true';
       // GITHUB_HEAD_REF not set
 
-      expect(() => {
-        autoCommitChanges('locales/**/*.json');
-      }).toThrow('Could not determine branch name from GITHUB_HEAD_REF');
+      await expect(autoCommitChanges('locales/**/*.json')).rejects.toThrow('Could not determine branch name from GITHUB_HEAD_REF');
     });
 
-    it('throws error when GitHub token is missing', () => {
+    it('throws error when GitHub token is missing', async () => {
       // Setup GitHub environment without token
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -233,12 +298,10 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      expect(() => {
-        autoCommitChanges('locales/**/*.json');
-      }).toThrow('GITHUB_TOKEN is not set');
+      await expect(autoCommitChanges('locales/**/*.json')).rejects.toThrow('GITHUB_TOKEN is not set');
     });
 
-    it('throws error when repository is missing', () => {
+    it('throws error when repository is missing', async () => {
       // Setup GitHub environment without repository
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -253,12 +316,10 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      expect(() => {
-        autoCommitChanges('locales/**/*.json');
-      }).toThrow('GITHUB_REPOSITORY is not set');
+      await expect(autoCommitChanges('locales/**/*.json')).rejects.toThrow('GITHUB_REPOSITORY is not set');
     });
 
-    it('handles git command errors', () => {
+    it('handles git command errors', async () => {
       // Setup GitHub environment
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -276,11 +337,118 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      expect(() => {
-        autoCommitChanges('locales/**/*.json');
-      }).toThrow('Git commit failed');
+      await expect(autoCommitChanges('locales/**/*.json')).rejects.toThrow('Git commit failed');
 
       expect(console.error).toHaveBeenCalledWith('Auto-commit failed:', 'Git commit failed');
+    });
+
+    it('uses app token when fetchGitHubInstallationToken succeeds', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'github-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      const mockFetchToken = jest.fn().mockResolvedValue('ghs_app_token_123');
+      const mockConfigSvc = { getProjectConfig: jest.fn().mockResolvedValue({ projectId: 'test-project' }) };
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        fetchGitHubInstallationToken: mockFetchToken,
+        configService: mockConfigSvc
+      });
+
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(mockFetchToken).toHaveBeenCalledWith('test-project');
+      expect(mockExec).toHaveBeenCalledWith(
+        'git remote set-url origin https://x-access-token:ghs_app_token_123@github.com/owner/repo.git',
+        { stdio: 'pipe' }
+      );
+      expect(console.warn).not.toHaveBeenCalled();
+    });
+
+    it('falls back to GITHUB_TOKEN when fetchGitHubInstallationToken fails', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'github-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      const mockFetchToken = jest.fn().mockRejectedValue(new Error('Network error'));
+      const mockConfigSvc = { getProjectConfig: jest.fn().mockResolvedValue({ projectId: 'test-project' }) };
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        fetchGitHubInstallationToken: mockFetchToken,
+        configService: mockConfigSvc
+      });
+
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(mockFetchToken).toHaveBeenCalledWith('test-project');
+      expect(mockExec).toHaveBeenCalledWith(
+        'git remote set-url origin https://x-access-token:github-token@github.com/owner/repo.git',
+        { stdio: 'pipe' }
+      );
+      expect(console.warn).toHaveBeenCalledWith(
+        '⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).'
+      );
+    });
+
+    it('silently falls back to GITHUB_TOKEN when GitHub App not installed', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'github-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      const error = new Error('GitHub App not installed');
+      error.code = 'github_app_not_installed';
+      const mockFetchToken = jest.fn().mockRejectedValue(error);
+      const mockConfigSvc = { getProjectConfig: jest.fn().mockResolvedValue({ projectId: 'test-project' }) };
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        fetchGitHubInstallationToken: mockFetchToken,
+        configService: mockConfigSvc
+      });
+
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(mockExec).toHaveBeenCalledWith(
+        'git remote set-url origin https://x-access-token:github-token@github.com/owner/repo.git',
+        { stdio: 'pipe' }
+      );
+      expect(console.warn).not.toHaveBeenCalled();
+      expect(console.log).toHaveBeenCalledWith('Changes committed and pushed successfully.');
     });
   });
 });
