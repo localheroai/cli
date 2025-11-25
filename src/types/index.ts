@@ -27,6 +27,13 @@ export interface TranslationFile {
   keys?: string[];
 }
 
+// Translation with metadata from Sync API (includes versioning info)
+export interface TranslationWithMetadata {
+  key: string;
+  value: unknown;
+  old_values?: Array<{ key: string }>;
+}
+
 /**
  * Project configuration interface
  *
@@ -50,6 +57,9 @@ export interface ProjectConfig {
 
   /** Last time translations were synced */
   lastSyncedAt: string | null;
+
+  /** Internal: Sync trigger ID set by backend to initiate sync mode in CI */
+  'sync-trigger-id'?: string;
 
   /** Command to run after translations are updated but before commit */
   postTranslateCommand?: string;

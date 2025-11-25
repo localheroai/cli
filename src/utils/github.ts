@@ -2,7 +2,7 @@ import { execSync, ExecSyncOptions } from 'child_process';
 import { promises as fs, existsSync } from 'fs';
 import path from 'path';
 import { fetchGitHubInstallationToken } from '../api/github.js';
-import { configService } from './config.js';
+import { configService, PROJECT_CONFIG_FILE } from './config.js';
 
 /**
  * Dependencies for the GitHub service
@@ -12,6 +12,7 @@ interface GitHubDependencies {
   fs: typeof fs & { existsSync: typeof existsSync };
   path: typeof path;
   env: NodeJS.ProcessEnv;
+  console: Pick<Console, 'log' | 'warn' | 'error'>;
   fetchGitHubInstallationToken?: (projectId: string) => Promise<string>;
   configService?: {
     getProjectConfig: (basePath?: string) => Promise<any>;
@@ -24,11 +25,14 @@ const defaultDependencies: GitHubDependencies = {
   fs: { ...fs, existsSync },
   path,
   env: process.env,
+  console,
   fetchGitHubInstallationToken,
   configService
 };
 
 const workflowFileName = 'localhero-translate.yml';
+const GIT_USER_NAME = 'LocalHero Bot';
+const GIT_USER_EMAIL = 'hi@localhero.ai';
 
 export const githubService = {
   deps: { ...defaultDependencies },
@@ -106,7 +110,8 @@ jobs:
   translate:
     if: |
       !contains(github.event.pull_request.labels.*.name, 'skip-translation') &&
-      github.event.head_commit.author.username != 'LocalHero-ai-bot'
+      github.event.pull_request.draft == false &&
+      github.actor != 'localhero-ai[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -153,6 +158,170 @@ jobs:
   },
 
   /**
+   * Configure git user for commits
+   */
+  configureGitUser(): void {
+    const { exec } = this.deps;
+    exec(`git config --global user.name "${GIT_USER_NAME}"`, { stdio: 'inherit' });
+    exec(`git config --global user.email "${GIT_USER_EMAIL}"`, { stdio: 'inherit' });
+  },
+
+  /**
+   * Get the current branch name from GitHub Actions environment
+   */
+  getBranchName(): string {
+    const branchName = this.deps.env.GITHUB_HEAD_REF;
+    if (!branchName) {
+      throw new Error('Could not determine branch name from GITHUB_HEAD_REF');
+    }
+    return branchName;
+  },
+
+  /**
+   * Push changes to GitHub using the provided token
+   * @param branchName Branch to push to
+   * @param token GitHub token for authentication
+   * @param forceWithLease Use --force-with-lease for amended commits
+   */
+  pushToGitHub(branchName: string, token: string, forceWithLease: boolean = false): void {
+    const { exec, env, console: log } = this.deps;
+
+    const repository = env.GITHUB_REPOSITORY;
+    if (!repository) {
+      throw new Error('GITHUB_REPOSITORY is not set');
+    }
+
+    const remoteUrl = `https://x-access-token:${token}@github.com/${repository}.git`;
+
+    try {
+      const result = exec(`git remote set-url origin ${remoteUrl}`, { stdio: 'pipe' });
+      if (result) {
+        const maskedOutput = result.toString().replace(token, '***TOKEN***');
+        if (maskedOutput.trim()) {
+          log.log(maskedOutput);
+        }
+      }
+    } catch (error: unknown) {
+      const err = error as Error;
+      const maskedMessage = err.message.replace(token, '***TOKEN***');
+      throw new Error(maskedMessage);
+    }
+
+    const pushCmd = forceWithLease
+      ? `git push --force-with-lease origin HEAD:${branchName}`
+      : `git push origin HEAD:${branchName}`;
+    exec(pushCmd, { stdio: 'inherit' });
+  },
+
+  /**
+   * Check if there are staged changes to commit
+   */
+  hasStagedChanges(): boolean {
+    const { exec } = this.deps;
+    const status = exec('git status --porcelain').toString();
+    return status.length > 0;
+  },
+
+  /**
+   * Check if the last commit was made by LocalHero bot
+   * Used to determine if we can safely amend the commit
+   */
+  isLastCommitByLocalHero(): boolean {
+    const { exec } = this.deps;
+    try {
+      const authorEmail = exec('git log -1 --format=%ae').toString().trim();
+      return authorEmail.includes('localhero');
+    } catch {
+      return false;
+    }
+  },
+
+  /**
+   * Commit with the given message
+   * @param message Commit message
+   * @param amend Whether to amend the previous commit
+   */
+  commit(message: string, amend: boolean = false): void {
+    const { exec } = this.deps;
+    const escapedMessage = message.replace(/'/g, "'\\''");
+    const commitCmd = amend
+      ? `git commit --amend -m '${escapedMessage}'`
+      : `git commit -m '${escapedMessage}'`;
+    exec(commitCmd, { stdio: 'inherit' });
+  },
+
+  /**
+   * Get the token to use for pushing, preferring GitHub App token if available
+   */
+  async getTokenForPush(): Promise<string> {
+    const { env, console: log } = this.deps;
+
+    const { token: appToken, errorCode } = await this.fetchActionToken();
+    const finalToken = appToken || env.GITHUB_TOKEN;
+
+    if (!finalToken) {
+      throw new Error('GITHUB_TOKEN is not set');
+    }
+
+    if (appToken) {
+      log.log('✓ Using GitHub App token');
+    } else {
+      if (errorCode === 'invalid_api_key') {
+        log.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
+      } else if (errorCode !== 'github_app_not_installed') {
+        log.warn('⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).');
+      }
+    }
+
+    return finalToken;
+  },
+
+  /**
+   * Automatically commit and push sync changes when running in GitHub Actions
+   * @param modifiedFiles List of file paths that were modified
+   */
+  async autoCommitSyncChanges(modifiedFiles: string[]): Promise<void> {
+    const { exec, console: log } = this.deps;
+
+    if (!this.isGitHubAction()) return;
+
+    log.log('\nCommitting sync changes...');
+    try {
+      this.configureGitUser();
+      const branchName = this.getBranchName();
+
+      const commitMessage = 'Sync translations from LocalHero.ai';
+
+      for (const filePath of modifiedFiles) {
+        exec(`git add "${filePath}"`, { stdio: 'inherit' });
+      }
+      exec(`git add ${PROJECT_CONFIG_FILE}`, { stdio: 'inherit' });
+
+      if (!this.hasStagedChanges()) {
+        log.log('No changes to commit.');
+        return;
+      }
+
+      // Only amend if last commit was by LocalHero bot - don't amend other developers' commits
+      const canAmend = this.isLastCommitByLocalHero();
+      this.commit(commitMessage, canAmend);
+
+      const token = await this.getTokenForPush();
+      this.pushToGitHub(branchName, token, canAmend);
+
+      if (canAmend) {
+        log.log('✓ Commit amended and pushed to GitHub\n');
+      } else {
+        log.log('✓ New commit created and pushed to GitHub\n');
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error('Auto-commit failed:', errorMessage);
+      throw error;
+    }
+  },
+
+  /**
    * Automatically commit and push changes when running in GitHub Actions
    * @param filesPath Path pattern for files to commit
    * @param translationSummary Optional summary of translation results
@@ -162,25 +331,19 @@ jobs:
     languages: string[];
     viewUrl?: string;
   }): Promise<void> {
-    const { exec, env } = this.deps;
+    const { exec, console: log } = this.deps;
 
     if (!this.isGitHubAction()) return;
 
-    console.log('Running in GitHub Actions. Committing changes...');
+    log.log('Running in GitHub Actions. Committing changes...');
     try {
-      exec('git config --global user.name "LocalHero Bot"', { stdio: 'inherit' });
-      exec('git config --global user.email "hi@localhero.ai"', { stdio: 'inherit' });
-
-      const branchName = env.GITHUB_HEAD_REF;
-      if (!branchName) {
-        throw new Error('Could not determine branch name from GITHUB_HEAD_REF');
-      }
+      this.configureGitUser();
+      const branchName = this.getBranchName();
 
       exec(`git add ${filesPath}`, { stdio: 'inherit' });
 
-      const status = exec('git status --porcelain').toString();
-      if (!status) {
-        console.log('No changes to commit.');
+      if (!this.hasStagedChanges()) {
+        log.log('No changes to commit.');
         return;
       }
 
@@ -201,51 +364,15 @@ jobs:
         }
       }
 
-      exec(`git commit -m "${commitMessage}"`, { stdio: 'inherit' });
+      this.commit(commitMessage);
 
-      const { token: appToken, errorCode } = await this.fetchActionToken();
-      const finalToken = appToken || env.GITHUB_TOKEN;
+      const token = await this.getTokenForPush();
+      this.pushToGitHub(branchName, token);
 
-      if (!finalToken) {
-        throw new Error('GITHUB_TOKEN is not set');
-      }
-
-      if (appToken) {
-        console.log('✓ Using GitHub App token');
-      } else {
-        if (errorCode === 'invalid_api_key') {
-          console.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
-        } else if (errorCode !== 'github_app_not_installed') {
-          console.warn('⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).');
-        }
-      }
-
-      const repository = env.GITHUB_REPOSITORY;
-      if (!repository) {
-        throw new Error('GITHUB_REPOSITORY is not set');
-      }
-
-      const remoteUrl = `https://x-access-token:${finalToken}@github.com/${repository}.git`;
-
-      try {
-        const result = exec(`git remote set-url origin ${remoteUrl}`, { stdio: 'pipe' });
-        if (result) {
-          const maskedOutput = result.toString().replace(finalToken, '***TOKEN***');
-          if (maskedOutput.trim()) {
-            console.log(maskedOutput);
-          }
-        }
-      } catch (error: unknown) {
-        const err = error as Error;
-        const maskedMessage = err.message.replace(finalToken, '***TOKEN***');
-        throw new Error(maskedMessage);
-      }
-
-      exec(`git push origin HEAD:${branchName}`, { stdio: 'inherit' });
-      console.log('Changes committed and pushed successfully.');
+      log.log('Changes committed and pushed successfully.');
     } catch (error: unknown) {
-      const err = error as Error;
-      console.error('Auto-commit failed:', err.message);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      log.error('Auto-commit failed:', errorMessage);
       throw error;
     }
   }

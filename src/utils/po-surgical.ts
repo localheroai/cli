@@ -8,11 +8,24 @@ import { createUniqueKey, normalizeStringValue, parseUniqueKey, parsePoFile, PLU
 export function surgicalUpdatePoFile(
   originalContent: string,
   translations: Record<string, string>,
-  options?: { sourceLanguage?: string; targetLanguage?: string; sourceContent?: string }
+  options?: {
+    sourceLanguage?: string;
+    targetLanguage?: string;
+    sourceContent?: string;
+    keyMappings?: Record<string, string>; // Map of new keys to old keys (for PO versioning)
+  }
 ): string {
   // If no translations to apply, return original content unchanged
   if (Object.keys(translations).length === 0) {
     return originalContent;
+  }
+
+  // If keyMappings are provided, skip the allIdentical optimization
+  // because we need to update msgids even if values are identical
+  const hasKeyMappings = options?.keyMappings && Object.keys(options.keyMappings).length > 0;
+
+  if (hasKeyMappings) {
+    return processLineByLine(originalContent, translations, options);
   }
 
   // Quick check, if all translations match normalized content exactly,
@@ -232,6 +245,7 @@ interface CurrentEntry {
   msgctxt?: string;
   msgid?: string;
   msgid_plural?: string;
+  versionedNewMsgid?: string; // Tracks the new msgid when key versioning is applied
   currentState: State;
   multilineBuffer: string[];
   pluralIndex?: number;
@@ -244,12 +258,22 @@ interface CurrentEntry {
 function processLineByLine(
   content: string,
   translations: Record<string, string>,
-  options?: { sourceLanguage?: string; targetLanguage?: string; sourceContent?: string }
+  options?: {
+    sourceLanguage?: string;
+    targetLanguage?: string;
+    sourceContent?: string;
+    keyMappings?: Record<string, string>;
+  }
 ): string {
   const lines = content.split('\n');
   const result: string[] = [];
   const parsed = po.parse(content);
   const changesToMake = new Map<string, string>();
+  const msgidChanges = new Map<string, string>(); // Map old msgid → new msgid (for versioning)
+
+  // PO Key Versioning: When a key's source text (msgid) changes in the UI,
+  // the backend creates a new key version and provides the old msgid in old_values.
+  // We need to find the entry by the OLD msgid and update it to the NEW msgid.
   Object.entries(parsed.translations).forEach(([context, entries]) => {
     if (typeof entries === 'object' && entries !== null) {
       Object.entries(entries).forEach(([msgid, entry]: [string, any]) => {
@@ -258,8 +282,24 @@ function processLineByLine(
         const contextValue = context !== '' ? context : undefined;
         const uniqueKey = createUniqueKey(msgid, contextValue);
 
-        if (translations[uniqueKey]) {
-          const newValue = translations[uniqueKey];
+        let actualNewKey = uniqueKey;
+        let foundViaMapping = false;
+
+        if (options?.keyMappings) {
+          for (const [newKey, oldKey] of Object.entries(options.keyMappings)) {
+            if (oldKey === uniqueKey) {
+              actualNewKey = newKey;
+              foundViaMapping = true;
+
+              const { msgid: newMsgid } = parseUniqueKey(newKey);
+              msgidChanges.set(uniqueKey, newMsgid);
+              break;
+            }
+          }
+        }
+
+        if (translations[actualNewKey]) {
+          const newValue = translations[actualNewKey];
 
           // Skip updating if this is a source language entry (msgid === msgstr)
           if (newValue === msgid && options?.sourceLanguage === options?.targetLanguage) {
@@ -272,7 +312,7 @@ function processLineByLine(
             : normalizeStringValue(entry.msgstr);
           const normalizedNewValue = normalizeStringValue(newValue);
 
-          if (currentValue !== normalizedNewValue) {
+          if (currentValue !== normalizedNewValue || foundViaMapping) {
             changesToMake.set(uniqueKey, newValue);
           }
         }
@@ -282,15 +322,17 @@ function processLineByLine(
 
           // Check for plural forms for this specific key
           for (let i = 1; i < actualPluralCount; i++) {
-            const pluralKey = uniqueKey + `${PLURAL_PREFIX}${i}`;
+            const oldPluralKey = uniqueKey + `${PLURAL_PREFIX}${i}`;
+            const newPluralKey = actualNewKey + `${PLURAL_PREFIX}${i}`;
+            const translationKey = translations[newPluralKey] ? newPluralKey : oldPluralKey;
 
-            if (translations[pluralKey]) {
+            if (translations[translationKey]) {
               const currentPluralValue = normalizeStringValue(entry.msgstr[i] || '');
-              const newPluralValue = translations[pluralKey];
+              const newPluralValue = translations[translationKey];
               const normalizedNewPluralValue = normalizeStringValue(newPluralValue);
 
-              if (currentPluralValue !== normalizedNewPluralValue) {
-                changesToMake.set(pluralKey, newPluralValue);
+              if (currentPluralValue !== normalizedNewPluralValue || foundViaMapping) {
+                changesToMake.set(oldPluralKey, newPluralValue);
               }
             }
           }
@@ -389,10 +431,23 @@ function processLineByLine(
       currentEntry.msgid = unescapePoString(value);
       currentEntry.currentState = State.IN_MSGID;
 
-      // Add all lines for this msgid
-      for (let j = i; j < nextIndex; j++) {
-        result.push(lines[j]);
+      const uniqueKey = createUniqueKey(currentEntry.msgid, currentEntry.msgctxt);
+      const newMsgid = msgidChanges.get(uniqueKey);
+
+      if (newMsgid) {
+        currentEntry.versionedNewMsgid = newMsgid;
       }
+
+      // Add all lines for this msgid (possibly with updated msgid)
+      for (let j = i; j < nextIndex; j++) {
+        if (newMsgid && j === i) {
+          result.push(`msgid "${escapePoString(newMsgid)}"`);
+        } else if (newMsgid && j > i) {
+        } else {
+          result.push(lines[j]);
+        }
+      }
+
       i = nextIndex;
       continue;
     }
@@ -403,9 +458,26 @@ function processLineByLine(
       currentEntry.msgid_plural = unescapePoString(value);
       currentEntry.currentState = State.IN_MSGID_PLURAL;
 
-      // Add all lines for this msgid_plural
+      // Only update msgid_plural when versioning is active (versionedNewMsgid was set)
+      // The __plural_1 translation value becomes the new msgid_plural text
+      let newMsgidPlural: string | undefined;
+      if (currentEntry.versionedNewMsgid) {
+        const uniqueKey = createUniqueKey(currentEntry.versionedNewMsgid, currentEntry.msgctxt);
+        const pluralKey = uniqueKey + '__plural_1';
+        if (translations[pluralKey]) {
+          newMsgidPlural = translations[pluralKey];
+        }
+      }
+
+      // Add all lines for this msgid_plural (possibly with updated value)
       for (let j = i; j < nextIndex; j++) {
-        result.push(lines[j]);
+        if (newMsgidPlural && j === i) {
+          result.push(`msgid_plural "${escapePoString(newMsgidPlural)}"`);
+        } else if (newMsgidPlural && j > i) {
+          // Skip continuation lines - we replaced with single-line msgid_plural
+        } else {
+          result.push(lines[j]);
+        }
       }
       i = nextIndex;
       continue;
@@ -720,14 +792,29 @@ function detectMsgstrFormat(lines: string[], startIndex: number): MsgstrFormat {
 
   let i = startIndex;
   const msgstrLines: string[] = [];
+  let isFirstLine = true;
 
   while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Stop if we hit the next entry or empty line
-    if (trimmed === '' || (!trimmed.startsWith('"') && !trimmed.startsWith('msgstr'))) {
+    // Stop if we hit an empty line
+    if (trimmed === '') {
       break;
+    }
+
+    // For the first line, it must be a msgstr line
+    if (isFirstLine) {
+      if (!trimmed.startsWith('msgstr')) {
+        break;
+      }
+      isFirstLine = false;
+    } else {
+      // For subsequent lines, only continuation lines (starting with ") are part of this entry
+      // Stop if we hit another msgstr, msgid, msgctxt, or comment
+      if (!trimmed.startsWith('"')) {
+        break;
+      }
     }
 
     msgstrLines.push(line);

@@ -27,7 +27,7 @@ export interface ConfigService {
 }
 
 const AUTH_CONFIG_FILE = '.localhero_key';
-const PROJECT_CONFIG_FILE = 'localhero.json';
+export const PROJECT_CONFIG_FILE = 'localhero.json';
 const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   schemaVersion: '1.0',
   projectId: '',
@@ -126,9 +126,14 @@ export const configService: ConfigService = {
   async saveProjectConfig(config: Partial<ProjectConfig>, basePath?: string): Promise<void> {
     const { fs } = this.deps;
     const configPath = this.configFilePath(basePath);
+
+    // Remove sync-trigger-id - it's internal state managed by backend, never written by CLI
+    const configCopy = { ...config } as Record<string, unknown>;
+    delete configCopy['sync-trigger-id'];
+
     const configWithSchema = {
       ...DEFAULT_PROJECT_CONFIG,
-      ...config,
+      ...configCopy,
       schemaVersion: DEFAULT_PROJECT_CONFIG.schemaVersion
     };
     await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2));

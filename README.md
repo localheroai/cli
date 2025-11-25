@@ -97,29 +97,31 @@ You can customize the base branch in your `localhero.json`:
 npx @localheroai/cli ci
 ```
 
-A specialized command for running translations in CI/CD environments (GitHub Actions etc.). This command automatically detects the context (PR vs main branch) and optimizes translation behavior accordingly:
+A specialized command for running in CI/CD environments (GitHub Actions etc.). This command automatically detects the operation mode and context:
 
+#### Mode Detection
+
+**Sync Mode** (when `sync-trigger-id` is present in `localhero.json`):
+- Fetches translations from LocalHero.ai Sync API
+- Updates local translation files with new/modified translations
+- Handles PO key versioning when source text changes
+- Removes `sync-trigger-id` after successful sync
+- Commits changes with sync summary
+
+**Translate Mode** (default):
 - **On main/master branch**: Translates all missing keys
 - **On feature branch PRs**: Only translates changed keys (using `--changed-only` mode)
-- **Always commits changes** when running in CI/CD
+- Auto-commits changes when running in CI/CD
+
+Both modes automatically commit changes to your repository when running in GitHub Actions.
 
 #### Options
 
-**`--verbose`**: Show detailed progress and context detection information.
+**`--verbose`**: Show detailed progress, mode detection, and context information.
 
 ```bash
 npx @localheroai/cli ci --verbose
 ```
-
-#### Environment Variables
-
-The command uses these environment variables for auto-detection:
-
-- `GITHUB_ACTIONS`: Confirms running in GitHub Actions (set to `"true"`)
-- `GITHUB_BASE_REF`: Used to detect PR context and base branch (main/master)
-- `GITHUB_TOKEN`: Used for auto-committing changes
-- `LOCALHERO_API_KEY`: Your API key (from repository secrets)
-
 
 ### Pull / push
 

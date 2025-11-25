@@ -4,7 +4,7 @@ import { updateYamlFile, deleteKeysFromYamlFile } from './yaml-handler.js';
 import { updateJsonFile, deleteKeysFromJsonFile } from './json-handler.js';
 import { updatePoFile, deleteKeysFromPoFile } from './po-handler.js';
 import { isDjangoWorkflow, getDjangoSourcePath } from '../translation-utils.js';
-import type { ProjectConfig } from '../../types/index.js';
+import type { ProjectConfig, TranslationWithMetadata } from '../../types/index.js';
 
 /**
  * Result of updating a translation file
@@ -18,14 +18,14 @@ interface UpdateResult {
  * Updates a translation file with new translations
  *
  * @param filePath Path to the file to update
- * @param translations Dictionary of translations to add/update
+ * @param translations Dictionary of translations to add/update, or array of SyncTranslation objects
  * @param languageCode The language code (default: 'en')
  * @param sourceFilePath Optional path to source file (needed for new files)
  * @returns Information about the update operation
  */
 export async function updateTranslationFile(
   filePath: string,
-  translations: Record<string, unknown>,
+  translations: Record<string, unknown> | TranslationWithMetadata[],
   languageCode?: string,
   sourceFilePath?: string | null,
   sourceLanguage?: string,
@@ -46,7 +46,7 @@ export async function updateTranslationFile(
 
 async function _updateTranslationFile(
   filePath: string,
-  translations: Record<string, unknown>,
+  translations: Record<string, unknown> | TranslationWithMetadata[],
   languageCode: string = 'en',
   sourceFilePath: string | null = null,
   sourceLanguage?: string,
@@ -56,10 +56,17 @@ async function _updateTranslationFile(
 
   await ensureDirectoryExists(filePath);
 
-  // Filter out any null values
-  const filteredTranslations = Object.fromEntries(
-    Object.entries(translations).filter(([_, value]) => value !== null)
-  );
+  let filteredTranslations: Record<string, unknown>;
+  if (Array.isArray(translations)) {
+    filteredTranslations = Object.fromEntries(
+      translations.map(t => [t.key, t.value]).filter(([_, value]) => value !== null)
+    );
+  } else {
+    // Filter out any null values
+    filteredTranslations = Object.fromEntries(
+      Object.entries(translations).filter(([_, value]) => value !== null)
+    );
+  }
 
   if (fileExt === 'json') {
     const jsonResult = await updateJsonFile(filePath, filteredTranslations, languageCode, sourceFilePath);

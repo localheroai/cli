@@ -2,25 +2,47 @@ import { readFile, writeFile } from 'fs/promises';
 import { fileExists } from './common.js';
 import { parseUniqueKey, parsePoFile, createPoFile } from '../po-utils.js';
 import { surgicalUpdatePoFile } from '../po-surgical.js';
+import type { TranslationWithMetadata } from '../../types/index.js';
 
 /**
  * Updates a .po file with new translations
  */
 export async function updatePoFile(
   filePath: string,
-  translations: Record<string, unknown>,
+  translations: Record<string, unknown> | TranslationWithMetadata[],
   languageCode: string = 'en',
   sourceFilePath: string | null = null,
   sourceLanguage?: string
 ): Promise<{ created: boolean; updatedKeys: string[] }> {
   let created = false;
   const fileAlreadyExists = await fileExists(filePath);
-  const stringTranslations = Object.fromEntries(
-    Object.entries(translations).map(([key, value]) => [
-      key,
-      typeof value === 'string' ? value : String(value)
-    ])
-  );
+
+  // Build keyMappings for PO versioning (new key → old key)
+  const keyMappings: Record<string, string> = {};
+  let stringTranslations: Record<string, string>;
+
+  if (Array.isArray(translations)) {
+    // Sync mode: array of SyncTranslation objects with metadata
+    stringTranslations = {};
+    for (const item of translations) {
+      const value = typeof item.value === 'string' ? item.value : String(item.value);
+      stringTranslations[item.key] = value;
+
+      // If this translation has old_values, map new key to old key
+      if (item.old_values && item.old_values.length > 0) {
+        const oldKey = item.old_values[0].key;
+        keyMappings[item.key] = oldKey;
+      }
+    }
+  } else {
+    // Regular mode: Record<string, unknown>
+    stringTranslations = Object.fromEntries(
+      Object.entries(translations).map(([key, value]) => [
+        key,
+        typeof value === 'string' ? value : String(value)
+      ])
+    );
+  }
 
   let updatedKeys: string[] = [];
 
@@ -36,7 +58,8 @@ export async function updatePoFile(
     const updatedContent = surgicalUpdatePoFile(originalContent, stringTranslations, {
       sourceLanguage,
       targetLanguage: languageCode,
-      sourceContent
+      sourceContent,
+      keyMappings: Object.keys(keyMappings).length > 0 ? keyMappings : undefined
     });
 
     // Check if content actually changed
@@ -57,7 +80,8 @@ export async function updatePoFile(
       const updatedContent = surgicalUpdatePoFile(sourceContent, stringTranslations, {
         sourceLanguage,
         targetLanguage: languageCode,
-        sourceContent
+        sourceContent,
+        keyMappings: Object.keys(keyMappings).length > 0 ? keyMappings : undefined
       });
 
       await writeFile(filePath, updatedContent, 'utf-8');

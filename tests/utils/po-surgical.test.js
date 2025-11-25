@@ -904,4 +904,215 @@ msgstr[1] "messages"
       expect(result).toContain('msgstr[2] "wiadomości"');
     });
   });
+
+  describe('PO Key Versioning Support', () => {
+    test('should update msgid when keyMappings provided (simple case)', () => {
+      const original = `# Test file
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Old source text"
+msgstr "Old source text"
+
+msgid "Another key"
+msgstr "Another translation"
+`;
+
+      const translations = {
+        'New source text': 'New source text'
+      };
+
+      const keyMappings = {
+        'New source text': 'Old source text'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "New source text"');
+      expect(result).not.toContain('msgid "Old source text"');
+      expect(result).toContain('msgstr "New source text"');
+      expect(result).toContain('msgid "Another key"');
+      expect(result).toContain('msgstr "Another translation"');
+    });
+
+    test('should update msgid with context when keyMappings provided', () => {
+      const original = `# Test file with context
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgctxt "button"
+msgid "Save"
+msgstr "Save"
+`;
+
+      const translations = {
+        'button|Submit': 'Submit'
+      };
+
+      const keyMappings = {
+        'button|Submit': 'button|Save'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgctxt "button"');
+      expect(result).toContain('msgid "Submit"');
+      expect(result).not.toContain('msgid "Save"');
+      expect(result).toContain('msgstr "Submit"');
+    });
+
+    test('should handle plural forms with versioning', () => {
+      const original = `# Plural versioning test
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Language: sv\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "källa"
+msgid_plural "källor"
+msgstr[0] "källa"
+msgstr[1] "källor"
+`;
+
+      const translations = {
+        'fråga': 'fråga',
+        'fråga__plural_1': 'frågor'
+      };
+
+      const keyMappings = {
+        'fråga': 'källa',
+        'fråga__plural_1': 'källa__plural_1'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "fråga"');
+      expect(result).not.toContain('msgid "källa"');
+      expect(result).toContain('msgid_plural "frågor"');
+      expect(result).not.toContain('msgid_plural "källor"');
+      expect(result).toContain('msgstr[0] "fråga"');
+      expect(result).toContain('msgstr[1] "frågor"');
+    });
+
+    test('should update msgstr when both key and value change', () => {
+      const original = `# Version change with translation update
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Redigera objekt"
+msgstr "Edit item"
+`;
+
+      const translations = {
+        'Ändra objekt': 'Modify item'
+      };
+
+      const keyMappings = {
+        'Ändra objekt': 'Redigera objekt'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "Ändra objekt"');
+      expect(result).not.toContain('msgid "Redigera objekt"');
+      expect(result).toContain('msgstr "Modify item"');
+      expect(result).not.toContain('msgstr "Edit item"');
+    });
+
+    test('should preserve comments and formatting during versioning', () => {
+      const original = `# Test file with comments
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#: app/views/items/show.html.erb:15
+#: app/controllers/items_controller.rb:42
+msgid "Delete item"
+msgstr "Delete item"
+`;
+
+      const translations = {
+        'Remove item': 'Remove item'
+      };
+
+      const keyMappings = {
+        'Remove item': 'Delete item'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('#: app/views/items/show.html.erb:15');
+      expect(result).toContain('#: app/controllers/items_controller.rb:42');
+      expect(result).toContain('msgid "Remove item"');
+      expect(result).toContain('msgstr "Remove item"');
+    });
+
+    test('should fallback to normal update if old key not found', () => {
+      const original = `# Test fallback behavior
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Existing key"
+msgstr "Existing translation"
+`;
+
+      const translations = {
+        'New key': 'New translation'
+      };
+
+      const keyMappings = {
+        'New key': 'Non-existent old key'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "New key"');
+      expect(result).toContain('msgstr "New translation"');
+      expect(result).toContain('msgid "Existing key"');
+      expect(result).toContain('msgstr "Existing translation"');
+    });
+
+    test('should handle multiple versioned keys in single update', () => {
+      const original = `# Multiple versioned keys
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Create"
+msgstr "Create"
+
+msgid "Update"
+msgstr "Update"
+
+msgid "Delete"
+msgstr "Delete"
+`;
+
+      const translations = {
+        'Add': 'Add',
+        'Edit': 'Edit',
+        'Remove': 'Remove'
+      };
+
+      const keyMappings = {
+        'Add': 'Create',
+        'Edit': 'Update',
+        'Remove': 'Delete'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "Add"');
+      expect(result).toContain('msgid "Edit"');
+      expect(result).toContain('msgid "Remove"');
+      expect(result).not.toContain('msgid "Create"');
+      expect(result).not.toContain('msgid "Update"');
+      expect(result).not.toContain('msgid "Delete"');
+    });
+  });
 });
