@@ -35,22 +35,14 @@ const defaultDeps: CiDependencies = {
 };
 
 /**
- * Detects if running in a PR context (feature branch)
+ * Detects if running in a PR context
  * @param env Environment variables
  * @returns true if in PR context (should use --changed-only), false otherwise
  */
 function detectPRContext(env: NodeJS.ProcessEnv): boolean {
-  const baseRef = env.GITHUB_BASE_REF;
-
-  if (!baseRef) {
-    return false;
-  }
-
-  if (baseRef === 'main' || baseRef === 'master') {
-    return false;
-  }
-
-  return true;
+  // GITHUB_BASE_REF is only set in pull_request events
+  // If set, we're in a PR and should use --changed-only
+  return !!env.GITHUB_BASE_REF;
 }
 
 /**
@@ -157,20 +149,20 @@ async function runSyncMode(
     modifiedFiles.push(file.path);
   }
 
-  // Remove sync-trigger-id by re-saving config (saveProjectConfig strips it automatically)
+  // Remove syncTriggerId by re-saving config (saveProjectConfig strips it automatically)
   await configUtils.saveProjectConfig(config);
 
   console.log(chalk.green(`\n✓ Synced ${translationsUpdated} translations across ${filesUpdated} files`));
 
   if (githubUtils.isGitHubAction()) {
-    githubUtils.autoCommitSyncChanges(modifiedFiles);
+    await githubUtils.autoCommitSyncChanges(modifiedFiles);
   }
 }
 
 /**
  * CI command - runs translations optimized for CI/CD environments
  * Auto-detects PR vs main branch context and adjusts behavior accordingly
- * Also detects and handles sync mode when sync-trigger-id is present
+ * Also detects and handles sync mode when syncTriggerId is present
  */
 export async function ci(
   options: CiOptions = {},
@@ -194,8 +186,7 @@ export async function ci(
     process.exit(1);
   }
 
-  // Detect mode based on sync-trigger-id
-  const syncTriggerId = config['sync-trigger-id'];
+  const syncTriggerId = config.syncTriggerId;
 
   if (syncTriggerId) {
     if (options.verbose) {

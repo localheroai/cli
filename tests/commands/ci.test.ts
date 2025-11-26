@@ -43,8 +43,8 @@ describe('ci command', () => {
   });
 
   describe('PR context detection', () => {
-    it('should use --changed-only for feature branch PRs', async () => {
-      mockEnv.GITHUB_BASE_REF = 'feature-branch';
+    it('should use --changed-only when in a PR context', async () => {
+      mockEnv.GITHUB_BASE_REF = 'main';
 
       await ci({ verbose: false }, {
         console: mockConsole,
@@ -63,47 +63,7 @@ describe('ci command', () => {
       );
     });
 
-    it('should use full translation for main branch', async () => {
-      mockEnv.GITHUB_BASE_REF = 'main';
-
-      await ci({ verbose: false }, {
-        console: mockConsole,
-        configUtils: mockConfigUtils,
-        authUtils: mockAuthUtils,
-        githubUtils: mockGithubUtils,
-        env: mockEnv,
-        translateCommand: mockTranslateCommand
-      });
-
-      expect(mockTranslateCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          changedOnly: false,
-          verbose: false
-        })
-      );
-    });
-
-    it('should use full translation for master branch', async () => {
-      mockEnv.GITHUB_BASE_REF = 'master';
-
-      await ci({ verbose: false }, {
-        console: mockConsole,
-        configUtils: mockConfigUtils,
-        authUtils: mockAuthUtils,
-        githubUtils: mockGithubUtils,
-        env: mockEnv,
-        translateCommand: mockTranslateCommand
-      });
-
-      expect(mockTranslateCommand).toHaveBeenCalledWith(
-        expect.objectContaining({
-          changedOnly: false,
-          verbose: false
-        })
-      );
-    });
-
-    it('should use full translation when GITHUB_BASE_REF is not set', async () => {
+    it('should use full translation when not in a PR context', async () => {
       await ci({ verbose: false }, {
         console: mockConsole,
         configUtils: mockConfigUtils,
