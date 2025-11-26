@@ -77,7 +77,8 @@ async function _updateTranslationFile(
   }
 
   if (fileExt === 'po' || fileExt === 'pot') {
-    const poResult = await updatePoFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);
+    // Preserve old_values metadata for key versioning
+    const poResult = await updatePoFile(filePath, translations, languageCode, sourceFilePath, sourceLanguage);
 
     if (config && isDjangoWorkflow(config) && Object.keys(filteredTranslations).length > 0) {
       await updateDjangoSourcesFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);

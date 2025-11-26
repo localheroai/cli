@@ -314,6 +314,10 @@ function processLineByLine(
 
           if (currentValue !== normalizedNewValue || foundViaMapping) {
             changesToMake.set(uniqueKey, newValue);
+            // Also track the new key so addNewEntries doesn't add it as a duplicate
+            if (foundViaMapping && actualNewKey !== uniqueKey) {
+              changesToMake.set(actualNewKey, newValue);
+            }
           }
         }
 
@@ -333,6 +337,10 @@ function processLineByLine(
 
               if (currentPluralValue !== normalizedNewPluralValue || foundViaMapping) {
                 changesToMake.set(oldPluralKey, newPluralValue);
+                // Also track the new plural key so addNewEntries doesn't add it as a duplicate
+                if (foundViaMapping && newPluralKey !== oldPluralKey) {
+                  changesToMake.set(newPluralKey, newPluralValue);
+                }
               }
             }
           }
@@ -689,6 +697,8 @@ function addNewEntries(
 function createNewEntry(msgid: string, msgstr: string, context?: string): string[] {
   const result: string[] = [];
 
+  result.push('');
+
   if (context) {
     result.push(`msgctxt "${escapePoString(context)}"`);
   }
@@ -710,6 +720,8 @@ function createNewPluralEntry(
   nplurals: number = 2
 ): string[] {
   const result: string[] = [];
+
+  result.push('');
 
   if (context) {
     result.push(`msgctxt "${escapePoString(context)}"`);
