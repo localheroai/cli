@@ -127,9 +127,14 @@ export const configService: ConfigService = {
     const { fs } = this.deps;
     const configPath = this.configFilePath(basePath);
 
-    // Remove sync-trigger-id - it's internal state managed by backend, never written by CLI
+    // Internal state managed by backend, never written by CLI
     const configCopy = { ...config } as Record<string, unknown>;
-    delete configCopy['sync-trigger-id'];
+    delete configCopy['syncTriggerId'];
+
+    // Remove default django config
+    if (configCopy['django'] && JSON.stringify(configCopy['django']) === JSON.stringify(DEFAULT_DJANGO_CONFIG)) {
+      delete configCopy['django'];
+    }
 
     const configWithSchema = {
       ...DEFAULT_PROJECT_CONFIG,

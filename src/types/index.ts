@@ -59,7 +59,7 @@ export interface ProjectConfig {
   lastSyncedAt: string | null;
 
   /** Internal: Sync trigger ID set by backend to initiate sync mode in CI */
-  'sync-trigger-id'?: string;
+  syncTriggerId?: string;
 
   /** Command to run after translations are updated but before commit */
   postTranslateCommand?: string;
