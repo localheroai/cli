@@ -20,20 +20,21 @@ describe('github module', () => {
     };
     mockEnv = {};
 
-    // Reset the service with our mocks
-    githubService.setDependencies({
-      exec: mockExec,
-      fs: mockFs,
-      path: mockPath,
-      env: mockEnv
-    });
-
     // Mock console methods
     originalConsole = { ...console };
     console.log = jest.fn();
     console.warn = jest.fn();
     console.error = jest.fn();
     console.info = jest.fn();
+
+    // Reset the service with our mocks (including console for autoCommit methods)
+    githubService.setDependencies({
+      exec: mockExec,
+      fs: mockFs,
+      path: mockPath,
+      env: mockEnv,
+      console: { log: console.log, warn: console.warn, error: console.error }
+    });
   });
 
   afterEach(() => {
@@ -61,13 +62,12 @@ describe('github module', () => {
       expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
-      expect(fileContent).toContain("github.event.head_commit.author.username != 'LocalHero-ai-bot'");
+      expect(fileContent).toContain("github.actor != 'localhero-ai[bot]'");
 
       expect(fileContent).toContain('fetch-depth: 0');
       expect(fileContent).toContain('git fetch --no-tags origin');
       expect(fileContent).toContain('GITHUB_BASE_REF:');
-      expect(fileContent).toContain('if [[ "${{ github.base_ref }}" == "main" || "${{ github.base_ref }}" == "master" ]]; then');
-      expect(fileContent).toContain('npx -y @localheroai/cli translate --changed-only');
+      expect(fileContent).toContain('npx -y @localheroai/cli ci');
 
       // Verify return value is the workflow file path
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');
@@ -134,6 +134,7 @@ describe('github module', () => {
         fs: mockFs,
         path: mockPath,
         env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error },
         fetchGitHubInstallationToken: mockFetchGitHubInstallationToken,
         configService: mockConfigService
       });
@@ -217,7 +218,7 @@ describe('github module', () => {
       expect(mockExec).toHaveBeenCalledWith('git config --global user.email "hi@localhero.ai"', { stdio: "inherit" });
       expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: "inherit" });
       expect(mockExec).toHaveBeenCalledWith('git status --porcelain');
-      expect(mockExec).toHaveBeenCalledWith('git commit -m "Update translations"', { stdio: "inherit" });
+      expect(mockExec).toHaveBeenCalledWith("git commit -m 'Update translations'", { stdio: "inherit" });
       expect(mockExec).toHaveBeenCalledWith('git remote set-url origin https://x-access-token:fake-token@github.com/owner/repo.git', { stdio: "pipe" });
       expect(mockExec).toHaveBeenCalledWith('git push origin HEAD:feature-branch', { stdio: "inherit" });
 
@@ -248,7 +249,7 @@ describe('github module', () => {
       await autoCommitChanges('locales/**/*.json', translationSummary);
 
       const expectedMessage = 'Update translations\n\nTranslated 15 keys in German, French, Spanish\nView results at https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
-      expect(mockExec).toHaveBeenCalledWith(`git commit -m "${expectedMessage}"`, { stdio: "inherit" });
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: "inherit" });
     });
 
     it('does not commit when there are no changes', async () => {
@@ -269,7 +270,7 @@ describe('github module', () => {
       // Verify git commands were executed but not commit or push
       expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: "inherit" });
       expect(mockExec).toHaveBeenCalledWith('git status --porcelain');
-      expect(mockExec).not.toHaveBeenCalledWith('git commit -m "Update translations"', { stdio: "inherit" });
+      expect(mockExec).not.toHaveBeenCalledWith("git commit -m 'Update translations'", { stdio: "inherit" });
       expect(mockExec).not.toHaveBeenCalledWith(expect.stringContaining('git push'), expect.anything());
 
       // Verify log messages
@@ -328,7 +329,7 @@ describe('github module', () => {
 
       // Mock git command to throw error
       mockExec.mockImplementation((cmd) => {
-        if (cmd === 'git commit -m "Update translations"') {
+        if (cmd === "git commit -m 'Update translations'") {
           throw new Error('Git commit failed');
         }
         if (cmd === 'git status --porcelain') {
@@ -356,6 +357,7 @@ describe('github module', () => {
         fs: mockFs,
         path: mockPath,
         env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error },
         fetchGitHubInstallationToken: mockFetchToken,
         configService: mockConfigSvc
       });
@@ -392,6 +394,7 @@ describe('github module', () => {
         fs: mockFs,
         path: mockPath,
         env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error },
         fetchGitHubInstallationToken: mockFetchToken,
         configService: mockConfigSvc
       });
@@ -431,6 +434,7 @@ describe('github module', () => {
         fs: mockFs,
         path: mockPath,
         env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error },
         fetchGitHubInstallationToken: mockFetchToken,
         configService: mockConfigSvc
       });

@@ -116,4 +116,108 @@ msgstr "Old translation"
       await expect(deleteKeysFromPoFile(nonExistentPath, ['hello'])).resolves.toBeUndefined();
     });
   });
+
+  describe('SyncTranslation array support', () => {
+    it('should accept array of translations with metadata', async () => {
+      const targetFilePath = path.join(tempDir, 'array-test.po');
+      const existingContent = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hello"
+msgstr "Hello"
+`;
+      await fs.writeFile(targetFilePath, existingContent);
+
+      const translations = [
+        { key: 'Hello', value: 'Hej' },
+        { key: 'Goodbye', value: 'Hej då' }
+      ];
+
+      const result = await updatePoFile(targetFilePath, translations, 'sv');
+
+      expect(result.created).toBe(false);
+      expect(result.updatedKeys).toContain('Hello');
+      expect(result.updatedKeys).toContain('Goodbye');
+
+      const updatedContent = await fs.readFile(targetFilePath, 'utf-8');
+      expect(updatedContent).toContain('msgstr "Hej"');
+      expect(updatedContent).toContain('msgstr "Hej då"');
+    });
+
+    it('should handle old_values for PO key versioning', async () => {
+      const targetFilePath = path.join(tempDir, 'versioning-test.po');
+      const existingContent = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Redigera objekt"
+msgstr "Edit item"
+`;
+      await fs.writeFile(targetFilePath, existingContent);
+
+      const translations = [
+        {
+          key: 'Ändra objekt',
+          value: 'Modify item',
+          old_values: [{ key: 'Redigera objekt' }]
+        }
+      ];
+
+      const result = await updatePoFile(targetFilePath, translations, 'en');
+
+      expect(result.created).toBe(false);
+
+      const updatedContent = await fs.readFile(targetFilePath, 'utf-8');
+
+      expect(updatedContent).toContain('msgid "Ändra objekt"');
+      expect(updatedContent).not.toContain('msgid "Redigera objekt"');
+      expect(updatedContent).toContain('msgstr "Modify item"');
+    });
+
+    it('should handle mixed array (with and without old_values)', async () => {
+      const targetFilePath = path.join(tempDir, 'mixed-test.po');
+      const existingContent = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Old key"
+msgstr "Old value"
+
+msgid "Regular key"
+msgstr "Regular value"
+`;
+      await fs.writeFile(targetFilePath, existingContent);
+
+      const translations = [
+        {
+          key: 'New key',
+          value: 'New value',
+          old_values: [{ key: 'Old key' }]
+        },
+        {
+          key: 'Regular key',
+          value: 'Updated regular value'
+        },
+        {
+          key: 'Brand new key',
+          value: 'Brand new value'
+        }
+      ];
+
+      const result = await updatePoFile(targetFilePath, translations, 'en');
+
+      expect(result.created).toBe(false);
+
+      const updatedContent = await fs.readFile(targetFilePath, 'utf-8');
+
+      expect(updatedContent).toContain('msgid "New key"');
+      expect(updatedContent).not.toContain('msgid "Old key"');
+      expect(updatedContent).toContain('msgstr "New value"');
+      expect(updatedContent).toContain('msgid "Regular key"');
+      expect(updatedContent).toContain('msgstr "Updated regular value"');
+      expect(updatedContent).toContain('msgid "Brand new key"');
+      expect(updatedContent).toContain('msgstr "Brand new value"');
+    });
+  });
 });

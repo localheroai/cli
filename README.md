@@ -78,7 +78,7 @@ Translating your missing keys:
 npx @localheroai/cli translate --changed-only
 ```
 
-The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them. 
+The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them.
 
 You can customize the base branch in your `localhero.json`:
 
@@ -91,6 +91,34 @@ You can customize the base branch in your `localhero.json`:
 }
 ```
 
+### CI
+
+```bash
+npx @localheroai/cli ci
+```
+
+A specialized command for running in CI/CD environments (GitHub Actions etc.). This command automatically detects the operation mode and context:
+
+#### Mode Detection
+
+**Sync Mode** (when `syncTriggerId` is present in `localhero.json`):
+- Fetches translations from LocalHero.ai export API
+- Updates local translation files with new/modified translations
+- Removes `syncTriggerId` after successful sync
+
+**Translate Mode** (default):
+- **On feature branches**: Only translates changed keys (using `--changed-only` mode)
+- **On main/master**: Translates all missing keys
+
+Both modes automatically commit changes to your repository when running in GitHub Actions.
+
+#### Options
+
+**`--verbose`**: Show detailed progress, mode detection, and context information.
+
+```bash
+npx @localheroai/cli ci --verbose
+```
 
 ### Pull / push
 
