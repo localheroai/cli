@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.25] - 2025-11-27
+
+### Added
+- New `ci` command for CI/CD environments with intelligent translation modes
+  - Sync mode: fetches translations from Localhero.ai sync API when `syncTriggerId` is configured
+  - Translate mode with auto-detection: feature branches use `--changed-only`, main/master uses full translation
+  - Automatic commit and push of translation changes in GitHub Actions
+
+### Fixed
+- Improved branch detection in GitHub Actions using GITHUB_HEAD_REF and GITHUB_REF_NAME
+- Config file no longer persists default Django settings unnecessarily
+
 ## [0.0.23] - 2025-11-20
 
 ### Added
