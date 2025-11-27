@@ -35,14 +35,18 @@ const defaultDeps: CiDependencies = {
 };
 
 /**
- * Detects if running in a PR context
+ * Gets the current branch and determines translation mode
  * @param env Environment variables
- * @returns true if in PR context (should use --changed-only), false otherwise
+ * @returns branch name and whether to use --changed-only mode
  */
-function detectPRContext(env: NodeJS.ProcessEnv): boolean {
-  // GITHUB_BASE_REF is only set in pull_request events
-  // If set, we're in a PR and should use --changed-only
-  return !!env.GITHUB_BASE_REF;
+function getBranchContext(env: NodeJS.ProcessEnv): { branch: string; useChangedOnly: boolean } {
+  // GITHUB_HEAD_REF: source branch of a PR (empty for push/workflow_dispatch)
+  // GITHUB_REF_NAME: branch/tag that triggered the workflow
+  // See: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
+  const branch = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || 'unknown';
+  const useChangedOnly = branch !== 'main' && branch !== 'master';
+
+  return { branch, useChangedOnly };
 }
 
 /**
@@ -54,20 +58,19 @@ async function runTranslateMode(
 ): Promise<void> {
   const { verbose } = options;
   const { console, env, translateCommand } = deps;
-  const shouldUseChangedOnly = detectPRContext(env);
+  const { branch, useChangedOnly } = getBranchContext(env);
 
   if (verbose) {
-    const baseRef = env.GITHUB_BASE_REF || 'unknown';
-    if (shouldUseChangedOnly) {
-      console.log(chalk.blue(`ℹ Auto-detected PR context (base: ${baseRef}) - using --changed-only`));
+    if (useChangedOnly) {
+      console.log(chalk.blue(`ℹ On branch '${branch}' - using --changed-only`));
     } else {
-      console.log(chalk.blue(`ℹ Auto-detected main branch context (base: ${baseRef}) - using full translation`));
+      console.log(chalk.blue(`ℹ On branch '${branch}' - using full translation`));
     }
   }
 
   const translateOptions: TranslationOptions = {
     ...options,
-    changedOnly: shouldUseChangedOnly,
+    changedOnly: useChangedOnly,
   };
 
   await translateCommand(translateOptions);

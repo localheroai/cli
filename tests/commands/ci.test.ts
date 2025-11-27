@@ -42,9 +42,9 @@ describe('ci command', () => {
     };
   });
 
-  describe('PR context detection', () => {
-    it('should use --changed-only when in a PR context', async () => {
-      mockEnv.GITHUB_BASE_REF = 'main';
+  describe('branch-based mode detection', () => {
+    it('should use --changed-only on feature branch (via GITHUB_HEAD_REF in PR)', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature/new-feature';
 
       await ci({ verbose: false }, {
         console: mockConsole,
@@ -57,13 +57,14 @@ describe('ci command', () => {
 
       expect(mockTranslateCommand).toHaveBeenCalledWith(
         expect.objectContaining({
-          changedOnly: true,
-          verbose: false
+          changedOnly: true
         })
       );
     });
 
-    it('should use full translation when not in a PR context', async () => {
+    it('should use --changed-only on feature branch (via GITHUB_REF_NAME on push)', async () => {
+      mockEnv.GITHUB_REF_NAME = 'develop';
+
       await ci({ verbose: false }, {
         console: mockConsole,
         configUtils: mockConfigUtils,
@@ -75,8 +76,65 @@ describe('ci command', () => {
 
       expect(mockTranslateCommand).toHaveBeenCalledWith(
         expect.objectContaining({
-          changedOnly: false,
-          verbose: false
+          changedOnly: true
+        })
+      );
+    });
+
+    it('should use full translation on main branch', async () => {
+      mockEnv.GITHUB_REF_NAME = 'main';
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: false
+        })
+      );
+    });
+
+    it('should use full translation on master branch', async () => {
+      mockEnv.GITHUB_REF_NAME = 'master';
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: false
+        })
+      );
+    });
+
+    it('should prefer GITHUB_HEAD_REF over GITHUB_REF_NAME (PR scenario)', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature/foo';
+      mockEnv.GITHUB_REF_NAME = 'main';
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: true
         })
       );
     });
@@ -156,7 +214,7 @@ describe('ci command', () => {
 
   describe('translate command integration', () => {
     it('should pass through all options to translate command', async () => {
-      mockEnv.GITHUB_BASE_REF = 'feature-branch';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
 
       const options: CiOptions = {
         verbose: true,

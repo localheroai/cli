@@ -101,17 +101,14 @@ A specialized command for running in CI/CD environments (GitHub Actions etc.). T
 
 #### Mode Detection
 
-**Sync Mode** (when `sync-trigger-id` is present in `localhero.json`):
-- Fetches translations from LocalHero.ai Sync API
+**Sync Mode** (when `syncTriggerId` is present in `localhero.json`):
+- Fetches translations from LocalHero.ai export API
 - Updates local translation files with new/modified translations
-- Handles PO key versioning when source text changes
-- Removes `sync-trigger-id` after successful sync
-- Commits changes with sync summary
+- Removes `syncTriggerId` after successful sync
 
 **Translate Mode** (default):
-- **On main/master branch**: Translates all missing keys
-- **On feature branch PRs**: Only translates changed keys (using `--changed-only` mode)
-- Auto-commits changes when running in CI/CD
+- **On feature branches**: Only translates changed keys (using `--changed-only` mode)
+- **On main/master**: Translates all missing keys
 
 Both modes automatically commit changes to your repository when running in GitHub Actions.
 
