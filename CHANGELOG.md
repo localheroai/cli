@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.26] - 2025-12-02
+
+### Changed
+- Generated GitHub workflow now triggers on `localhero.json` changes to enable sync mode when backend sets `syncTriggerId`
+- Refined bot detection to allow initial bot PR creation while skipping only `synchronize` events from bots (commits)
+
 ## [0.0.25] - 2025-11-27
 
 ### Added
@@ -9,6 +15,10 @@ All notable changes to this project will be documented in this file.
   - Sync mode: fetches translations from Localhero.ai sync API when `syncTriggerId` is configured
   - Translate mode with auto-detection: feature branches use `--changed-only`, main/master uses full translation
   - Automatic commit and push of translation changes in GitHub Actions
+
+### Changed
+- GitHub Actions workflow now monitors `localhero.json` changes to trigger on backend-initiated sync events
+- Refined bot detection to allow initial bot PR events while skipping synchronize events from bots
 
 ### Fixed
 - Improved branch detection in GitHub Actions using GITHUB_HEAD_REF and GITHUB_REF_NAME
