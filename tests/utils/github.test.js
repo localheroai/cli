@@ -62,7 +62,7 @@ describe('github module', () => {
       expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
-      expect(fileContent).toContain("github.actor != 'localhero-ai[bot]'");
+      expect(fileContent).toContain("!(github.actor == 'localhero-ai[bot]' && github.event.action == 'synchronize')");
 
       expect(fileContent).toContain('fetch-depth: 0');
       expect(fileContent).toContain('git fetch --no-tags origin');

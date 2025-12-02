@@ -100,6 +100,7 @@ on:
     const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
     return `- "${formattedPath}"`;
   }).join('\n      ')}
+      - "localhero.json"
   workflow_dispatch:
 
 concurrency:
@@ -111,7 +112,7 @@ jobs:
     if: |
       !contains(github.event.pull_request.labels.*.name, 'skip-translation') &&
       github.event.pull_request.draft == false &&
-      github.actor != 'localhero-ai[bot]'
+      !(github.actor == 'localhero-ai[bot]' && github.event.action == 'synchronize')
     runs-on: ubuntu-latest
     permissions:
       contents: write
