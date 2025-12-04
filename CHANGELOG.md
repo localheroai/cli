@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.27] - 2025-12-04
+
+### Changed
+- Aligned sync commit messages with translate commit message
+
+### Added
+- CommitSummary shared type for consistent commit metadata between sync and translate operations
+- sync_url field to SyncResponse type for linking to LocalHero dashboard from commit messages
+
 ## [0.0.26] - 2025-12-02
 
 ### Changed
