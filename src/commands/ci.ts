@@ -92,6 +92,7 @@ async function runSyncMode(
   const allFiles: SyncFile[] = [];
   let currentPage = 1;
   let totalPages = 1;
+  let syncUrl: string | undefined;
 
   try {
     while (currentPage <= totalPages) {
@@ -99,6 +100,10 @@ async function runSyncMode(
 
       if (!response || !response.sync || !response.pagination) {
         throw new Error(`Invalid response from Sync API for page ${currentPage}`);
+      }
+
+      if (currentPage === 1) {
+        syncUrl = response.sync.sync_url;
       }
 
       allFiles.push(...response.sync.files);
@@ -158,7 +163,12 @@ async function runSyncMode(
   console.log(chalk.green(`\n✓ Synced ${translationsUpdated} translations across ${filesUpdated} files`));
 
   if (githubUtils.isGitHubAction()) {
-    await githubUtils.autoCommitSyncChanges(modifiedFiles);
+    const languages = [...new Set(allFiles.map(f => f.language))];
+    await githubUtils.autoCommitSyncChanges(modifiedFiles, {
+      keysTranslated: translationsUpdated,
+      languages,
+      viewUrl: syncUrl
+    });
   }
 }
 

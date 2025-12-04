@@ -106,6 +106,12 @@ export interface GitHubInstallationTokenResponse {
   expires_at: string;
 }
 
+export interface CommitSummary {
+  keysTranslated: number;
+  languages: string[];
+  viewUrl?: string;
+}
+
 export interface Project {
   id: string;
   name: string;

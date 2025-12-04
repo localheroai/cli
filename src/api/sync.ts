@@ -42,6 +42,7 @@ export interface SyncResponse {
     sync_id: string;
     status: string;
     created_at: string;
+    sync_url?: string;
     pr_url?: string;
     pr_number?: number;
     files: SyncFile[];

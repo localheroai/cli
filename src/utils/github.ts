@@ -3,6 +3,7 @@ import { promises as fs, existsSync } from 'fs';
 import path from 'path';
 import { fetchGitHubInstallationToken } from '../api/github.js';
 import { configService, PROJECT_CONFIG_FILE } from './config.js';
+import { CommitSummary } from '../types/index.js';
 
 /**
  * Dependencies for the GitHub service
@@ -280,8 +281,9 @@ jobs:
   /**
    * Automatically commit and push sync changes when running in GitHub Actions
    * @param modifiedFiles List of file paths that were modified
+   * @param syncSummary Optional summary of sync results
    */
-  async autoCommitSyncChanges(modifiedFiles: string[]): Promise<void> {
+  async autoCommitSyncChanges(modifiedFiles: string[], syncSummary?: CommitSummary): Promise<void> {
     const { exec, console: log } = this.deps;
 
     if (!this.isGitHubAction()) return;
@@ -291,7 +293,22 @@ jobs:
       this.configureGitUser();
       const branchName = this.getBranchName();
 
-      const commitMessage = 'Sync translations from LocalHero.ai';
+      let commitMessage = 'Sync translations from LocalHero.ai';
+
+      if (syncSummary && syncSummary.keysTranslated > 0) {
+        const { keysTranslated, languages, viewUrl } = syncSummary;
+        const languageList = languages.join(', ');
+
+        if (keysTranslated > 1) {
+          commitMessage += `\n\nSynced ${keysTranslated} keys in ${languageList}`;
+        } else {
+          commitMessage += `\n\nSynced ${keysTranslated} key in ${languageList}`;
+        }
+
+        if (viewUrl) {
+          commitMessage += `\nView results at ${viewUrl}`;
+        }
+      }
 
       for (const filePath of modifiedFiles) {
         exec(`git add "${filePath}"`, { stdio: 'inherit' });
@@ -327,11 +344,7 @@ jobs:
    * @param filesPath Path pattern for files to commit
    * @param translationSummary Optional summary of translation results
    */
-  async autoCommitChanges(filesPath: string, translationSummary?: {
-    keysTranslated: number;
-    languages: string[];
-    viewUrl?: string;
-  }): Promise<void> {
+  async autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<void> {
     const { exec, console: log } = this.deps;
 
     if (!this.isGitHubAction()) return;
@@ -409,10 +422,6 @@ export function fetchActionToken(): Promise<{ token: string | null; errorCode?: 
  * @param filesPath Path pattern for files to commit
  * @param translationSummary Optional summary of translation results
  */
-export function autoCommitChanges(filesPath: string, translationSummary?: {
-  keysTranslated: number;
-  languages: string[];
-  viewUrl?: string;
-}): Promise<void> {
+export function autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<void> {
   return githubService.autoCommitChanges(filesPath, translationSummary);
 }
