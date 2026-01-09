@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.28] - 2026-01-09
+
+### Added
+- Added `--prune` flag to push command to remove stale keys from the API that no longer exist in local files
+
 ## [0.0.27] - 2025-12-04
 
 ### Changed
