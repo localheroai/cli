@@ -1,25 +1,28 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest } from './client.js';
+import type { PrunableKey } from '../types/index.js';
 
-/**
- * Parameters for creating an import
- */
+export type { PrunableKey };
+
+export interface TranslationPayload {
+  language: string;
+  format: string;
+  filename: string;
+  content: string;
+  keys?: Array<{ name: string; context: string | null }>;
+}
+
 export interface CreateImportParams {
   projectId: string;
-  translations: any[]; // Array of translation files
+  translations: TranslationPayload[];
 }
 
-/**
- * Parameters for bulk updating translations
- */
 export interface BulkUpdateTranslationsParams {
   projectId: string;
-  translations: any[]; // Array of translation files
+  translations: TranslationPayload[];
+  includePrunable?: boolean;
 }
 
-/**
- * Import operation details
- */
 export interface ImportDetail {
   id: string;
   status: string;
@@ -35,20 +38,13 @@ export interface ImportDetail {
   warnings?: string[];
   translations_url?: string;
   sourceImport?: boolean;
+  prunable_keys?: PrunableKey[];
 }
 
-/**
- * Import creation response
- */
 export interface ImportResponse {
   import: ImportDetail;
 }
 
-/**
- * Create a new import of translations
- * @param params Import parameters
- * @returns The created import details
- */
 export async function createImport(params: CreateImportParams): Promise<ImportResponse> {
   const apiKey = await getApiKey();
   const response = await apiRequest(`/api/v1/projects/${params.projectId}/imports`, {
@@ -63,7 +59,11 @@ export async function createImport(params: CreateImportParams): Promise<ImportRe
 
 export async function bulkUpdateTranslations(params: BulkUpdateTranslationsParams): Promise<ImportResponse> {
   const apiKey = await getApiKey();
-  const response = await apiRequest(`/api/v1/projects/${params.projectId}/imports`, {
+  const url = params.includePrunable
+    ? `/api/v1/projects/${params.projectId}/imports?include_prunable=true`
+    : `/api/v1/projects/${params.projectId}/imports`;
+
+  const response = await apiRequest(url, {
     method: 'PATCH',
     body: {
       translations: params.translations
@@ -73,12 +73,6 @@ export async function bulkUpdateTranslations(params: BulkUpdateTranslationsParam
   return response;
 }
 
-/**
- * Check the status of an import
- * @param projectId The ID of the project
- * @param importId The ID of the import to check
- * @returns The import status response
- */
 export async function checkImportStatus(projectId: string, importId: string): Promise<ImportResponse> {
   const apiKey = await getApiKey();
   const response = await apiRequest(`/api/v1/projects/${projectId}/imports/${importId}`, {

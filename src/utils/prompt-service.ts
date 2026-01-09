@@ -119,6 +119,29 @@ const inputWithHint = createPrompt<string, { message: string; hint?: string; def
 });
 
 /**
+ * Default inquirer adapter using the inquirer package
+ * Lazy-loaded to avoid import issues in test environments
+ */
+export const defaultInquirerAdapter = {
+  password: async (options: PasswordOptions) => {
+    const inquirer = (await import('inquirer')).default;
+    return inquirer.prompt([{ type: 'password', name: 'value', ...options }]).then(r => r.value);
+  },
+  select: async (options: SelectOptions) => {
+    const inquirer = (await import('inquirer')).default;
+    return inquirer.prompt([{ type: 'list', name: 'value', ...options }]).then(r => r.value);
+  },
+  input: async (options: InputOptions) => {
+    const inquirer = (await import('inquirer')).default;
+    return inquirer.prompt([{ type: 'input', name: 'value', ...options }]).then(r => r.value);
+  },
+  confirm: async (options: ConfirmOptions) => {
+    const inquirer = (await import('inquirer')).default;
+    return inquirer.prompt([{ type: 'confirm', name: 'value', ...options }]).then(r => r.value);
+  }
+};
+
+/**
  * Creates a prompt service for handling CLI interactions
  * @param deps Dependencies for the prompt service
  * @returns The prompt service object

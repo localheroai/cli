@@ -129,6 +129,22 @@ export interface TranslationFilesResult {
   targetFilesByLocale: Record<string, TranslationFile[]>;
 }
 
+// Prunable key from API (for --prune functionality)
+export interface PrunableKey {
+  id: string;
+  name: string;
+  context: string | null;
+  path: string;
+}
+
+// Import file for push/import operations
+export interface ImportFile {
+  path: string;
+  language: string;
+  format: string;
+  namespace: string;
+}
+
 // Translation Command Dependencies
 export interface TranslationFileOptions {
   parseContent?: boolean;

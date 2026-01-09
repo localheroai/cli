@@ -426,21 +426,18 @@ describe('importService', () => {
 
       expect(mockImportsApi.bulkUpdateTranslations).toHaveBeenCalledWith({
         projectId: mockConfig.projectId,
-        translations: expect.any(Array)
+        translations: expect.any(Array),
+        includePrunable: undefined
       });
 
-      expect(result).toEqual({
-        status: 'completed',
-        statistics: {
-          added: 0,
-          updated: 5,
-          ignored: 0
-        },
-        files: {
-          source: [],
-          target: mockFiles
-        }
+      expect(result.status).toBe('completed');
+      expect(result.statistics).toEqual({
+        added: 0,
+        updated: 5,
+        ignored: 0
       });
+      expect(result.files.source).toEqual([mockFiles[0]]);
+      expect(result.files.target).toEqual([mockFiles[1]]);
     });
 
     it('handles processing status and polls until completion', async () => {
@@ -495,6 +492,48 @@ describe('importService', () => {
 
       expect(result.status).toBe('failed');
       expect(result.error).toBe('Failed during processing');
+    });
+
+    it('passes includePrunable: true when prune option is set', async () => {
+      const result = await importService.pushTranslations(mockConfig, process.cwd(), { prune: true });
+
+      expect(mockImportsApi.bulkUpdateTranslations).toHaveBeenCalledWith({
+        projectId: mockConfig.projectId,
+        translations: expect.any(Array),
+        includePrunable: true
+      });
+
+      expect(result.status).toBe('completed');
+    });
+
+    it('includes keys array for source files when prune option is set', async () => {
+      await importService.pushTranslations(mockConfig, process.cwd(), { prune: true });
+
+      const callArgs = mockImportsApi.bulkUpdateTranslations.mock.calls[0][0];
+      const sourceTranslation = callArgs.translations.find(t => t.language === 'en');
+
+      expect(sourceTranslation).toBeDefined();
+      expect(sourceTranslation.keys).toBeDefined();
+      expect(Array.isArray(sourceTranslation.keys)).toBe(true);
+    });
+
+    it('returns prunable_keys from API response', async () => {
+      const mockPrunableKeys = [
+        { id: 'key1', name: 'old.key', context: null, path: 'en.json' }
+      ];
+
+      mockImportsApi.bulkUpdateTranslations.mockResolvedValueOnce({
+        import: {
+          id: 'test-import',
+          status: 'completed',
+          statistics: { added: 0, updated: 0, ignored: 0 },
+          prunable_keys: mockPrunableKeys
+        }
+      });
+
+      const result = await importService.pushTranslations(mockConfig, process.cwd(), { prune: true });
+
+      expect(result.prunable_keys).toEqual(mockPrunableKeys);
     });
   });
 });

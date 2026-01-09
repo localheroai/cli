@@ -111,7 +111,8 @@ program
   .option('-v, --verbose', 'Show detailed progress information')
   .option('-y, --yes', 'Skip confirmation prompt')
   .option('-f, --force', 'Push all files regardless of git changes')
-  .action(wrapCommandAction(async (options: { verbose?: boolean; yes?: boolean; force?: boolean }) => {
+  .option('--prune', 'Delete keys from API that no longer exist locally')
+  .action(wrapCommandAction(async (options: { verbose?: boolean; yes?: boolean; force?: boolean; prune?: boolean }) => {
     const config = await configService.getValidProjectConfig();
     return push(config, options);
   }));

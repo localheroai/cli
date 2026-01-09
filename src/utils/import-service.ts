@@ -1,34 +1,23 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import chalk from 'chalk';
+import yaml from 'yaml';
 import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations } from '../api/imports.js';
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
-import {
+import type {
   ProjectConfig,
   TranslationFile,
-  TranslationFileOptions
+  TranslationFileOptions,
+  PrunableKey,
+  ImportFile
 } from '../types/index.js';
 
-/**
- * File format supported by the import service
- */
+export type { PrunableKey, ImportFile };
+
 export type FileFormat = 'json' | 'yaml' | 'po' | 'pot' | null;
 
-/**
- * File details for import operations
- */
-export interface ImportFile {
-  path: string;
-  language: string;
-  format: string;
-  namespace: string;
-}
-
-/**
- * Result of the translation import
- */
 export interface ImportResult {
   status: string;
   error?: string;
@@ -45,23 +34,27 @@ export interface ImportResult {
   };
   poll_interval?: number;
   id?: string;
+  prunable_keys?: PrunableKey[];
 }
 
-/**
- * Translation record to import
- */
+export interface KeyIdentifier {
+  name: string;
+  context: string | null;
+}
+
 export interface TranslationRecord {
   language: string;
   format: string;
   filename: string;
   content: string;
+  keys?: KeyIdentifier[];
 }
 
-/**
- * Get the file format based on extension
- * @param filePath Path to the file
- * @returns The file format or null if not supported
- */
+interface FileReadResult {
+  content: string;
+  keys: KeyIdentifier[];
+}
+
 function getFileFormat(filePath: string): FileFormat {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.json') return 'json';
@@ -71,27 +64,16 @@ function getFileFormat(filePath: string): FileFormat {
   return null;
 }
 
-/**
- * Normalize file format for API compatibility
- * @param format The file format from files.ts
- * @returns The normalized format for the API
- */
 function normalizeFormat(format: string): string {
   if (format === 'yml') return 'yaml';
   if (format === 'pot') return 'po';
   return format;
 }
 
-/**
- * Read file content and convert to base64
- * @param filePath Path to the file
- * @param options Language context for proper handling
- * @returns Base64 encoded content
- */
-async function readFileContent(
+async function readFileContentWithKeys(
   filePath: string,
   options?: { sourceLanguage?: string; currentLanguage?: string }
-): Promise<string> {
+): Promise<FileReadResult> {
   const content = await fs.readFile(filePath, 'utf8');
   const format = getFileFormat(filePath);
 
@@ -99,10 +81,35 @@ async function readFileContent(
     try {
       const jsonContent = JSON.parse(content);
       const flattened = flattenTranslations(jsonContent);
+      const keys = Object.keys(flattened).map(name => ({ name, context: null }));
 
-      return Buffer.from(JSON.stringify(flattened)).toString('base64');
+      return {
+        content: Buffer.from(JSON.stringify(flattened)).toString('base64'),
+        keys
+      };
     } catch {
-      return Buffer.from(content).toString('base64');
+      return {
+        content: Buffer.from(content).toString('base64'),
+        keys: []
+      };
+    }
+  }
+
+  if (format === 'yaml') {
+    try {
+      const yamlContent = yaml.parse(content);
+      const flattened = flattenTranslations(yamlContent);
+      const keys = Object.keys(flattened).map(name => ({ name, context: null }));
+
+      return {
+        content: Buffer.from(content).toString('base64'),
+        keys
+      };
+    } catch {
+      return {
+        content: Buffer.from(content).toString('base64'),
+        keys: []
+      };
     }
   }
 
@@ -111,22 +118,43 @@ async function readFileContent(
       const parsed = parsePoFile(content);
       const apiFormat = poEntriesToApiFormat(parsed, options);
 
-      return Buffer.from(JSON.stringify(apiFormat)).toString('base64');
+      const keys: KeyIdentifier[] = [];
+      for (const entry of parsed.entries) {
+        if (entry.msgid) {
+          keys.push({
+            name: entry.msgid,
+            context: entry.msgctxt || null
+          });
+        }
+      }
+
+      return {
+        content: Buffer.from(JSON.stringify(apiFormat)).toString('base64'),
+        keys
+      };
     } catch {
-      return Buffer.from(content).toString('base64');
+      return {
+        content: Buffer.from(content).toString('base64'),
+        keys: []
+      };
     }
   }
 
-  return Buffer.from(content).toString('base64');
+  return {
+    content: Buffer.from(content).toString('base64'),
+    keys: []
+  };
+}
+
+async function readFileContent(
+  filePath: string,
+  options?: { sourceLanguage?: string; currentLanguage?: string }
+): Promise<string> {
+  const result = await readFileContentWithKeys(filePath, options);
+  return result.content;
 }
 
 export const importService = {
-  /**
-   * Find translation files based on configuration
-   * @param config Project configuration
-   * @param basePath Base path to look for files (defaults to cwd)
-   * @returns Array of import file objects
-   */
   async findTranslationFiles(
     config: ProjectConfig,
     basePath = process.cwd()
@@ -150,12 +178,6 @@ export const importService = {
     }));
   },
 
-  /**
-   * Import translations from files
-   * @param config Project configuration
-   * @param basePath Base path to look for files (defaults to cwd)
-   * @returns Result of the import operation
-   */
   async importTranslations(
     config: ProjectConfig,
     basePath = process.cwd()
@@ -255,16 +277,10 @@ export const importService = {
     };
   },
 
-  /**
-   * Push local translations to the API
-   * @param config Project configuration
-   * @param basePath Base path to look for files (defaults to cwd)
-   * @returns Result of the push operation
-   */
   async pushTranslations(
     config: ProjectConfig,
     basePath = process.cwd(),
-    options: { force?: boolean; verbose?: boolean } = {}
+    options: { force?: boolean; verbose?: boolean; prune?: boolean } = {}
   ): Promise<ImportResult> {
     let files = await this.findTranslationFiles(config, basePath);
 
@@ -293,15 +309,23 @@ export const importService = {
 
     for (const file of sourceFiles) {
       const fullPath = path.join(basePath, file.path);
-      allTranslations.push({
+      const fileResult = await readFileContentWithKeys(fullPath, {
+        sourceLanguage: config.sourceLocale,
+        currentLanguage: file.language
+      });
+
+      const record: TranslationRecord = {
         language: file.language,
         format: normalizeFormat(file.format),
         filename: file.path,
-        content: await readFileContent(fullPath, {
-          sourceLanguage: config.sourceLocale,
-          currentLanguage: file.language
-        })
-      });
+        content: fileResult.content
+      };
+
+      if (options.prune) {
+        record.keys = fileResult.keys;
+      }
+
+      allTranslations.push(record);
     }
 
     for (const file of targetFiles) {
@@ -326,7 +350,8 @@ export const importService = {
 
     const importResult = await bulkUpdateTranslations({
       projectId: config.projectId,
-      translations: allTranslations
+      translations: allTranslations,
+      includePrunable: options.prune
     });
 
     if (importResult.import?.status === 'failed') {
@@ -356,7 +381,8 @@ export const importService = {
         statistics,
         warnings,
         translations_url,
-        sourceImport
+        sourceImport,
+        prunable_keys
       } = {}
     } = finalImportResult;
 
@@ -366,17 +392,12 @@ export const importService = {
       warnings,
       translations_url,
       sourceImport,
-      files: { source: [], target: files }
+      files: { source: sourceFiles, target: targetFiles },
+      prunable_keys
     };
   }
 };
 
-/**
- * Find translation files based on configuration
- * @param config Project configuration
- * @param basePath Base path to look for files (defaults to cwd)
- * @returns Array of import file objects
- */
 export async function findTranslationFiles(
   config: ProjectConfig,
   basePath = process.cwd()
@@ -384,12 +405,6 @@ export async function findTranslationFiles(
   return importService.findTranslationFiles(config, basePath);
 }
 
-/**
- * Import translations from files
- * @param config Project configuration
- * @param basePath Base path to look for files (defaults to cwd)
- * @returns Result of the import operation
- */
 export async function importTranslations(
   config: ProjectConfig,
   basePath = process.cwd()
@@ -397,12 +412,6 @@ export async function importTranslations(
   return importService.importTranslations(config, basePath);
 }
 
-/**
- * Push translations to the API
- * @param config Project configuration
- * @param basePath Base path to look for files (defaults to cwd)
- * @returns Result of the push operation
- */
 export async function pushTranslations(
   config: ProjectConfig,
   basePath = process.cwd()
