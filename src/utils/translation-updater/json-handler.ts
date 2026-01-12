@@ -9,19 +9,67 @@ interface UpdateResult {
 
 type JsonFormat = 'nested' | 'flat' | 'mixed';
 
-async function detectSourceFileStructure(sourceFilePath: string): Promise<boolean> {
-  try {
-    const content = await fs.readFile(sourceFilePath, 'utf8');
-    const sourceContent = JSON.parse(content);
-    const hasLanguageWrapper = Object.entries(sourceContent).some(([key, value]) => {
-      // Check if any top-level key is a language code with an object value
-      return typeof value === 'object' && value !== null && /^[a-zA-Z]{2}(-[a-zA-Z]{2})?$/.test(key);
-    });
+interface FileStructure {
+  hasLanguageWrapper: boolean;
+  jsonFormat: JsonFormat;
+}
 
-    return hasLanguageWrapper;
-  } catch (error) {
-    throw new Error(`Failed to read source file ${sourceFilePath}: ${error instanceof Error ? error.message : String(error)}`);
+function detectStructureFromContent(
+  content: Record<string, unknown>,
+  languageCode: string
+): FileStructure | null {
+  const languageValue = content[languageCode];
+  const hasLanguageWrapper = languageValue !== undefined &&
+    typeof languageValue === 'object' &&
+    languageValue !== null;
+
+  if (hasLanguageWrapper) {
+    const innerContent = languageValue as Record<string, unknown>;
+    if (Object.keys(innerContent).length === 0) {
+      return null;
+    }
+    return { hasLanguageWrapper: true, jsonFormat: detectJsonFormat(innerContent) };
   }
+
+  if (Object.keys(content).length === 0) {
+    return null;
+  }
+  return { hasLanguageWrapper: false, jsonFormat: detectJsonFormat(content) };
+}
+
+async function readSourceFileStructure(sourceFilePath: string): Promise<FileStructure> {
+  const content = await fs.readFile(sourceFilePath, 'utf8');
+  const sourceContent = JSON.parse(content);
+
+  for (const [key, value] of Object.entries(sourceContent)) {
+    if (typeof value === 'object' && value !== null && /^[a-zA-Z]{2}(-[a-zA-Z]{2})?$/.test(key)) {
+      return {
+        hasLanguageWrapper: true,
+        jsonFormat: detectJsonFormat(value as Record<string, unknown>)
+      };
+    }
+  }
+
+  return { hasLanguageWrapper: false, jsonFormat: detectJsonFormat(sourceContent) };
+}
+
+async function getStructure(
+  existingContent: Record<string, unknown> | null,
+  languageCode: string,
+  sourceFilePath: string | null
+): Promise<FileStructure> {
+  if (existingContent) {
+    const detected = detectStructureFromContent(existingContent, languageCode);
+    if (detected) {
+      return detected;
+    }
+  }
+
+  if (!sourceFilePath) {
+    throw new Error('Source file is required for creating new JSON translation files');
+  }
+
+  return readSourceFileStructure(sourceFilePath);
 }
 
 export async function updateJsonFile(
@@ -30,62 +78,44 @@ export async function updateJsonFile(
   languageCode: string,
   sourceFilePath: string | null = null
 ): Promise<UpdateResult> {
+  let existingContent: Record<string, any> | null = null;
+  let created = false;
+
   try {
-    let existingContent: Record<string, any> = {};
-    let jsonFormat: JsonFormat = 'nested';
-    let hasLanguageWrapper = false;
-    const result: UpdateResult = {
-      updatedKeys: Object.keys(translations),
-      created: false
-    };
-
-    try {
-      const content = await fs.readFile(filePath, 'utf8');
-      existingContent = JSON.parse(content);
-      if (existingContent[languageCode] && typeof existingContent[languageCode] === 'object') {
-        hasLanguageWrapper = true;
-        jsonFormat = detectJsonFormat(existingContent[languageCode]);
-      } else {
-        jsonFormat = detectJsonFormat(existingContent);
-      }
-    } catch {
-      if (!sourceFilePath) {
-        throw new Error('Source file is required for creating new JSON translation files');
-      }
-
-      console.warn(`Creating new JSON file: ${filePath}`);
-      result.created = true;
-      await ensureDirectoryExists(filePath);
-
-      // Use source file structure
-      hasLanguageWrapper = await detectSourceFileStructure(sourceFilePath);
-    }
-
-    let updatedContent: Record<string, any>;
-
-    if (result.created) {
-      updatedContent = hasLanguageWrapper ?
-        { [languageCode]: preserveJsonStructure({}, translations, jsonFormat) } :
-        preserveJsonStructure({}, translations, jsonFormat);
-    } else if (hasLanguageWrapper) {
-      existingContent[languageCode] = existingContent[languageCode] || {};
-      updatedContent = JSON.parse(JSON.stringify(existingContent));
-      const mergedContent = preserveJsonStructure(
-        existingContent[languageCode],
-        translations,
-        jsonFormat
-      );
-      updatedContent[languageCode] = mergedContent;
-    } else {
-      const existingCopy = JSON.parse(JSON.stringify(existingContent));
-      updatedContent = preserveJsonStructure(existingCopy, translations, jsonFormat);
-    }
-
-    await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
-    return result;
-  } catch (error) {
-    throw new Error(`Failed to update JSON file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
+    const content = await fs.readFile(filePath, 'utf8');
+    existingContent = JSON.parse(content);
+  } catch {
+    console.warn(`Creating new JSON file: ${filePath}`);
+    created = true;
+    await ensureDirectoryExists(filePath);
   }
+
+  const { hasLanguageWrapper, jsonFormat } = await getStructure(
+    existingContent,
+    languageCode,
+    sourceFilePath
+  );
+
+  const baseContent = hasLanguageWrapper
+    ? (existingContent?.[languageCode] ?? {})
+    : (existingContent ?? {});
+
+  const mergedContent = preserveJsonStructure(
+    JSON.parse(JSON.stringify(baseContent)),
+    translations,
+    jsonFormat
+  );
+
+  const updatedContent = hasLanguageWrapper
+    ? { ...existingContent, [languageCode]: mergedContent }
+    : mergedContent;
+
+  await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
+
+  return {
+    updatedKeys: Object.keys(translations),
+    created
+  };
 }
 
 export async function deleteKeysFromJsonFile(

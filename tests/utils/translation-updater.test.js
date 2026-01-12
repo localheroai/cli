@@ -256,6 +256,73 @@ en:
         });
       });
 
+      it('uses source format when target file exists but is empty', async () => {
+        // Create nested source file
+        const sourceFilePath = path.join(tempDir, 'en.json');
+        const sourceContent = {
+          en: {
+            navbar: {
+              home: 'Home',
+              about: 'About'
+            }
+          }
+        };
+        fs.writeFileSync(sourceFilePath, JSON.stringify(sourceContent, null, 2));
+
+        // Create empty target file with only language wrapper
+        const targetFilePath = path.join(tempDir, 'sv.json');
+        fs.writeFileSync(targetFilePath, JSON.stringify({ sv: {} }, null, 2));
+
+        const translations = {
+          'navbar.home': 'Hem',
+          'navbar.about': 'Om'
+        };
+
+        await updateTranslationFile(targetFilePath, translations, 'sv', sourceFilePath);
+
+        const fileContent = JSON.parse(fs.readFileSync(targetFilePath, 'utf8'));
+        expect(fileContent).toEqual({
+          sv: {
+            navbar: {
+              home: 'Hem',
+              about: 'Om'
+            }
+          }
+        });
+      });
+
+      it('uses source format and wrapper when target file is completely empty', async () => {
+        // Create nested source file with wrapper
+        const sourceFilePath = path.join(tempDir, 'en.json');
+        const sourceContent = {
+          en: {
+            navbar: {
+              home: 'Home'
+            }
+          }
+        };
+        fs.writeFileSync(sourceFilePath, JSON.stringify(sourceContent, null, 2));
+
+        // Create completely empty target file
+        const targetFilePath = path.join(tempDir, 'sv.json');
+        fs.writeFileSync(targetFilePath, JSON.stringify({}, null, 2));
+
+        const translations = {
+          'navbar.home': 'Hem'
+        };
+
+        await updateTranslationFile(targetFilePath, translations, 'sv', sourceFilePath);
+
+        const fileContent = JSON.parse(fs.readFileSync(targetFilePath, 'utf8'));
+        expect(fileContent).toEqual({
+          sv: {
+            navbar: {
+              home: 'Hem'
+            }
+          }
+        });
+      });
+
       it('filters out null values before updating', async () => {
         const filePath = path.join(tempDir, 'en.yml');
         const translations = {
