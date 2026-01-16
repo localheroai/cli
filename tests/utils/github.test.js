@@ -62,12 +62,9 @@ describe('github module', () => {
       expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
-      expect(fileContent).toContain("!(github.actor == 'localhero-ai[bot]' && github.event.action == 'synchronize')");
-
       expect(fileContent).toContain('fetch-depth: 0');
-      expect(fileContent).toContain('git fetch --no-tags origin');
-      expect(fileContent).toContain('GITHUB_BASE_REF:');
-      expect(fileContent).toContain('npx -y @localheroai/cli ci');
+      expect(fileContent).toContain('uses: localheroai/localhero-action@v1');
+      expect(fileContent).toContain('api-key: ${{ secrets.LOCALHERO_API_KEY }}');
 
       // Verify return value is the workflow file path
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');

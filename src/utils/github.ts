@@ -110,38 +110,22 @@ concurrency:
 
 jobs:
   translate:
-    if: |
-      !contains(github.event.pull_request.labels.*.name, 'skip-translation') &&
-      github.event.pull_request.draft == false &&
-      !(github.actor == 'localhero-ai[bot]' && github.event.action == 'synchronize')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: write
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v5
-      with:
-        ref: \${{ github.head_ref }}
-        fetch-depth: 0
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          ref: \${{ github.head_ref }}
+          fetch-depth: 0
 
-    - name: Fetch base branch for comparison
-      if: github.event_name == 'pull_request'
-      run: |
-        git fetch --no-tags origin \${{ github.base_ref }}
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v5
-      with:
-        node-version: 22
-
-    - name: Translate strings
-      env:
-        LOCALHERO_API_KEY: \${{ secrets.LOCALHERO_API_KEY }}
-        GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
-        GITHUB_BASE_REF: \${{ github.base_ref }}
-      run: npx -y @localheroai/cli ci`;
+      - name: Translate
+        uses: localheroai/localhero-action@v1
+        with:
+          api-key: \${{ secrets.LOCALHERO_API_KEY }}`;
 
     await fs.writeFile(workflowFile, actionContent);
     return workflowFile;
