@@ -179,6 +179,30 @@ jobs:
     return branchName;
   },
 
+  async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  },
+
+  async pushWithRetry(
+    branchName: string,
+    token: string,
+    forceWithLease: boolean = false,
+    maxRetries: number = 3
+  ): Promise<void> {
+    const { console: log } = this.deps;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.pushToGitHub(branchName, token, forceWithLease);
+        return;
+      } catch (error) {
+        if (attempt === maxRetries) throw error;
+        log.log(`Push failed, retrying (${attempt}/${maxRetries})...`);
+        await this.sleep(2000);
+      }
+    }
+  },
+
   /**
    * Push changes to GitHub using the provided token
    * @param branchName Branch to push to
@@ -325,7 +349,7 @@ jobs:
       this.commit(commitMessage, canAmend);
 
       const token = await this.getTokenForPush();
-      this.pushToGitHub(branchName, token, canAmend);
+      await this.pushWithRetry(branchName, token, canAmend);
 
       if (canAmend) {
         log.log('✓ Commit amended and pushed to GitHub\n');
@@ -381,7 +405,7 @@ jobs:
       this.commit(commitMessage);
 
       const token = await this.getTokenForPush();
-      this.pushToGitHub(branchName, token);
+      await this.pushWithRetry(branchName, token);
 
       log.log('Changes committed and pushed successfully.');
     } catch (error: unknown) {

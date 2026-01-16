@@ -303,13 +303,10 @@ describe('github module', () => {
     });
 
     it('throws error when repository is missing', async () => {
-      // Setup GitHub environment without repository
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockEnv.GITHUB_TOKEN = 'fake-token';
-      // GITHUB_REPOSITORY not set
 
-      // Mock git status to return changes
       mockExec.mockImplementation((cmd) => {
         if (cmd === 'git status --porcelain') {
           return Buffer.from('M locales/en.json');
@@ -317,7 +314,16 @@ describe('github module', () => {
         return Buffer.from('');
       });
 
-      await expect(autoCommitChanges('locales/**/*.json')).rejects.toThrow('GITHUB_REPOSITORY is not set');
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error }
+      });
+      githubService.sleep = jest.fn().mockResolvedValue(undefined);
+
+      await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toThrow('GITHUB_REPOSITORY is not set');
     });
 
     it('handles git command errors', async () => {
@@ -454,6 +460,74 @@ describe('github module', () => {
       );
       expect(console.warn).not.toHaveBeenCalled();
       expect(console.log).toHaveBeenCalledWith('Changes committed and pushed successfully.');
+    });
+
+    it('retries push on failure and succeeds on second attempt', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      let pushAttempts = 0;
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        if (cmd === 'git push origin HEAD:feature-branch') {
+          pushAttempts++;
+          if (pushAttempts === 1) {
+            throw new Error('Repository not found');
+          }
+          return Buffer.from('');
+        }
+        return Buffer.from('');
+      });
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error }
+      });
+      githubService.sleep = jest.fn().mockResolvedValue(undefined);
+
+      await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(pushAttempts).toBe(2);
+      expect(console.log).toHaveBeenCalledWith('Push failed, retrying (1/3)...');
+      expect(console.log).toHaveBeenCalledWith('Changes committed and pushed successfully.');
+    });
+
+    it('throws after all retry attempts exhausted', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd) => {
+        if (cmd === 'git status --porcelain') {
+          return Buffer.from('M locales/en.json');
+        }
+        if (cmd === 'git push origin HEAD:feature-branch') {
+          throw new Error('Repository not found');
+        }
+        return Buffer.from('');
+      });
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs,
+        path: mockPath,
+        env: mockEnv,
+        console: { log: console.log, warn: console.warn, error: console.error }
+      });
+      githubService.sleep = jest.fn().mockResolvedValue(undefined);
+
+      await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toThrow('Repository not found');
+
+      expect(console.log).toHaveBeenCalledWith('Push failed, retrying (1/3)...');
+      expect(console.log).toHaveBeenCalledWith('Push failed, retrying (2/3)...');
     });
   });
 });
