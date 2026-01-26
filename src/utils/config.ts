@@ -130,6 +130,7 @@ export const configService: ConfigService = {
     // Internal state managed by backend, never written by CLI
     const configCopy = { ...config } as Record<string, unknown>;
     delete configCopy['syncTriggerId'];
+    delete configCopy['syncUpdateVersion'];
 
     // Remove default django config
     if (configCopy['django'] && JSON.stringify(configCopy['django']) === JSON.stringify(DEFAULT_DJANGO_CONFIG)) {

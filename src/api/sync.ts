@@ -70,3 +70,27 @@ export async function getSyncTranslations(
 
   return apiRequest(`/api/v1/translation_syncs/${syncId}?${queryParams}`, { apiKey });
 }
+
+export interface CompleteSyncUpdateResponse {
+  success: boolean;
+  status: string;
+}
+
+/**
+ * Mark a sync update as completed after successfully writing translation files
+ * @param syncId The sync ID from localhero.json
+ * @param version The sync update version number
+ * @returns Response indicating success
+ */
+export async function completeSyncUpdate(
+  syncId: string,
+  version: number
+): Promise<CompleteSyncUpdateResponse> {
+  const apiKey = await getApiKey();
+
+  return apiRequest(`/api/v1/translation_syncs/${syncId}/complete_update`, {
+    apiKey,
+    method: 'POST',
+    body: { version }
+  });
+}

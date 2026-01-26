@@ -4,7 +4,7 @@ import { translate, type TranslationOptions } from './translate.js';
 import { configService, type ConfigService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { githubService } from '../utils/github.js';
-import { getSyncTranslations, type SyncFile } from '../api/sync.js';
+import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 
 // CiOptions is an alias for TranslationOptions
@@ -82,7 +82,7 @@ async function runTranslateMode(
 async function runSyncMode(
   syncId: string,
   deps: CiDependencies,
-  options?: { verbose?: boolean }
+  options?: { verbose?: boolean; syncUpdateVersion?: number }
 ): Promise<void> {
   const { console, configUtils, githubUtils } = deps;
   const verbose = options?.verbose || false;
@@ -170,6 +170,18 @@ async function runSyncMode(
       viewUrl: syncUrl
     });
   }
+
+  if (options?.syncUpdateVersion) {
+    try {
+      await completeSyncUpdate(syncId, options.syncUpdateVersion);
+      if (verbose) {
+        console.log(chalk.gray(`  Marked sync update ${options.syncUpdateVersion} as completed`));
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(chalk.yellow(`  ⚠️  Could not mark sync update as completed: ${errorMessage}`));
+    }
+  }
 }
 
 /**
@@ -206,7 +218,7 @@ export async function ci(
       console.log(chalk.blue('📥 Sync mode detected'));
     }
     try {
-      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose });
+      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion: config.syncUpdateVersion });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(chalk.red('\n✖ Sync failed:', errorMessage));

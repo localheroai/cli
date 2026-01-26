@@ -61,6 +61,9 @@ export interface ProjectConfig {
   /** Internal: Sync trigger ID set by backend to initiate sync mode in CI */
   syncTriggerId?: string;
 
+  /** Internal: Sync update version set by backend when pushing updates to an existing PR */
+  syncUpdateVersion?: number;
+
   /** Command to run after translations are updated but before commit */
   postTranslateCommand?: string;
 
