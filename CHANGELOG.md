@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.29] - 2026-01-26
+
+### Added
+- Sync update completion API calls to mark backend-initiated translation updates as completed
+
+### Changed
+- GitHub workflow generation now uses official `localheroai/localhero-action@v1` action
+- Improved JSON file handling to properly detect and apply source file format to empty target files
+
+### Fixed
+- Git push operations retry up to 3 times to handle temporary failures
+
 ## [0.0.28] - 2026-01-09
 
 ### Added
