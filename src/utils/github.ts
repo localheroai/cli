@@ -308,9 +308,9 @@ jobs:
         const languageList = languages.join(', ');
 
         if (keysTranslated > 1) {
-          commitMessage += `\n\nSynced ${keysTranslated} keys in ${languageList}`;
+          commitMessage += `\n\nSynced ${keysTranslated} translations in ${languageList}`;
         } else {
-          commitMessage += `\n\nSynced ${keysTranslated} key in ${languageList}`;
+          commitMessage += `\n\nSynced ${keysTranslated} translation in ${languageList}`;
         }
 
         if (viewUrl) {
@@ -324,7 +324,7 @@ jobs:
       exec(`git add ${PROJECT_CONFIG_FILE}`, { stdio: 'inherit' });
 
       if (!this.hasStagedChanges()) {
-        log.log('No changes to commit.');
+        log.log('No changes to commit - translations already up to date.');
         return;
       }
 
