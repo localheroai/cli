@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.30] - 2026-01-30
+
+### Fixed
+- Improved sync commit messages for clarity
+- Disabled YAML line wrapping to reduce noisy diffs in translation files
+
 ## [0.0.29] - 2026-01-26
 
 ### Added
