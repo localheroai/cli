@@ -5,12 +5,12 @@
   "homepage": "https://localhero.ai",
   "repository": {
     "type": "git",
-    "url": "https://github.com/localheroai/cli"
+    "url": "git+https://github.com/localheroai/cli.git"
   },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "localheroai": "./dist/cli.js"
+    "localheroai": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc && chmod +x dist/cli.js",
