@@ -26,7 +26,7 @@ interface UpdateResult {
 }
 
 const NEEDS_QUOTES_REGEX = /[:,%{}[\]|><!&*?-]/;
-const LINE_WIDTH = 80;
+const LINE_WIDTH = 0; // Disable line wrapping to preserve original formatting
 
 function detectYamlOptions(content: string): YamlOptions {
   const lines = content
