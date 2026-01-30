@@ -100,8 +100,6 @@ async function createYamlDocument(filePath: string): Promise<YamlDocumentResult>
   const content = await fs.readFile(filePath, 'utf8');
   const options = detectYamlOptions(content);
   const doc = yaml.parseDocument(content);
-  // @ts-ignore - lineWidth exists on options
-  doc.options.lineWidth = LINE_WIDTH;
   return {
     doc,
     created: false,
@@ -191,14 +189,11 @@ export async function updateYamlFile(
 
   await updateYamlTranslations(yamlDoc, translations, languageCode);
 
-  // @ts-ignore - yaml options exist at runtime
-  yamlDoc.options.indent = options.indent;
-  // @ts-ignore - yaml options exist at runtime
-  yamlDoc.options.indentSeq = options.indentSeq;
-  // @ts-ignore - yaml options exist at runtime
-  yamlDoc.options.lineWidth = LINE_WIDTH;
-
-  await fs.writeFile(filePath, yamlDoc.toString());
+  await fs.writeFile(filePath, yamlDoc.toString({
+    indent: options.indent,
+    indentSeq: options.indentSeq,
+    lineWidth: LINE_WIDTH
+  }));
   return {
     updatedKeys: Object.keys(translations),
     created
@@ -253,7 +248,12 @@ export async function deleteKeysFromYamlFile(
       }
     }
 
-    await fs.writeFile(filePath, yamlDoc.toString());
+    const options = detectYamlOptions(content);
+    await fs.writeFile(filePath, yamlDoc.toString({
+      indent: options.indent,
+      indentSeq: options.indentSeq,
+      lineWidth: LINE_WIDTH
+    }));
     return deletedKeys;
   } catch (error) {
     throw new Error(`Failed to delete keys from YAML file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);

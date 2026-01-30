@@ -347,6 +347,49 @@ en:
       });
     });
 
+    describe('line width handling', () => {
+      it('does not wrap long strings to preserve original formatting', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const longString = 'This is a very long string that would normally be wrapped at 80 characters if line width was enabled but should remain on a single line';
+        const translations = {
+          'description': longString
+        };
+
+        await updateTranslationFile(filePath, translations, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        // The long string should be on a single line, not wrapped
+        expect(content).toContain(`description: ${longString}`);
+        // Should NOT contain the folded block style indicator
+        expect(content).not.toMatch(/description: [>|]/);
+      });
+
+      it('preserves long strings without wrapping when updating existing file', async () => {
+        const filePath = path.join(tempDir, 'en.yml');
+        const initialContent = `en:
+  title: "Short title"
+  tagline: "Original tagline"
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        const longTagline = 'TaskFlow helps teams stay organized and ship projects together. Simple tools, happy teams, great results for everyone.';
+        await updateTranslationFile(filePath, {
+          'tagline': longTagline
+        }, 'en');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        // The updated long string should remain on one line (may be quoted)
+        expect(content).toMatch(new RegExp(`tagline: "?${longTagline.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"?`));
+        // Should NOT be wrapped to multiple lines with folded/literal block style
+        expect(content).not.toMatch(/tagline: >\n/);
+        expect(content).not.toMatch(/tagline: \|\n/);
+        // Verify the entire tagline appears on a single line (not split across multiple lines)
+        const lines = content.split('\n');
+        const taglineLine = lines.find(line => line.includes('tagline:'));
+        expect(taglineLine).toContain(longTagline);
+      });
+    });
+
     describe('multiline string handling', () => {
       it('formats long text from API as multiline when it contains newlines', async () => {
         const filePath = path.join(tempDir, 'en.yml');
