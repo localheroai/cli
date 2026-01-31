@@ -9,6 +9,22 @@ import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
 type FileWithPath = { path: string };
 
 /**
+ * Extract the content under the locale wrapper if present.
+ * YAML/JSON files often have structure like { en: { key: value } }.
+ * This extracts the inner object to get keys without the locale prefix.
+ */
+export function extractLocaleContent(
+  obj: Record<string, any>,
+  locale: string
+): Record<string, any> {
+  const wrapper = obj[locale];
+  if (wrapper && typeof wrapper === 'object' && !Array.isArray(wrapper)) {
+    return wrapper;
+  }
+  return obj;
+}
+
+/**
  * Git integration for --changed-only flag
  * This module filters translations to only include keys that changed in the current branch
  */
@@ -269,7 +285,8 @@ function getChangedKeys(
           }
         );
         const oldObj = parseFile(oldContent, file.format, file.path);
-        oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldObj);
+        const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
+        oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
 
       } catch (error) {
         const err = error as Error;
@@ -287,7 +304,8 @@ function getChangedKeys(
       // Get current version from working directory
       const newContent = readFileSync(file.path, 'utf-8');
       const newObj = parseFile(newContent, file.format, file.path);
-      const newFlat = isPo ? extractPoKeys(newObj) : flattenTranslations(newObj);
+      const newTranslations = isPo ? newObj : extractLocaleContent(newObj, file.locale);
+      const newFlat = isPo ? extractPoKeys(newObj) : flattenTranslations(newTranslations);
 
       // Compare flattened objects to find changed keys
       const fileChangedKeys: string[] = [];

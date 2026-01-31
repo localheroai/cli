@@ -8,6 +8,7 @@ jest.unstable_mockModule('child_process', () => ({
 }));
 
 let filterByGitChanges;
+let extractLocaleContent;
 let gitDiffModule;
 
 import * as actualFs from 'fs';
@@ -20,6 +21,7 @@ jest.unstable_mockModule('fs', () => ({
 beforeAll(async () => {
   gitDiffModule = await import('../../src/utils/git-changes.js');
   filterByGitChanges = gitDiffModule.filterByGitChanges;
+  extractLocaleContent = gitDiffModule.extractLocaleContent;
 });
 
 function setupGitMock({
@@ -255,18 +257,19 @@ describe('git-changes module (object-based diff)', () => {
         path: 'locales/en.yml',
         targetPath: 'locales/fr.yml',
         keys: {
-          'en.user.name': { value: 'Name', sourceKey: 'en.user.name' },
-          'en.user.email': { value: 'Email', sourceKey: 'en.user.email' },
-          'en.user.other': { value: 'Other', sourceKey: 'en.user.other' }
+          'user.name': { value: 'Name', sourceKey: 'user.name' },
+          'user.email': { value: 'Email', sourceKey: 'user.email' },
+          'user.other': { value: 'Other', sourceKey: 'user.other' }
         },
         keyCount: 3
       };
 
       const result = filterByGitChanges(yamlSourceFiles, mockMissingByLocale, mockConfig, false);
 
-      expect(result['fr:locales/en.yml'].keys['en.user.name']).toBeDefined();
-      expect(result['fr:locales/en.yml'].keys['en.user.email']).toBeDefined();
-      expect(result['fr:locales/en.yml'].keys['en.user.other']).toBeUndefined();
+      // Changed keys (name, email) should be included, unchanged key (other) should not
+      expect(result['fr:locales/en.yml'].keys['user.name']).toBeDefined();
+      expect(result['fr:locales/en.yml'].keys['user.email']).toBeDefined();
+      expect(result['fr:locales/en.yml'].keys['user.other']).toBeUndefined();
     });
   });
 
@@ -656,5 +659,37 @@ msgstr[1] "Delete items"
       expect(result).toHaveLength(1);
       expect(result[0].path).toBe('locales/en.json');
     });
+  });
+});
+
+describe('extractLocaleContent', () => {
+  it('extracts content under locale key when present', () => {
+    const obj = {
+      en: {
+        dashboard: { welcome: 'Hello', overview: 'Your overview' }
+      }
+    };
+
+    const result = extractLocaleContent(obj, 'en');
+
+    expect(result).toEqual({
+      dashboard: { welcome: 'Hello', overview: 'Your overview' }
+    });
+  });
+
+  it('returns original object when locale key not present', () => {
+    const obj = { dashboard: { welcome: 'Hello' } };
+
+    const result = extractLocaleContent(obj, 'en');
+
+    expect(result).toEqual({ dashboard: { welcome: 'Hello' } });
+  });
+
+  it('returns original object when locale key is not an object', () => {
+    const obj = { en: 'just a string', dashboard: { welcome: 'Hello' } };
+
+    const result = extractLocaleContent(obj, 'en');
+
+    expect(result).toEqual(obj);
   });
 });
