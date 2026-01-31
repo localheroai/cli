@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.32] - 2026-01-31
+
+### Fixed
+- Fixed `--changed-only` flag not detecting keys in YAML files with locale wrapper (e.g., `{ en: { ... } }`)
+
+## [0.0.31] - 2026-01-30
+
+### Fixed
+- Fixed YAML line width handling to prevent formatting issues
+
 ## [0.0.30] - 2026-01-30
 
 ### Fixed
