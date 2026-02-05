@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.33] - 2026-02-05
+
+### Added
+- Support for sync triggers (`LOCALHERO_SYNC_ID` and `LOCALHERO_SYNC_VERSION`) via dipatch event
+
 ## [0.0.32] - 2026-01-31
 
 ### Fixed
