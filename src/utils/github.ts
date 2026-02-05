@@ -246,6 +246,19 @@ jobs:
     }
   },
 
+  canAmendLastCommit(isSyncMode: boolean): boolean {
+    if (!isSyncMode) return false;
+    const { exec } = this.deps;
+    try {
+      const authorEmail = exec('git log -1 --format=%ae').toString().trim();
+      if (!authorEmail.includes('localhero')) return false;
+      const diff = exec('git log -1 --format= -p -- localhero.json').toString();
+      return diff.includes('syncTriggerId');
+    } catch {
+      return false;
+    }
+  },
+
   /**
    * Commit with the given message
    * @param message Commit message
@@ -291,7 +304,11 @@ jobs:
    * @param modifiedFiles List of file paths that were modified
    * @param syncSummary Optional summary of sync results
    */
-  async autoCommitSyncChanges(modifiedFiles: string[], syncSummary?: CommitSummary): Promise<void> {
+  async autoCommitSyncChanges(
+    modifiedFiles: string[],
+    syncSummary?: CommitSummary,
+    options?: { branchName?: string }
+  ): Promise<void> {
     const { exec, console: log } = this.deps;
 
     if (!this.isGitHubAction()) return;
@@ -299,7 +316,7 @@ jobs:
     log.log('\nCommitting sync changes...');
     try {
       this.configureGitUser();
-      const branchName = this.getBranchName();
+      const branchName = options?.branchName || this.getBranchName();
 
       let commitMessage = 'Sync translations from LocalHero.ai';
 
@@ -328,8 +345,7 @@ jobs:
         return;
       }
 
-      // Only amend if last commit was by LocalHero bot - don't amend other developers' commits
-      const canAmend = this.isLastCommitByLocalHero();
+      const canAmend = this.canAmendLastCommit(true);
       this.commit(commitMessage, canAmend);
 
       const token = await this.getTokenForPush();

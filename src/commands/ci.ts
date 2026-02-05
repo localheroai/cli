@@ -7,8 +7,6 @@ import { githubService } from '../utils/github.js';
 import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 
-// CiOptions is an alias for TranslationOptions
-// The ci command accepts all the same options as translate
 export type CiOptions = TranslationOptions;
 
 interface CiDependencies {
@@ -93,6 +91,7 @@ async function runSyncMode(
   let currentPage = 1;
   let totalPages = 1;
   let syncUrl: string | undefined;
+  let branchName: string | undefined;
 
   try {
     while (currentPage <= totalPages) {
@@ -104,6 +103,7 @@ async function runSyncMode(
 
       if (currentPage === 1) {
         syncUrl = response.sync.sync_url;
+        branchName = response.sync.branch_name;
       }
 
       allFiles.push(...response.sync.files);
@@ -164,11 +164,11 @@ async function runSyncMode(
 
   if (githubUtils.isGitHubAction()) {
     const languages = [...new Set(allFiles.map(f => f.language))];
-    await githubUtils.autoCommitSyncChanges(modifiedFiles, {
-      keysTranslated: translationsUpdated,
-      languages,
-      viewUrl: syncUrl
-    });
+    await githubUtils.autoCommitSyncChanges(
+      modifiedFiles,
+      { keysTranslated: translationsUpdated, languages, viewUrl: syncUrl },
+      { branchName }
+    );
   }
 
   if (options?.syncUpdateVersion) {
@@ -211,14 +211,17 @@ export async function ci(
     process.exit(1);
   }
 
-  const syncTriggerId = config.syncTriggerId;
+  const syncTriggerId = deps.env.LOCALHERO_SYNC_ID || config.syncTriggerId;
+  const syncUpdateVersion = deps.env.LOCALHERO_SYNC_VERSION
+    ? parseInt(deps.env.LOCALHERO_SYNC_VERSION, 10)
+    : config.syncUpdateVersion;
 
   if (syncTriggerId) {
     if (options.verbose) {
       console.log(chalk.blue('📥 Sync mode detected'));
     }
     try {
-      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion: config.syncUpdateVersion });
+      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(chalk.red('\n✖ Sync failed:', errorMessage));

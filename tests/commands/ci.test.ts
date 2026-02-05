@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { ci, CiOptions } from '../../src/commands/ci.js';
 import type { TranslationOptions } from '../../src/commands/translate.js';
 
@@ -208,6 +208,125 @@ describe('ci command', () => {
         expect.stringContaining('Warning: This command is designed to run in CI/CD environments')
       );
 
+      expect(mockTranslateCommand).toHaveBeenCalled();
+    });
+  });
+
+  describe('sync mode detection', () => {
+    let mockExit: jest.SpiedFunction<typeof process.exit>;
+
+    beforeEach(() => {
+      mockExit = jest.spyOn(process, 'exit').mockImplementation((code?: string | number | null | undefined) => {
+        throw new Error(`Process exit: ${code}`);
+      });
+    });
+
+    afterEach(() => {
+      mockExit.mockRestore();
+    });
+
+    it('should detect sync mode from LOCALHERO_SYNC_ID env var', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc123';
+
+      await expect(ci({ verbose: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      })).rejects.toThrow();
+
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        expect.stringContaining('Sync mode detected')
+      );
+      expect(mockTranslateCommand).not.toHaveBeenCalled();
+    });
+
+    it('should detect sync mode from config.syncTriggerId (backward compat)', async () => {
+      mockConfigUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] },
+        syncTriggerId: 'sync_from_config'
+      });
+
+      await expect(ci({ verbose: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      })).rejects.toThrow();
+
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        expect.stringContaining('Sync mode detected')
+      );
+      expect(mockTranslateCommand).not.toHaveBeenCalled();
+    });
+
+    it('should prefer LOCALHERO_SYNC_ID env var over config.syncTriggerId', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_from_env';
+
+      mockConfigUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] },
+        syncTriggerId: 'sync_from_config'
+      });
+
+      await expect(ci({ verbose: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      })).rejects.toThrow();
+
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        expect.stringContaining('Sync mode detected')
+      );
+      expect(mockTranslateCommand).not.toHaveBeenCalled();
+    });
+
+    it('should pass syncUpdateVersion from LOCALHERO_SYNC_VERSION env var', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc123';
+      mockEnv.LOCALHERO_SYNC_VERSION = '3';
+
+      await expect(ci({ verbose: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      })).rejects.toThrow();
+
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        expect.stringContaining('Sync mode detected')
+      );
+      expect(mockTranslateCommand).not.toHaveBeenCalled();
+    });
+
+    it('should enter translate mode when no sync trigger is present', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature/test';
+
+      await ci({ verbose: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        expect.stringContaining('Translate mode detected')
+      );
       expect(mockTranslateCommand).toHaveBeenCalled();
     });
   });

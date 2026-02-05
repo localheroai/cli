@@ -45,6 +45,7 @@ export interface SyncResponse {
     sync_url?: string;
     pr_url?: string;
     pr_number?: number;
+    branch_name?: string;
     files: SyncFile[];
   };
   pagination: PaginationMetadata;
