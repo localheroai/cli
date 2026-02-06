@@ -126,7 +126,7 @@ async function runSyncMode(
   const config = await configUtils.getValidProjectConfig();
   const modifiedFiles: string[] = [];
   let filesUpdated = 0;
-  let translationsUpdated = 0;
+  const uniqueKeys = new Set<string>();
 
   const projectRoot = process.cwd();
 
@@ -153,20 +153,21 @@ async function runSyncMode(
     );
 
     filesUpdated++;
-    translationsUpdated += file.translations.length;
+    file.translations.forEach(t => uniqueKeys.add(t.key));
     modifiedFiles.push(file.path);
   }
 
   // Remove syncTriggerId by re-saving config (saveProjectConfig strips it automatically)
   await configUtils.saveProjectConfig(config);
 
-  console.log(chalk.green(`\n✓ Synced ${translationsUpdated} translations across ${filesUpdated} files`));
+  const keysUpdated = uniqueKeys.size;
+  console.log(chalk.green(`\n✓ Synced ${keysUpdated} keys across ${filesUpdated} files`));
 
   if (githubUtils.isGitHubAction()) {
     const languages = [...new Set(allFiles.map(f => f.language))];
     await githubUtils.autoCommitSyncChanges(
       modifiedFiles,
-      { keysTranslated: translationsUpdated, languages, viewUrl: syncUrl },
+      { keysTranslated: keysUpdated, languages, viewUrl: syncUrl },
       { branchName }
     );
   }

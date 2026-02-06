@@ -245,7 +245,7 @@ describe('githubService', () => {
         viewUrl: 'https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ'
       });
 
-      const expectedMessage = 'Update translations\n\nTranslated 15 keys in German, French, Spanish\nView results at https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
+      const expectedMessage = 'Translate 15 keys via LocalHero\n\n15 keys in German, French, Spanish\nDetails at https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
@@ -459,6 +459,85 @@ describe('githubService', () => {
       await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toThrow('Repository not found');
       expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (1/3)...');
       expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (2/3)...');
+    });
+  });
+
+  describe('autoCommitSyncChanges', () => {
+    it('does nothing when not in GitHub Actions', async () => {
+      mockEnv.GITHUB_ACTIONS = 'false';
+      await githubService.autoCommitSyncChanges(['locales/sv.json']);
+      expect(mockExec).not.toHaveBeenCalled();
+    });
+
+    it('commits with sync message and viewUrl', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/sv.json');
+        if (cmd === 'git log -1 --format=%ae') return Buffer.from('other@example.com');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(
+        ['locales/sv.json'],
+        { viewUrl: 'https://localhero.ai/r/abc123' }
+      );
+
+      const expectedMessage = 'Sync translations from LocalHero\n\nDetails at https://localhero.ai/r/abc123';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
+    it('commits with subject-only when no viewUrl', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/sv.json');
+        if (cmd === 'git log -1 --format=%ae') return Buffer.from('other@example.com');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+      expect(mockExec).toHaveBeenCalledWith("git commit -m 'Sync translations from LocalHero'", { stdio: 'inherit' });
+    });
+
+    it('stages each modified file and localhero.json', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/sv.json');
+        if (cmd === 'git log -1 --format=%ae') return Buffer.from('other@example.com');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.json', 'locales/no.json']);
+
+      expect(mockExec).toHaveBeenCalledWith('git add "locales/sv.json"', { stdio: 'inherit' });
+      expect(mockExec).toHaveBeenCalledWith('git add "locales/no.json"', { stdio: 'inherit' });
+      expect(mockExec).toHaveBeenCalledWith('git add localhero.json', { stdio: 'inherit' });
+    });
+
+    it('skips commit when no staged changes', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+      expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
     });
   });
 });

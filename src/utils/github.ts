@@ -306,7 +306,7 @@ jobs:
    */
   async autoCommitSyncChanges(
     modifiedFiles: string[],
-    syncSummary?: CommitSummary,
+    syncSummary?: Pick<CommitSummary, 'viewUrl'>,
     options?: { branchName?: string }
   ): Promise<void> {
     const { exec, console: log } = this.deps;
@@ -318,22 +318,9 @@ jobs:
       this.configureGitUser();
       const branchName = options?.branchName || this.getBranchName();
 
-      let commitMessage = 'Sync translations from LocalHero.ai';
-
-      if (syncSummary && syncSummary.keysTranslated > 0) {
-        const { keysTranslated, languages, viewUrl } = syncSummary;
-        const languageList = languages.join(', ');
-
-        if (keysTranslated > 1) {
-          commitMessage += `\n\nSynced ${keysTranslated} translations in ${languageList}`;
-        } else {
-          commitMessage += `\n\nSynced ${keysTranslated} translation in ${languageList}`;
-        }
-
-        if (viewUrl) {
-          commitMessage += `\nView results at ${viewUrl}`;
-        }
-      }
+      const commitMessage = syncSummary?.viewUrl
+        ? `Sync translations from LocalHero\n\nDetails at ${syncSummary.viewUrl}`
+        : 'Sync translations from LocalHero';
 
       for (const filePath of modifiedFiles) {
         exec(`git add "${filePath}"`, { stdio: 'inherit' });
@@ -392,13 +379,15 @@ jobs:
         const languageList = languages.join(', ');
 
         if (keysTranslated > 1) {
-          commitMessage += `\n\nTranslated ${keysTranslated} keys in ${languageList}`;
+          commitMessage = `Translate ${keysTranslated} keys via LocalHero`;
         } else {
-          commitMessage += `\n\nTranslated ${keysTranslated} key in ${languageList}`;
+          commitMessage = 'Translate 1 key via LocalHero';
         }
 
+        commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
+
         if (viewUrl) {
-          commitMessage += `\nView results at ${viewUrl}`;
+          commitMessage += `\nDetails at ${viewUrl}`;
         }
       }
 
