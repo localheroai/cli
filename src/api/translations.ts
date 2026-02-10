@@ -120,6 +120,7 @@ export async function getTranslations(jobId: string): Promise<TranslationsRespon
 export interface GetUpdatesParams {
   since: string;
   page?: number;
+  branch?: string;
 }
 
 // Translation update
@@ -149,7 +150,7 @@ export interface UpdatesResponse {
  */
 export async function getUpdates(
   projectId: string,
-  { since, page = 1 }: GetUpdatesParams
+  { since, page = 1, branch }: GetUpdatesParams
 ): Promise<UpdatesResponse> {
   const apiKey = await getApiKey();
 
@@ -161,6 +162,10 @@ export async function getUpdates(
     since,
     page: page.toString()
   });
+
+  if (branch) {
+    queryParams.set('branch', branch);
+  }
 
   return apiRequest(`/api/v1/projects/${projectId}/updates?${queryParams}`, { apiKey });
 }

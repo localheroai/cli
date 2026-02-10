@@ -213,5 +213,27 @@ describe('translations API', () => {
         .rejects
         .toThrow('Missing required parameter: since (ISO 8601 timestamp)');
     });
+
+    it('includes branch in query params when provided', async () => {
+      mockApiRequest.mockResolvedValueOnce({ updates: {}, pagination: {} });
+
+      const projectId = 'test-project';
+      const since = '2024-03-15T00:00:00Z';
+      await getUpdates(projectId, { since, branch: 'feature/my-branch' });
+
+      const calledUrl = mockApiRequest.mock.calls[0][0];
+      expect(calledUrl).toContain('branch=feature%2Fmy-branch');
+    });
+
+    it('omits branch from query params when not provided', async () => {
+      mockApiRequest.mockResolvedValueOnce({ updates: {}, pagination: {} });
+
+      const projectId = 'test-project';
+      const since = '2024-03-15T00:00:00Z';
+      await getUpdates(projectId, { since });
+
+      const calledUrl = mockApiRequest.mock.calls[0][0];
+      expect(calledUrl).not.toContain('branch');
+    });
   });
 });

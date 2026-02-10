@@ -6,6 +6,7 @@ describe('syncService', () => {
   let mockTranslationUpdater;
   let mockConsole;
   let mockFilesUtils;
+  let mockGetCurrentBranch;
   let syncService;
   let originalConsole;
 
@@ -41,6 +42,8 @@ describe('syncService', () => {
       })
     };
 
+    mockGetCurrentBranch = jest.fn().mockResolvedValue(null);
+
     originalConsole = { ...console };
     mockConsole = {
       log: jest.fn(),
@@ -60,6 +63,10 @@ describe('syncService', () => {
 
     await jest.unstable_mockModule('../../src/utils/files.js', () => ({
       findTranslationFiles: mockFilesUtils.findTranslationFiles
+    }));
+
+    await jest.unstable_mockModule('../../src/utils/git.js', () => ({
+      getCurrentBranch: mockGetCurrentBranch
     }));
 
     const syncServiceModule = await import('../../src/utils/sync-service.js');
@@ -149,6 +156,38 @@ describe('syncService', () => {
       await syncService.checkForUpdates({ verbose: true });
 
       expect(mockTranslationsApi.getUpdates).toHaveBeenCalledTimes(500);
+    });
+
+    it('passes branch to getUpdates when on a git branch', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue(testConfig);
+      mockGetCurrentBranch.mockResolvedValueOnce('feature/my-branch');
+      mockTranslationsApi.getUpdates.mockResolvedValue({
+        updates: { updated_keys: [], deleted_keys: [] },
+        pagination: { current_page: 1, total_pages: 1, total_count: 0 }
+      });
+
+      await syncService.checkForUpdates();
+
+      expect(mockGetCurrentBranch).toHaveBeenCalled();
+      expect(mockTranslationsApi.getUpdates).toHaveBeenCalledWith(
+        'test-project',
+        expect.objectContaining({ branch: 'feature/my-branch' })
+      );
+    });
+
+    it('omits branch from getUpdates when not in a git repo', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue(testConfig);
+      mockGetCurrentBranch.mockResolvedValueOnce(null);
+      mockTranslationsApi.getUpdates.mockResolvedValue({
+        updates: { updated_keys: [], deleted_keys: [] },
+        pagination: { current_page: 1, total_pages: 1, total_count: 0 }
+      });
+
+      await syncService.checkForUpdates();
+
+      expect(mockGetCurrentBranch).toHaveBeenCalled();
+      const callArgs = mockTranslationsApi.getUpdates.mock.calls[0][1];
+      expect(callArgs.branch).toBeUndefined();
     });
 
     it('includes deleted keys in the updates', async () => {

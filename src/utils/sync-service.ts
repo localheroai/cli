@@ -3,6 +3,7 @@ import { configService } from './config.js';
 import { getUpdates, GetUpdatesParams } from '../api/translations.js';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater/index.js';
 import { findTranslationFiles } from './files.js';
+import { getCurrentBranch } from './git.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult } from '../types/index.js';
 
@@ -77,6 +78,7 @@ export const syncService: SyncService = {
     }
 
     const since = config.lastSyncedAt || new Date(0).toISOString();
+    const branch = await getCurrentBranch();
 
     if (verbose) {
       console.log(chalk.blue(`Checking for updates since ${since}`));
@@ -88,7 +90,7 @@ export const syncService: SyncService = {
     let hasMorePages = true;
 
     while (hasMorePages && currentPage <= MAX_PAGES) {
-      const params: GetUpdatesParams = { since, page: currentPage };
+      const params: GetUpdatesParams = { since, page: currentPage, ...(branch && { branch }) };
       const response = await getUpdates(config.projectId, params) as unknown as ApiUpdateResponse;
 
       if (response.updates?.updated_keys?.length) {
