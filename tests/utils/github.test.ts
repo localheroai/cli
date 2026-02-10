@@ -469,7 +469,7 @@ describe('githubService', () => {
       expect(mockExec).not.toHaveBeenCalled();
     });
 
-    it('commits with sync message and viewUrl', async () => {
+    it('commits with sync message including key count, languages and url', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockEnv.GITHUB_TOKEN = 'fake-token';
@@ -483,14 +483,14 @@ describe('githubService', () => {
 
       await githubService.autoCommitSyncChanges(
         ['locales/sv.json'],
-        { viewUrl: 'https://localhero.ai/r/abc123' }
+        { keysTranslated: 8, languages: ['en', 'fr', 'sv'], viewUrl: 'https://localhero.ai/r/abc123' }
       );
 
-      const expectedMessage = 'Sync translations from LocalHero\n\nDetails at https://localhero.ai/r/abc123';
+      const expectedMessage = 'Sync translations\n\nSynced 8 keys in en, fr, sv\n\nhttps://localhero.ai/r/abc123';
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
-    it('commits with subject-only when no viewUrl', async () => {
+    it('commits with subject-only when no summary', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockEnv.GITHUB_TOKEN = 'fake-token';
@@ -504,7 +504,7 @@ describe('githubService', () => {
 
       await githubService.autoCommitSyncChanges(['locales/sv.json']);
 
-      expect(mockExec).toHaveBeenCalledWith("git commit -m 'Sync translations from LocalHero'", { stdio: 'inherit' });
+      expect(mockExec).toHaveBeenCalledWith("git commit -m 'Sync translations'", { stdio: 'inherit' });
     });
 
     it('stages each modified file and localhero.json', async () => {

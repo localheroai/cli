@@ -259,11 +259,21 @@ jobs:
     }
   },
 
-  /**
-   * Commit with the given message
-   * @param message Commit message
-   * @param amend Whether to amend the previous commit
-   */
+  buildSyncCommitMessage(summary?: CommitSummary): string {
+    const lines = ['Sync translations'];
+
+    if (summary?.keysTranslated && summary.languages?.length) {
+      const keyWord = summary.keysTranslated === 1 ? 'key' : 'keys';
+      lines.push(`Synced ${summary.keysTranslated} ${keyWord} in ${summary.languages.join(', ')}`);
+    }
+
+    if (summary?.viewUrl) {
+      lines.push(summary.viewUrl);
+    }
+
+    return lines.join('\n\n');
+  },
+
   commit(message: string, amend: boolean = false): void {
     const { exec } = this.deps;
     const escapedMessage = message.replace(/'/g, "'\\''");
@@ -306,7 +316,7 @@ jobs:
    */
   async autoCommitSyncChanges(
     modifiedFiles: string[],
-    syncSummary?: Pick<CommitSummary, 'viewUrl'>,
+    syncSummary?: CommitSummary,
     options?: { branchName?: string }
   ): Promise<void> {
     const { exec, console: log } = this.deps;
@@ -318,9 +328,7 @@ jobs:
       this.configureGitUser();
       const branchName = options?.branchName || this.getBranchName();
 
-      const commitMessage = syncSummary?.viewUrl
-        ? `Sync translations from LocalHero\n\nDetails at ${syncSummary.viewUrl}`
-        : 'Sync translations from LocalHero';
+      const commitMessage = this.buildSyncCommitMessage(syncSummary);
 
       for (const filePath of modifiedFiles) {
         exec(`git add "${filePath}"`, { stdio: 'inherit' });
