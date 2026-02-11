@@ -264,7 +264,7 @@ jobs:
 
     if (summary?.keysTranslated && summary.languages?.length) {
       const keyWord = summary.keysTranslated === 1 ? 'key' : 'keys';
-      lines.push(`Synced ${summary.keysTranslated} ${keyWord} in ${summary.languages.join(', ')}`);
+      lines.push(`${summary.keysTranslated} ${keyWord} in ${summary.languages.join(', ')}`);
     }
 
     if (summary?.viewUrl) {
@@ -386,10 +386,10 @@ jobs:
         const { keysTranslated, languages, viewUrl } = translationSummary;
         const languageList = languages.join(', ');
 
-        commitMessage += `\n\nSynced ${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
+        commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
 
         if (viewUrl) {
-          commitMessage += `\n${viewUrl}`;
+          commitMessage += `\n\n${viewUrl}`;
         }
       }
 

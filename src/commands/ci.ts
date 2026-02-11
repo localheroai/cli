@@ -92,6 +92,7 @@ async function runSyncMode(
   let totalPages = 1;
   let syncUrl: string | undefined;
   let branchName: string | undefined;
+  let modifiedKeysCount: number | undefined;
 
   try {
     while (currentPage <= totalPages) {
@@ -104,6 +105,7 @@ async function runSyncMode(
       if (currentPage === 1) {
         syncUrl = response.sync.sync_url;
         branchName = response.sync.branch_name;
+        modifiedKeysCount = response.sync.modified_keys_count;
       }
 
       allFiles.push(...response.sync.files);
@@ -160,7 +162,8 @@ async function runSyncMode(
   // Remove syncTriggerId by re-saving config (saveProjectConfig strips it automatically)
   await configUtils.saveProjectConfig(config);
 
-  const keysUpdated = uniqueKeys.size;
+  const keysProcessed = uniqueKeys.size;
+  const keysUpdated = modifiedKeysCount ?? keysProcessed;
   console.log(chalk.green(`\n✓ Synced ${keysUpdated} keys across ${filesUpdated} files`));
 
   if (githubUtils.isGitHubAction()) {

@@ -241,11 +241,11 @@ describe('githubService', () => {
 
       await autoCommitChanges('locales/**/*.json', {
         keysTranslated: 15,
-        languages: ['German', 'French', 'Spanish'],
+        languages: ['de', 'fr', 'es'],
         viewUrl: 'https://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ'
       });
 
-      const expectedMessage = 'Update translations\n\nSynced 15 keys in German, French, Spanish\nhttps://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
+      const expectedMessage = 'Update translations\n\n15 keys in de, fr, es\n\nhttps://localhero.ai/r/QfH8nfDs5IHqfcxDYjFCJ';
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
@@ -486,7 +486,7 @@ describe('githubService', () => {
         { keysTranslated: 8, languages: ['en', 'fr', 'sv'], viewUrl: 'https://localhero.ai/r/abc123' }
       );
 
-      const expectedMessage = 'Sync translations\n\nSynced 8 keys in en, fr, sv\n\nhttps://localhero.ai/r/abc123';
+      const expectedMessage = 'Sync translations\n\n8 keys in en, fr, sv\n\nhttps://localhero.ai/r/abc123';
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
