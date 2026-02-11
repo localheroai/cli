@@ -43,11 +43,33 @@ en:
       });
 
       const updatedContent = fs.readFileSync(filePath, 'utf8');
-      // The yaml library uses its own style but should preserve special character quoting
       expect(updatedContent).toContain('greeting: "Hi, %{name}!"');
-      // Simple format now, but we at least preserve comments
-      expect(updatedContent).toContain("message: Hello");
+      expect(updatedContent).toContain("message: 'Hello'");
       expect(updatedContent).toContain('plain: simple');
+    });
+
+    it('preserves double quotes on plain values to avoid unnecessary diffs', async () => {
+      const filePath = path.join(tempDir, 'en.yml');
+      const initialContent = `en:
+  dashboard:
+    stats:
+      total_tasks: "Total Tasks"
+      in_progress: "In Progress"
+      completed: "Completed"
+      overdue: "Needs attention"
+`;
+      fs.writeFileSync(filePath, initialContent);
+
+      await updateTranslationFile(filePath, {
+        'dashboard.stats.total_tasks': 'Total Tasks',
+        'dashboard.stats.overdue': 'Needs attention'
+      });
+
+      const updatedContent = fs.readFileSync(filePath, 'utf8');
+      expect(updatedContent).toContain('"Total Tasks"');
+      expect(updatedContent).toContain('"In Progress"');
+      expect(updatedContent).toContain('"Completed"');
+      expect(updatedContent).toContain('"Needs attention"');
     });
 
     it('adds quotes for values with special characters', async () => {
@@ -448,8 +470,7 @@ en:
         expect(content).toContain('    First line');
         expect(content).toContain('    Second line');
         expect(content).toContain('    Third line');
-        // The document API doesn't preserve quotes on simple strings
-        expect(content).toContain('  title: New Title');
+        expect(content).toContain('  title: "New Title"');
       });
 
       it('handles multiline strings with empty lines and special characters', async () => {
@@ -606,9 +627,8 @@ en:
         // Section comments should be preserved
         expect(content).toContain('# Section for all button texts');
         expect(content).toContain('# User messages section');
-        // The yaml library preserves comments but might change quote formats
-        expect(content).toContain('submit: Save');
-        expect(content).toContain('welcome: Hello');
+        expect(content).toContain('submit: "Save"');
+        expect(content).toContain('welcome: "Hello"');
 
         // Check for comment presence (the yaml library might move inline comments)
         // Note: Sometimes the yaml library might move inline comments to their own lines

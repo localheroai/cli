@@ -55,6 +55,10 @@ function detectYamlOptions(content: string): YamlOptions {
   return options;
 }
 
+function isQuotedType(type: string | null | undefined): boolean {
+  return type === 'QUOTE_DOUBLE' || type === 'QUOTE_SINGLE';
+}
+
 function needsQuotes(str: unknown): boolean {
   if (typeof str !== 'string') return false;
 
@@ -173,8 +177,11 @@ async function updateYamlTranslations(
     }
 
     const node = yamlDoc.createNode(newValue) as YamlScalar;
+    const existingNode = current.get(lastKey, true);
     if (needsQuotes(newValue)) {
       node.type = 'QUOTE_DOUBLE';
+    } else if (yaml.isScalar(existingNode) && isQuotedType(existingNode.type)) {
+      node.type = existingNode.type;
     }
     current.set(lastKey, node);
   }
