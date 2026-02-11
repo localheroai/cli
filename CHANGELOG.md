@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Simplified CI commit messages for translate mode
+- Preserved existing quote style when updating YAML translation files to avoid unnecessary diffs
+
+## [0.0.34] - 2026-02-11
+
+### Changed
+- Improved CI commit messages with shorter subject lines and unique key counting
+- Pull command now sends branch name for better sync tracking
+
 ## [0.0.33] - 2026-02-05
 
 ### Added
