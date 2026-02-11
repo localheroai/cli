@@ -386,16 +386,10 @@ jobs:
         const { keysTranslated, languages, viewUrl } = translationSummary;
         const languageList = languages.join(', ');
 
-        if (keysTranslated > 1) {
-          commitMessage = `Translate ${keysTranslated} keys via LocalHero`;
-        } else {
-          commitMessage = 'Translate 1 key via LocalHero';
-        }
-
-        commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
+        commitMessage += `\n\nSynced ${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
 
         if (viewUrl) {
-          commitMessage += `\nDetails at ${viewUrl}`;
+          commitMessage += `\n${viewUrl}`;
         }
       }
 
