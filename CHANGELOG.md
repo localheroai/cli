@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.37] - 2026-02-15
+
+### Added
+- New `glossary` and `settings` commands for AI agent tool integration
+- `--api-key` flag for `login` command to authenticate non-interactively
+
+## [0.0.36] - 2026-02-11
+
+### Changed
+- Aligned CI commit message format and switched to API-reported key counts
+
+## [0.0.35] - 2026-02-11
+
 ### Changed
 - Simplified CI commit messages for translate mode
 - Preserved existing quote style when updating YAML translation files to avoid unnecessary diffs
@@ -133,3 +146,23 @@ All notable changes to this project will be documented in this file.
 - Improved GitHub Actions integration - skip running action on tag pushes, use `skip-translation` label on PRs to skip translation
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
+
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.37...HEAD
+[0.0.37]: https://github.com/localheroai/cli/compare/v0.0.36...v0.0.37
+[0.0.36]: https://github.com/localheroai/cli/compare/v0.0.35...v0.0.36
+[0.0.35]: https://github.com/localheroai/cli/compare/v0.0.34...v0.0.35
+[0.0.34]: https://github.com/localheroai/cli/compare/v0.0.33...v0.0.34
+[0.0.33]: https://github.com/localheroai/cli/compare/v0.0.32...v0.0.33
+[0.0.32]: https://github.com/localheroai/cli/compare/v0.0.31...v0.0.32
+[0.0.31]: https://github.com/localheroai/cli/compare/v0.0.30...v0.0.31
+[0.0.30]: https://github.com/localheroai/cli/compare/v0.0.29...v0.0.30
+[0.0.29]: https://github.com/localheroai/cli/compare/v0.0.28...v0.0.29
+[0.0.28]: https://github.com/localheroai/cli/compare/v0.0.27...v0.0.28
+[0.0.27]: https://github.com/localheroai/cli/compare/v0.0.26...v0.0.27
+[0.0.26]: https://github.com/localheroai/cli/compare/v0.0.25...v0.0.26
+[0.0.25]: https://github.com/localheroai/cli/compare/v0.0.23...v0.0.25
+[0.0.23]: https://github.com/localheroai/cli/compare/v0.0.22...v0.0.23
+[0.0.22]: https://github.com/localheroai/cli/compare/v0.0.21...v0.0.22
+[0.0.21]: https://github.com/localheroai/cli/compare/v0.0.20...v0.0.21
+[0.0.20]: https://github.com/localheroai/cli/compare/v0.0.19...v0.0.20
+[0.0.19]: https://github.com/localheroai/cli/compare/v0.0.18...v0.0.19
