@@ -48,14 +48,20 @@ The configuration file is used by the tool to interact with your translations an
 
 ```bash
 npx @localheroai/cli login
+npx @localheroai/cli login --api-key tk_xxx  # Non-interactive
 ```
 
-Authenticate with the API using your API key.  This will save your API key to `.localhero_key` and add the file to .gitignore if needed.
+Authenticate with the API using your API key. Saves to `.localhero_key` and adds it to .gitignore.
 
-Use this when:
-- Setting up a new development environment
-- Updating your API key
-- Verifying your authentication status
+### Glossary & Settings
+
+```bash
+npx @localheroai/cli glossary                 # View project glossary terms
+npx @localheroai/cli glossary --search work   # Search glossary
+npx @localheroai/cli settings                 # View project translation settings
+```
+
+Both support `--output json` for machine-readable output.
 
 ### Translate
 
@@ -180,6 +186,16 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
    - Check for missing translations and add new/updated translations to the repo.
 
 🚧 **Skip translations on a PR**: Add the `skip-translation` label to any PR to skip the translation workflow. Useful when you're still working on copy changes.
+
+## AI Assistant Integration 🤖
+
+Using an AI coding assistant (Claude Code, Cursor, etc.)? Install the Localhero.ai skill so your assistant writes correct source strings automatically:
+
+```bash
+npx skill add localheroai/agent-skill
+```
+
+Your assistant gets access to your project's glossary and style settings, as well as instructions on how to work with Localhero.ai in your project.
 
 ## Support 💬
 
