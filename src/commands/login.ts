@@ -95,5 +95,5 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
     console.log(chalk.white('  npx @localheroai/cli translate - to start translating'));
   }
 
-  console.log(chalk.dim('\nTip: Using an AI assistant? Install the Localhero.ai skill: npx skill add localheroai/agent-skill'));
+  console.log(chalk.dim('\nTip: Using an AI assistant? Install the Localhero.ai skill: npx skills add localheroai/agent-skill'));
 }

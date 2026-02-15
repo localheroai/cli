@@ -192,7 +192,7 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
 Using an AI coding assistant (Claude Code, Cursor, etc.)? Install the Localhero.ai skill so your assistant writes correct source strings automatically:
 
 ```bash
-npx skill add localheroai/agent-skill
+npx skills add localheroai/agent-skill
 ```
 
 Your assistant gets access to your project's glossary and style settings, as well as instructions on how to work with Localhero.ai in your project.
