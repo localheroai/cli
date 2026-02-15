@@ -12,6 +12,8 @@ import { init } from './commands/init.js';
 import { translate, TranslationOptions } from './commands/translate.js';
 import { ci, CiOptions } from './commands/ci.js';
 import { clone } from './commands/clone.js';
+import { glossary, GlossaryOptions } from './commands/glossary.js';
+import { settings, SettingsOptions } from './commands/settings.js';
 import { configService } from './utils/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -77,7 +79,8 @@ program
 program
   .command('login')
   .description('Authenticate with LocalHero.ai using an API key')
-  .action(wrapCommandAction(() => login()));
+  .option('--api-key <key>', 'API key for non-interactive authentication')
+  .action(wrapCommandAction((options: { apiKey?: string }) => login({ apiKey: options.apiKey })));
 
 program
   .command('init')
@@ -123,5 +126,18 @@ program
   .option('-v, --verbose', 'Show detailed progress information')
   .option('-f, --force', 'Force, override existing files')
   .action(wrapCommandAction((options: { verbose?: boolean; force?: boolean }) => clone(options)));
+
+program
+  .command('glossary')
+  .description('Show project glossary terms')
+  .option('-o, --output <format>', 'Output format (json)')
+  .option('-s, --search <query>', 'Search glossary terms')
+  .action(wrapCommandAction((options: GlossaryOptions) => glossary(options)));
+
+program
+  .command('settings')
+  .description('Show project translation settings')
+  .option('-o, --output <format>', 'Output format (json)')
+  .action(wrapCommandAction((options: SettingsOptions) => settings(options)));
 
 program.parse();

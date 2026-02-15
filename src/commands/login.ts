@@ -16,6 +16,7 @@ interface LoginDependencies {
   gitUtils?: { updateGitignore: (path: string) => Promise<boolean> };
   configUtils?: typeof configService;
   isCalledFromInit?: boolean;
+  apiKey?: string;
 }
 
 export async function login(deps: LoginDependencies = {}): Promise<void> {
@@ -26,7 +27,8 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
     verifyApiKey = defaultVerifyApiKey,
     gitUtils = { updateGitignore },
     configUtils = configService,
-    isCalledFromInit = false
+    isCalledFromInit = false,
+    apiKey: providedApiKey
   } = deps;
 
   const existingConfig = await configUtils.getAuthConfig(basePath);
@@ -35,7 +37,7 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
     console.log(chalk.yellow('\n⚠️  Warning: This will replace your existing API key configuration'));
   }
 
-  const apiKey = process.env.LOCALHERO_API_KEY || (
+  const apiKey = providedApiKey || process.env.LOCALHERO_API_KEY || (
     console.log('\n→ Get your API key from: https://localhero.ai/api-keys'),
     console.log('→ New to LocalHero? Sign up at: https://localhero.ai/signup'),
     console.log('\nThe API key will be saved to .localhero_key, and automatically added to your .gitignore file.\n'),
@@ -92,4 +94,6 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
     console.log(chalk.white('  npx @localheroai/cli clone - to download existing translations'));
     console.log(chalk.white('  npx @localheroai/cli translate - to start translating'));
   }
+
+  console.log(chalk.dim('\nTip: Using an AI assistant? Install the Localhero.ai skill: npx skill add localheroai/agent-skill'));
 }
