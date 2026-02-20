@@ -2,7 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.0.38] - 2026-02-20
+
+### Fixed
+- Fixed updating of PO file key renames on pull
 
 ## [0.0.37] - 2026-02-15
 
@@ -147,7 +150,8 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.37...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.38...HEAD
+[0.0.38]: https://github.com/localheroai/cli/compare/v0.0.37...v0.0.38
 [0.0.37]: https://github.com/localheroai/cli/compare/v0.0.36...v0.0.37
 [0.0.36]: https://github.com/localheroai/cli/compare/v0.0.35...v0.0.36
 [0.0.35]: https://github.com/localheroai/cli/compare/v0.0.34...v0.0.35
