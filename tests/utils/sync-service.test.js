@@ -428,6 +428,109 @@ describe('syncService', () => {
       expect(result.totalDeleted).toBe(2);
     });
 
+    it('passes TranslationWithMetadata array with old_values for PO files', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'sv',
+        outputLocales: ['en']
+      });
+
+      mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+        sourceFiles: [{ path: 'locale/sv/LC_MESSAGES/django.po', locale: 'sv' }],
+        allFiles: [],
+        targetFilesByLocale: {}
+      });
+
+      const poUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'locale/en/LC_MESSAGES/django.po',
+              languages: [
+                {
+                  code: 'en',
+                  translations: [
+                    {
+                      key: 'New key name',
+                      value: 'New key name translated',
+                      old_values: [{ key: 'Old key name' }]
+                    },
+                    {
+                      key: 'Unchanged key',
+                      value: 'Unchanged translation'
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['New key name', 'Unchanged key'],
+        created: false
+      });
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      await syncService.applyUpdates(poUpdates);
+
+      const translations = mockTranslationUpdater.updateTranslationFile.mock.calls[0][1];
+      expect(Array.isArray(translations)).toBe(true);
+      expect(translations).toEqual([
+        { key: 'New key name', value: 'New key name translated', old_values: [{ key: 'Old key name' }] },
+        { key: 'Unchanged key', value: 'Unchanged translation', old_values: undefined }
+      ]);
+    });
+
+    it('passes Record<string, string> for non-PO files even with old_values in response', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr']
+      });
+
+      mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        allFiles: [],
+        targetFilesByLocale: {}
+      });
+
+      const jsonUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'locales/fr.json',
+              languages: [
+                {
+                  code: 'fr',
+                  translations: [
+                    {
+                      key: 'greeting',
+                      value: 'Bonjour',
+                      old_values: [{ key: 'old_greeting' }]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      };
+
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['greeting'],
+        created: false
+      });
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      await syncService.applyUpdates(jsonUpdates);
+
+      const translations = mockTranslationUpdater.updateTranslationFile.mock.calls[0][1];
+      expect(Array.isArray(translations)).toBe(false);
+      expect(translations).toEqual({ greeting: 'Bonjour' });
+    });
+
     it('handles errors when deleting keys', async () => {
       const updatesWithDeleted = {
         updates: {

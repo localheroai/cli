@@ -5,16 +5,13 @@ import { updateTranslationFile, deleteKeysFromTranslationFile } from './translat
 import { findTranslationFiles } from './files.js';
 import { getCurrentBranch } from './git.js';
 import path from 'path';
-import { TranslationFile, TranslationFilesResult } from '../types/index.js';
+import { TranslationFile, TranslationFilesResult, TranslationWithMetadata } from '../types/index.js';
 
 const MAX_PAGES = parseInt(process.env.LOCALHERO_MAX_PAGES || '500');
 
 interface LanguageUpdate {
   code: string;
-  translations: Array<{
-    key: string;
-    value: string;
-  }>;
+  translations: Array<TranslationWithMetadata & { value: string }>;
 }
 
 interface FileUpdate {
@@ -183,9 +180,24 @@ export const syncService: SyncService = {
           console.log(chalk.blue(`Updating ${lang.code} translations in ${file.path}`));
         }
 
-        const translations: Record<string, string> = {};
+        const isPo = file.path.endsWith('.po') || file.path.endsWith('.pot');
+
+        let translations: Record<string, string> | TranslationWithMetadata[];
+        if (isPo) {
+          translations = lang.translations.map(t => ({
+            key: t.key,
+            value: t.value,
+            old_values: t.old_values,
+          }));
+        } else {
+          const record: Record<string, string> = {};
+          for (const t of lang.translations) {
+            record[t.key] = t.value;
+          }
+          translations = record;
+        }
+
         for (const translation of lang.translations) {
-          translations[translation.key] = translation.value;
           if (verbose) {
             const displayValue = translation.value?.length > 100 ? `${translation.value.slice(0, 100)}…` : translation.value;
             console.log(chalk.gray(` ${translation.key} = ${displayValue}`));

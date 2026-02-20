@@ -924,7 +924,7 @@ msgstr "Another translation"
       };
 
       const keyMappings = {
-        'New source text': 'Old source text'
+        'Old source text': 'New source text'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -952,7 +952,7 @@ msgstr "Save"
       };
 
       const keyMappings = {
-        'button|Submit': 'button|Save'
+        'button|Save': 'button|Submit'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -983,8 +983,8 @@ msgstr[1] "källor"
       };
 
       const keyMappings = {
-        'fråga': 'källa',
-        'fråga__plural_1': 'källa__plural_1'
+        'källa': 'fråga',
+        'källa__plural_1': 'fråga__plural_1'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -1012,7 +1012,7 @@ msgstr "Edit item"
       };
 
       const keyMappings = {
-        'Ändra objekt': 'Redigera objekt'
+        'Redigera objekt': 'Ändra objekt'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -1040,7 +1040,7 @@ msgstr "Delete item"
       };
 
       const keyMappings = {
-        'Remove item': 'Delete item'
+        'Delete item': 'Remove item'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -1066,7 +1066,7 @@ msgstr "Existing translation"
       };
 
       const keyMappings = {
-        'New key': 'Non-existent old key'
+        'Non-existent old key': 'New key'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -1075,6 +1075,111 @@ msgstr "Existing translation"
       expect(result).toContain('msgstr "New translation"');
       expect(result).toContain('msgid "Existing key"');
       expect(result).toContain('msgstr "Existing translation"');
+    });
+
+    test('should remove old entry when target msgid already exists in file (merge case)', () => {
+      const original = `# Merge test
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Intern kunskapsbank"
+msgstr "Internal knowledge base"
+
+msgid "Internt Help Center"
+msgstr "Internal Help Center"
+
+msgid "Other entry"
+msgstr "Other translation"
+`;
+
+      const translations = {
+        'Internt Help Center': 'Internal Help Center updated'
+      };
+
+      const keyMappings = {
+        'Intern kunskapsbank': 'Internt Help Center'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      const msgidMatches = result.match(/msgid "Internt Help Center"/g);
+      expect(msgidMatches).toHaveLength(1);
+
+      expect(result).not.toContain('msgid "Intern kunskapsbank"');
+
+      expect(result).toContain('msgstr "Internal Help Center updated"');
+
+      expect(result).toContain('msgid "Other entry"');
+      expect(result).toContain('msgstr "Other translation"');
+
+      expect(() => parsePoFile(result)).not.toThrow();
+    });
+
+    test('should remove old entry when target msgid already exists with context (merge case)', () => {
+      const original = `# Context merge test
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgctxt "menu"
+msgid "Old label"
+msgstr "Old label translation"
+
+msgctxt "menu"
+msgid "New label"
+msgstr "New label translation"
+`;
+
+      const translations = {
+        'menu|New label': 'Updated label translation'
+      };
+
+      const keyMappings = {
+        'menu|Old label': 'menu|New label'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      const msgidMatches = result.match(/msgid "New label"/g);
+      expect(msgidMatches).toHaveLength(1);
+
+      expect(result).not.toContain('msgid "Old label"');
+
+      expect(result).toContain('msgstr "Updated label translation"');
+
+      expect(() => parsePoFile(result)).not.toThrow();
+    });
+
+    test('should preserve existing entry translation when merge has no new translation', () => {
+      const original = `# Merge without new translation
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Old key"
+msgstr "Old translation"
+
+msgid "New key"
+msgstr "Existing translation"
+`;
+
+      const translations = {};
+
+      const keyMappings = {
+        'Old key': 'New key'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).not.toContain('msgid "Old key"');
+
+      const msgidMatches = result.match(/msgid "New key"/g);
+      expect(msgidMatches).toHaveLength(1);
+
+      expect(result).toContain('msgstr "Existing translation"');
+
+      expect(() => parsePoFile(result)).not.toThrow();
     });
 
     test('should handle multiple versioned keys in single update', () => {
@@ -1100,9 +1205,9 @@ msgstr "Delete"
       };
 
       const keyMappings = {
-        'Add': 'Create',
-        'Edit': 'Update',
-        'Remove': 'Delete'
+        'Create': 'Add',
+        'Update': 'Edit',
+        'Delete': 'Remove'
       };
 
       const result = surgicalUpdatePoFile(original, translations, { keyMappings });
@@ -1113,6 +1218,58 @@ msgstr "Delete"
       expect(result).not.toContain('msgid "Create"');
       expect(result).not.toContain('msgid "Update"');
       expect(result).not.toContain('msgid "Delete"');
+    });
+
+    test('should handle chain renames (A → B → C) when file still has original key', () => {
+      const original = `# Chain rename test
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Original text"
+msgstr "Old translation"
+`;
+
+      const translations = {
+        'Final text': 'Final translation'
+      };
+
+      const keyMappings = {
+        'Original text': 'Final text',
+        'Intermediate text': 'Final text'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "Final text"');
+      expect(result).not.toContain('msgid "Original text"');
+      expect(result).toContain('msgstr "Final translation"');
+    });
+
+    test('should handle chain renames (A → B → C) when file has intermediate key', () => {
+      const original = `# Chain rename test - file at step B
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Intermediate text"
+msgstr "Old translation"
+`;
+
+      const translations = {
+        'Final text': 'Final translation'
+      };
+
+      const keyMappings = {
+        'Original text': 'Final text',
+        'Intermediate text': 'Final text'
+      };
+
+      const result = surgicalUpdatePoFile(original, translations, { keyMappings });
+
+      expect(result).toContain('msgid "Final text"');
+      expect(result).not.toContain('msgid "Intermediate text"');
+      expect(result).toContain('msgstr "Final translation"');
     });
   });
 });

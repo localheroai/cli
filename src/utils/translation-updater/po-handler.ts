@@ -17,7 +17,7 @@ export async function updatePoFile(
   let created = false;
   const fileAlreadyExists = await fileExists(filePath);
 
-  // Build keyMappings for PO versioning (new key → old key)
+  // Build keyMappings for PO versioning (old key → new key)
   const keyMappings: Record<string, string> = {};
   let stringTranslations: Record<string, string>;
 
@@ -28,10 +28,8 @@ export async function updatePoFile(
       const value = typeof item.value === 'string' ? item.value : String(item.value);
       stringTranslations[item.key] = value;
 
-      // If this translation has old_values, map new key to old key
-      if (item.old_values && item.old_values.length > 0) {
-        const oldKey = item.old_values[0].key;
-        keyMappings[item.key] = oldKey;
+      for (const oldValue of item.old_values ?? []) {
+        keyMappings[oldValue.key] = item.key;
       }
     }
   } else {
@@ -44,6 +42,7 @@ export async function updatePoFile(
     );
   }
 
+  const hasKeyMappings = Object.keys(keyMappings).length > 0;
   let updatedKeys: string[] = [];
 
   if (fileAlreadyExists) {
@@ -59,29 +58,24 @@ export async function updatePoFile(
       sourceLanguage,
       targetLanguage: languageCode,
       sourceContent,
-      keyMappings: Object.keys(keyMappings).length > 0 ? keyMappings : undefined
+      keyMappings: hasKeyMappings ? keyMappings : undefined
     });
 
-    // Check if content actually changed
     if (updatedContent !== originalContent) {
-      // For .po files with surgical updates, if content changed, assume all provided keys were updated
-      // This is a simplified approach - could be made more precise by having surgicalUpdatePoFile return changed keys
       updatedKeys = Object.keys(stringTranslations);
       await writeFile(filePath, updatedContent, 'utf-8');
     }
   } else {
     created = true;
-    // New file - all translations are "updates"
     updatedKeys = Object.keys(stringTranslations);
 
     if (sourceFilePath && await fileExists(sourceFilePath)) {
-      // Copy structure from source file preserving original headers
       const sourceContent = await readFile(sourceFilePath, 'utf-8');
       const updatedContent = surgicalUpdatePoFile(sourceContent, stringTranslations, {
         sourceLanguage,
         targetLanguage: languageCode,
         sourceContent,
-        keyMappings: Object.keys(keyMappings).length > 0 ? keyMappings : undefined
+        keyMappings: hasKeyMappings ? keyMappings : undefined
       });
 
       await writeFile(filePath, updatedContent, 'utf-8');

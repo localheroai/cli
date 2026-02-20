@@ -12,17 +12,17 @@ export function surgicalUpdatePoFile(
     sourceLanguage?: string;
     targetLanguage?: string;
     sourceContent?: string;
-    keyMappings?: Record<string, string>; // Map of new keys to old keys (for PO versioning)
+    keyMappings?: Record<string, string>; // Map of old keys to new keys (for PO versioning)
   }
 ): string {
-  // If no translations to apply, return original content unchanged
-  if (Object.keys(translations).length === 0) {
-    return originalContent;
-  }
-
   // If keyMappings are provided, skip the allIdentical optimization
   // because we need to update msgids even if values are identical
   const hasKeyMappings = options?.keyMappings && Object.keys(options.keyMappings).length > 0;
+
+  // If no translations to apply and no key mappings, return original content unchanged
+  if (Object.keys(translations).length === 0 && !hasKeyMappings) {
+    return originalContent;
+  }
 
   if (hasKeyMappings) {
     return processLineByLine(originalContent, translations, options);
@@ -270,6 +270,7 @@ function processLineByLine(
   const parsed = po.parse(content);
   const changesToMake = new Map<string, string>();
   const msgidChanges = new Map<string, string>(); // Map old msgid → new msgid (for versioning)
+  const entriesToRemove = new Set<string>(); // Entries to remove when target msgid already exists (merge case)
 
   // PO Key Versioning: When a key's source text (msgid) changes in the UI,
   // the backend creates a new key version and provides the old msgid in old_values.
@@ -286,16 +287,22 @@ function processLineByLine(
         let foundViaMapping = false;
 
         if (options?.keyMappings) {
-          for (const [newKey, oldKey] of Object.entries(options.keyMappings)) {
-            if (oldKey === uniqueKey) {
-              actualNewKey = newKey;
-              foundViaMapping = true;
+          const mappedNewKey = options.keyMappings[uniqueKey];
+          if (mappedNewKey) {
+            actualNewKey = mappedNewKey;
+            foundViaMapping = true;
 
-              const { msgid: newMsgid } = parseUniqueKey(newKey);
+            if (keyExistsInParsed(mappedNewKey, parsed)) {
+              entriesToRemove.add(uniqueKey);
+            } else {
+              const { msgid: newMsgid } = parseUniqueKey(mappedNewKey);
               msgidChanges.set(uniqueKey, newMsgid);
-              break;
             }
           }
+        }
+
+        if (entriesToRemove.has(uniqueKey)) {
+          return;
         }
 
         if (translations[actualNewKey]) {
@@ -359,7 +366,7 @@ function processLineByLine(
     }
   });
 
-  if (changesToMake.size === 0) {
+  if (changesToMake.size === 0 && entriesToRemove.size === 0) {
     // Still need to add new entries even if no existing entries need changes
     const newEntries = addNewEntries(translations, parsed, changesToMake, options);
     if (newEntries.length > 0) {
@@ -377,6 +384,9 @@ function processLineByLine(
     entryStartLine: 0
   };
 
+  let entryContentStartIndex = 0;
+  let skippingEntry = false;
+
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
@@ -384,31 +394,39 @@ function processLineByLine(
 
     // Handle comments - they can appear within entries, so don't reset state
     if (trimmedLine.startsWith('#')) {
-      result.push(line);
+      if (!skippingEntry) {
+        result.push(line);
+      }
       i++;
       continue;
     }
 
     // Handle empty lines - they separate entries, so reset state
     if (trimmedLine === '') {
+      if (!skippingEntry) {
+        result.push(line);
+      }
+      skippingEntry = false;
       currentEntry = { currentState: State.IDLE, multilineBuffer: [], entryStartLine: i + 1 };
-      result.push(line);
+      entryContentStartIndex = result.length;
       i++;
       continue;
     }
 
     // Handle multiline context
     if (trimmedLine.startsWith('msgctxt ')) {
-      // Start new context entry
+      if (skippingEntry) {
+        const { nextIndex } = extractMultilineValue(lines, i);
+        i = nextIndex;
+        continue;
+      }
+      const { value, nextIndex } = extractMultilineValue(lines, i);
       currentEntry = {
-        msgctxt: extractMultilineValue(lines, i)[0],
+        msgctxt: unescapePoString(value),
         currentState: State.IN_MSGCTXT,
         multilineBuffer: [],
         entryStartLine: i
       };
-      const { value, nextIndex } = extractMultilineValue(lines, i);
-      currentEntry.msgctxt = unescapePoString(value);
-      // Add all lines for this msgctxt
       for (let j = i; j < nextIndex; j++) {
         result.push(lines[j]);
       }
@@ -440,18 +458,20 @@ function processLineByLine(
       currentEntry.currentState = State.IN_MSGID;
 
       const uniqueKey = createUniqueKey(currentEntry.msgid, currentEntry.msgctxt);
-      const newMsgid = msgidChanges.get(uniqueKey);
 
-      if (newMsgid) {
-        currentEntry.versionedNewMsgid = newMsgid;
+      if (entriesToRemove.has(uniqueKey)) {
+        result.length = entryContentStartIndex;
+        skippingEntry = true;
+        i = nextIndex;
+        continue;
       }
 
-      // Add all lines for this msgid (possibly with updated msgid)
-      for (let j = i; j < nextIndex; j++) {
-        if (newMsgid && j === i) {
-          result.push(`msgid "${escapePoString(newMsgid)}"`);
-        } else if (newMsgid && j > i) {
-        } else {
+      const newMsgid = msgidChanges.get(uniqueKey);
+      if (newMsgid) {
+        currentEntry.versionedNewMsgid = newMsgid;
+        result.push(`msgid "${escapePoString(newMsgid)}"`);
+      } else {
+        for (let j = i; j < nextIndex; j++) {
           result.push(lines[j]);
         }
       }
@@ -462,6 +482,11 @@ function processLineByLine(
 
     // Handle msgid_plural
     if (trimmedLine.startsWith('msgid_plural ')) {
+      if (skippingEntry) {
+        const { nextIndex } = extractMultilineValue(lines, i);
+        i = nextIndex;
+        continue;
+      }
       const { value, nextIndex } = extractMultilineValue(lines, i);
       currentEntry.msgid_plural = unescapePoString(value);
       currentEntry.currentState = State.IN_MSGID_PLURAL;
@@ -477,13 +502,10 @@ function processLineByLine(
         }
       }
 
-      // Add all lines for this msgid_plural (possibly with updated value)
-      for (let j = i; j < nextIndex; j++) {
-        if (newMsgidPlural && j === i) {
-          result.push(`msgid_plural "${escapePoString(newMsgidPlural)}"`);
-        } else if (newMsgidPlural && j > i) {
-          // Skip continuation lines - we replaced with single-line msgid_plural
-        } else {
+      if (newMsgidPlural) {
+        result.push(`msgid_plural "${escapePoString(newMsgidPlural)}"`);
+      } else {
+        for (let j = i; j < nextIndex; j++) {
           result.push(lines[j]);
         }
       }
@@ -493,6 +515,11 @@ function processLineByLine(
 
     // Handle msgstr
     if (trimmedLine.startsWith('msgstr ')) {
+      if (skippingEntry) {
+        const { nextIndex } = extractMultilineValue(lines, i);
+        i = nextIndex;
+        continue;
+      }
       currentEntry.currentState = State.IN_MSGSTR;
       const uniqueKey = createUniqueKey(currentEntry.msgid!, currentEntry.msgctxt);
 
@@ -519,6 +546,11 @@ function processLineByLine(
     // Handle msgstr[n]
     const pluralMatch = trimmedLine.match(/^msgstr\[(\d+)\]\s/);
     if (pluralMatch) {
+      if (skippingEntry) {
+        const { nextIndex } = extractMultilineValue(lines, i);
+        i = nextIndex;
+        continue;
+      }
       const pluralIndex = parseInt(pluralMatch[1]);
       currentEntry.pluralIndex = pluralIndex;
       currentEntry.currentState = State.IN_MSGSTR_PLURAL;
@@ -689,8 +721,6 @@ function addNewEntries(
   return result;
 }
 
-
-
 /**
  * Create a new regular translation entry
  */
@@ -767,7 +797,6 @@ function extractMultilineValue(lines: string[], startIndex: number): { value: st
 
   return { value, nextIndex: i };
 }
-
 
 function escapePoString(str: string): string {
   return str
