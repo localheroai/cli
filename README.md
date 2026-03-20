@@ -1,26 +1,80 @@
-# LocalHero.ai CLI 🌍✨
+<p align="center">
+  <img src="assets/banner.png" alt="LocalHero.ai - Agent native translations that ship with your code. No chaos. Just bliss." width="900" />
+</p>
 
-> Automatic translations for teams that ship
+## How it works
 
-LocalHero.ai is an AI-powered I18n translation service that seamlessly integrates with your development workflow. It automatically detects and translates I18n keys with missing translations, then saving any new translations directly to your repository. [Learn more at localhero.ai](https://localhero.ai/)
+1. **You or your agent writes source strings** → Install the Localhero skill and your AI assistant gets your glossary, style guide, and key naming conventions in context. It writes source strings that match your brand voice.
+2. **Localhero translates** → Run the CLI or let the GitHub Action handle it on every push. Only changed keys, nothing extra.
+3. **Translations ship in the same PR** → No separate translation PRs,
+   no drift, no "we forgot to translate that page."
 
-## Features 🚀
+[Learn more at localhero.ai](https://localhero.ai/)
 
-- 🤖 AI-powered translations that preserve your brand voice
-- 🔌 Seamless integration with with framworks like Rails, React, Django.
-- 🚀 Automated workflow with GitHub Actions support
-- 📦 Works with YAML, JSON, .po (experimental) translation files
+## Quick start
 
-## Getting Started 🏁
+Sign up at [localhero.ai](https://localhero.ai), then:
 
-1. Sign up for a free trial at [localhero.ai](https://localhero.ai/).
-2. Get your API key from [localhero.ai/api-keys](https://localhero.ai/api-keys)
-3. Run the init command in your project to setup the configuration:
-   ```bash
-   npx @localheroai/cli init
-   ```
+```bash
+# Set up your project
+$ npx @localheroai/cli init
+```
 
-## Commands 👏
+```bash
+# Install the agent skill (Claude Code, Cursor, Copilot, Codex) using skills.sh or similar
+$ npx skills add localheroai/agent-skill
+```
+
+The init wizard detects your framework, configures your translation paths, and optionally sets up the GitHub Action.
+
+## Why Localhero.ai
+
+Most translation tools bolt on after the fact. You write code, then
+remember to run a translation step, then review, then commit separately.
+It's always slightly broken.
+
+Localhero.ai treats translations as part of your development flow:
+
+- Your agent knows your glossary and uses it while writing code
+- CI translates only changed keys per PR, your feature branches stay focused
+- Translations commit alongside your code, not after it
+- Works with the i18n files you already have: `JSON`, `YAML`, `.po`
+- Auto-detects Rails, Django, React, and generic project structures
+
+### Production grade translations
+
+- Glossary enforcement → your product terms stay consistent across languages
+- Translation memory → tweaks and approved translations are reused to learn your project voice
+- Style and tone settings → control how your brand sounds in translation
+- Quality insights → see what's being translated, catch inconsistencies
+
+## Coding agent skill
+
+Localhero.ai ships an agent skill that works with Claude Code, Cursor,
+GitHub Copilot, Codex, and any tool supporting the Agent Skills standard.
+
+```bash
+$ npx skills add localheroai/agent-skill
+```
+
+When activated, your assistant gets:
+
+- Your project's glossary terms (loaded live from the API)
+- Style and tone settings
+- Key naming conventions from your existing files
+
+Your source strings stay consistent with your product's voice. Translations happen automatically when you push.
+
+## Works with your stack
+
+We auto-detect your project during init.
+
+- **Rails** - YAML files in config/locales/
+- **Django** - .po files via gettext
+- **React / Next.js** - JSON translation files
+- **Generic** - any JSON or YAML structure
+
+## Commands
 
 ### Initialize a Project
 
@@ -161,7 +215,7 @@ Download all translation files from LocalHero.ai to your local project directory
 - Setting up a new workspace
 - Fetching latest translation files during deploy
 
-## Environment Variables ⚙️
+## Environment Variables
 
 Typically you don't need to set these. The cli will use `LOCALHERO_API_KEY` if it's set, otherwise it will check the file `.localhero_key` for a API key.
 
@@ -172,7 +226,7 @@ Configure the CLI behavior with these environment variables:
 | `LOCALHERO_API_KEY` | Your LocalHero API key (get it at [localhero.ai/api-keys](https://localhero.ai/api-keys)) | Required |
 | `LOCALHERO_API_HOST` | API host for LocalHero (you typically don't need to change this) | https://api.localhero.ai |
 
-## GitHub Actions Integration 🤖
+## GitHub Actions Integration
 
 LocalHero.ai automatically translate your I18n files when you push changes. During the `init` command, you'll be prompted to set up GitHub Actions.
 
@@ -187,21 +241,12 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
 
 🚧 **Skip translations on a PR**: Add the `skip-translation` label to any PR to skip the translation workflow. Useful when you're still working on copy changes.
 
-## AI Assistant Integration 🤖
 
-Using an AI coding assistant (Claude Code, Cursor, etc.)? Install the Localhero.ai skill so your assistant writes correct source strings automatically:
-
-```bash
-npx skills add localheroai/agent-skill
-```
-
-Your assistant gets access to your project's glossary and style settings, as well as instructions on how to work with Localhero.ai in your project.
-
-## Support 💬
+## Support
 
 - Documentation: [localhero.ai/docs](https://localhero.ai/docs)
 - Email: hi@localhero.ai
 
-## License 📄
+## License
 
 MIT License - see LICENSE file for details
