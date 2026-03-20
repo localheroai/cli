@@ -39,7 +39,7 @@ export interface JobSourceMapping {
 
 export interface JobStatus {
   jobId: string;
-  status: 'pending' | 'processing' | 'completed';
+  status: 'pending' | 'processing' | 'completed' | 'validating';
   data?: any;
 }
 
@@ -147,6 +147,12 @@ function createJobSourceMapping(
   return jobSourceMapping;
 }
 
+const WAITING_STATUSES = ['pending', 'processing', 'validating'] as const;
+
+function isWaitingStatus(status: string): boolean {
+  return (WAITING_STATUSES as readonly string[]).includes(status);
+}
+
 /**
  * Monitors a job's status until completion
  *
@@ -179,7 +185,7 @@ async function monitorJobStatus(
       throw new Error(`Translation job failed: ${status.error_details || 'Unknown error'}`);
     }
 
-    if (status.status === 'pending' || status.status === 'processing') {
+    if (isWaitingStatus(status.status)) {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       if (elapsed > MAX_WAIT_MINUTES * 60) {
         throw new Error(`Translation timed out after ${MAX_WAIT_MINUTES} minutes`);
@@ -205,7 +211,7 @@ async function monitorJobStatus(
     }
 
     return { jobId, status: 'completed', data: status };
-  } while (status.status === 'pending' || status.status === 'processing');
+  } while (isWaitingStatus(status.status));
 }
 
 /**

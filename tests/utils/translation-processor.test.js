@@ -183,6 +183,70 @@ describe('translation-processor', () => {
       expect(result.uniqueKeysTranslated.size).toBe(1);
     });
 
+    it('keeps polling when job status is validating', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ greeting: 'Hello' })).toString('base64')
+          },
+          localeEntries: ['fr:locales/en.json'],
+          locales: ['fr']
+        }
+      ];
+
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { greeting: { value: 'Hello', sourceKey: 'greeting' } },
+          keyCount: 1
+        }
+      };
+
+      const config = { projectId: 'test-project' };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-123', language: { code: 'fr' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus
+        .mockResolvedValueOnce({
+          status: 'validating'
+        })
+        .mockResolvedValueOnce({
+          status: 'completed',
+          translations: {
+            data: { greeting: 'Bonjour' }
+          },
+          language: { code: 'fr' }
+        });
+
+      jest.useFakeTimers();
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = jest.fn((callback) => {
+        callback();
+        return 1;
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      global.setTimeout = originalSetTimeout;
+
+      expect(mockTranslationUtils.checkJobStatus).toHaveBeenCalledTimes(2);
+      expect(result.totalLanguages).toBe(1);
+      expect(result.uniqueKeysTranslated.size).toBe(1);
+    });
+
     it('captures job group short URL when present in response', async () => {
       const batches = [
         {
