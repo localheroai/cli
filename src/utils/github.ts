@@ -393,6 +393,11 @@ jobs:
         }
       }
 
+      const actor = this.deps.env.GITHUB_ACTOR;
+      if (actor && !actor.includes('[bot]')) {
+        commitMessage += `\n\nCo-authored-by: ${actor} <${actor}@users.noreply.github.com>`;
+      }
+
       this.commit(commitMessage);
 
       const token = await this.getTokenForPush();

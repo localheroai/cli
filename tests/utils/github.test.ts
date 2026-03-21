@@ -249,6 +249,63 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
+    it('includes co-author trailer when GITHUB_ACTOR is set', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+      mockEnv.GITHUB_ACTOR = 'arvida';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json');
+
+      const expectedMessage = 'Update translations\n\nCo-authored-by: arvida <arvida@users.noreply.github.com>';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
+    it('includes co-author trailer with translation summary', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+      mockEnv.GITHUB_ACTOR = 'arvida';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json', {
+        keysTranslated: 5,
+        languages: ['de', 'fr'],
+        viewUrl: 'https://localhero.ai/r/abc123'
+      });
+
+      const expectedMessage = 'Update translations\n\n5 keys in de, fr\n\nhttps://localhero.ai/r/abc123\n\nCo-authored-by: arvida <arvida@users.noreply.github.com>';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
+    it('skips co-author trailer when GITHUB_ACTOR is a bot', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+      mockEnv.GITHUB_ACTOR = 'dependabot[bot]';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json');
+
+      expect(mockExec).toHaveBeenCalledWith("git commit -m 'Update translations'", { stdio: 'inherit' });
+    });
+
     it('does not commit when there are no changes', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
