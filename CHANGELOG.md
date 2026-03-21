@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.40] - 2026-03-21
+
+### Added
+- Co-author trailer in translate mode commits
+
 ## [0.0.39] - 2026-03-18
 
 ### Added
@@ -155,7 +160,8 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.39...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.40...HEAD
+[0.0.40]: https://github.com/localheroai/cli/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/localheroai/cli/compare/v0.0.38...v0.0.39
 [0.0.38]: https://github.com/localheroai/cli/compare/v0.0.37...v0.0.38
 [0.0.37]: https://github.com/localheroai/cli/compare/v0.0.36...v0.0.37
