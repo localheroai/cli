@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.41] - 2026-03-24
+
+### Added
+- PR orphan key detection
+
 ## [0.0.40] - 2026-03-21
 
 ### Added
@@ -160,7 +165,8 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.40...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.41...HEAD
+[0.0.41]: https://github.com/localheroai/cli/compare/v0.0.40...v0.0.41
 [0.0.40]: https://github.com/localheroai/cli/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/localheroai/cli/compare/v0.0.38...v0.0.39
 [0.0.38]: https://github.com/localheroai/cli/compare/v0.0.37...v0.0.38
