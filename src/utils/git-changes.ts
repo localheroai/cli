@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import chalk from 'chalk';
-import type { TranslationFile, ProjectConfig } from '../types/index.js';
+import type { TranslationFile, ProjectConfig, KeyIdentifier } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
@@ -252,9 +252,54 @@ function resolveBranchRef(branch: string): string | null {
   return null;
 }
 
+interface FileDiff {
+  oldFlat: Record<string, any>;
+  newFlat: Record<string, any>;
+}
+
 /**
- * Get all changed keys from source files using object-based diff
- * Compares parsed and flattened objects from base branch vs current working directory
+ * Get the old (base branch) and new (working directory) flattened key maps for a file.
+ * Returns null if the current file cannot be read/parsed (caller should skip).
+ */
+function diffFileKeys(
+  file: TranslationFile,
+  resolvedRef: string,
+  verbose: boolean
+): FileDiff | null {
+  const sanitizedPath = sanitizeGitPath(file.path);
+  const isPo = file.format === 'po' || file.format === 'pot';
+
+  let oldFlat: Record<string, any> = {};
+  try {
+    const oldContent = execSync(
+      `git show ${resolvedRef}:"${sanitizedPath}"`,
+      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
+    );
+    const oldObj = parseFile(oldContent, file.format, file.path);
+    const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
+    oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
+  } catch (error) {
+    if (verbose) {
+      const err = error as Error;
+      if (err.message.includes('exists on disk, but not in') || err.message.includes('does not exist')) {
+        console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
+      } else {
+        console.log(chalk.yellow(`  ${file.path}: Parse error - ${err.message}`));
+      }
+    }
+  }
+
+  const newContent = readFileSync(file.path, 'utf-8');
+  const newObj = parseFile(newContent, file.format, file.path);
+  const newTranslations = isPo ? newObj : extractLocaleContent(newObj, file.locale);
+  const newFlat = isPo ? extractPoKeys(newObj) : flattenTranslations(newTranslations);
+
+  return { oldFlat, newFlat };
+}
+
+/**
+ * Get all changed keys from source files using object-based diff.
+ * Compares parsed and flattened objects from base branch vs current working directory.
  */
 function getChangedKeys(
   sourceFiles: TranslationFile[],
@@ -267,57 +312,22 @@ function getChangedKeys(
   }
 
   const allChangedKeys = new Set<string>();
-  const MAX_CHANGED_KEYS = 10000; // Safety limit to prevent memory issues
+  const MAX_CHANGED_KEYS = 10000;
 
   for (const file of sourceFiles) {
     try {
-      const sanitizedPath = sanitizeGitPath(file.path);
-      const isPo = file.format === 'po' || file.format === 'pot';
-      let oldFlat: Record<string, any> = {};
+      const diff = diffFileKeys(file, resolvedRef, verbose);
+      if (!diff) continue;
 
-      try {
-        const oldContent = execSync(
-          `git show ${resolvedRef}:"${sanitizedPath}"`,
-          {
-            encoding: 'utf-8',
-            maxBuffer: 10 * 1024 * 1024,
-            stdio: ['pipe', 'pipe', 'ignore']
-          }
-        );
-        const oldObj = parseFile(oldContent, file.format, file.path);
-        const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
-        oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
-
-      } catch (error) {
-        const err = error as Error;
-        if (verbose) {
-          // Check if it's a git error (file doesn't exist) or parse error
-          if (err.message.includes('exists on disk, but not in') || err.message.includes('does not exist')) {
-            console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
-          } else {
-            console.log(chalk.yellow(`  ${file.path}: Parse error - ${err.message}`));
-          }
-        }
-        // If parse fails or file doesn't exist, oldFlat remains {} - all keys will be treated as new
-      }
-
-      // Get current version from working directory
-      const newContent = readFileSync(file.path, 'utf-8');
-      const newObj = parseFile(newContent, file.format, file.path);
-      const newTranslations = isPo ? newObj : extractLocaleContent(newObj, file.locale);
-      const newFlat = isPo ? extractPoKeys(newObj) : flattenTranslations(newTranslations);
-
-      // Compare flattened objects to find changed keys
+      const { oldFlat, newFlat } = diff;
       const fileChangedKeys: string[] = [];
-      const MAX_KEYS_TO_COLLECT = 100; // Cap to prevent memory issues
       let totalChangedInFile = 0;
 
       for (const [key, value] of Object.entries(newFlat)) {
-        const keyExistsInOld = key in oldFlat;
-        if (!keyExistsInOld || oldFlat[key] !== value) {
+        if (!(key in oldFlat) || oldFlat[key] !== value) {
           if (allChangedKeys.size >= MAX_CHANGED_KEYS) {
             if (verbose) {
-              console.log(chalk.yellow(`⚠ Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
+              console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
             }
             return null;
           }
@@ -325,7 +335,7 @@ function getChangedKeys(
           allChangedKeys.add(key);
           totalChangedInFile++;
 
-          if (verbose && fileChangedKeys.length < MAX_KEYS_TO_COLLECT) {
+          if (verbose && fileChangedKeys.length < 5) {
             fileChangedKeys.push(key);
           }
         }
@@ -333,18 +343,14 @@ function getChangedKeys(
 
       if (verbose && totalChangedInFile > 0) {
         console.log(chalk.dim(`  ${file.path}: ${totalChangedInFile} changed key${totalChangedInFile === 1 ? '' : 's'}`));
-        const displayKeys = fileChangedKeys.slice(0, 5);
-
-        displayKeys.forEach(key => {
+        for (const key of fileChangedKeys.slice(0, 5)) {
           const status = (key in oldFlat) ? 'modified' : 'new';
           console.log(chalk.dim(`    - ${key} (${status})`));
-        });
-
+        }
         if (totalChangedInFile > 5) {
           console.log(chalk.dim(`    ... and ${totalChangedInFile - 5} more`));
         }
       }
-
     } catch (error) {
       if (verbose) {
         const err = error as Error;
@@ -354,6 +360,95 @@ function getChangedKeys(
   }
 
   return allChangedKeys;
+}
+
+/**
+ * Get changed keys per file, returning a Map of file path to key identifiers.
+ * Used to build the manifest for the finalize endpoint.
+ *
+ * Returns null on failure (git unavailable, ref resolution error, safety limit exceeded).
+ * Returns an empty Map if no changes detected (all files checked, zero diffs).
+ */
+export function getChangedKeysPerFile(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Map<string, KeyIdentifier[]> | null {
+  if (!isGitAvailable()) {
+    return null;
+  }
+
+  const baseBranch = getBaseBranch(config);
+  const resolvedRef = resolveBranchRef(baseBranch);
+  if (!resolvedRef) {
+    return null;
+  }
+
+  const result = new Map<string, KeyIdentifier[]>();
+  const MAX_CHANGED_KEYS = 10000;
+  let totalKeys = 0;
+
+  for (const file of sourceFiles) {
+    try {
+      const diff = diffFileKeys(file, resolvedRef, false);
+      if (!diff) continue;
+
+      const { oldFlat, newFlat } = diff;
+      const isPo = file.format === 'po' || file.format === 'pot';
+      const fileKeys: KeyIdentifier[] = [];
+
+      for (const [key, value] of Object.entries(newFlat)) {
+        if (!(key in oldFlat) || oldFlat[key] !== value) {
+          totalKeys++;
+          if (totalKeys > MAX_CHANGED_KEYS) {
+            if (verbose) {
+              console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
+            }
+            return null;
+          }
+
+          const identifier: KeyIdentifier = { name: key };
+          if (isPo) {
+            const pipeIndex = key.indexOf('|');
+            if (pipeIndex > 0) {
+              identifier.context = key.substring(0, pipeIndex);
+              identifier.name = key.substring(pipeIndex + 1);
+            }
+          }
+          fileKeys.push(identifier);
+        }
+      }
+
+      result.set(file.path, fileKeys);
+    } catch (error) {
+      if (verbose) {
+        const err = error as Error;
+        console.log(chalk.dim(`  Skipping ${file.path} from manifest: ${err.message}`));
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Build the manifest payload for the finalize endpoint.
+ * Wraps getChangedKeysPerFile and converts to a plain object suitable for JSON.
+ *
+ * Returns null on failure (signals CLI should skip finalize).
+ * Returns {} when all files were checked but have zero changes.
+ */
+export function getManifestForFinalize(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Record<string, KeyIdentifier[]> | null {
+  const perFile = getChangedKeysPerFile(sourceFiles, config, verbose);
+  if (perFile === null) {
+    return null;
+  }
+
+  return Object.fromEntries(perFile);
 }
 
 /**
