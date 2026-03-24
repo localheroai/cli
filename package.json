@@ -1,6 +1,6 @@
 {
   "name": "@localheroai/cli",
-  "version": "0.0.40",
+  "version": "0.0.41",
   "description": "CLI tool for managing translations with LocalHero.ai",
   "homepage": "https://localhero.ai",
   "repository": {
