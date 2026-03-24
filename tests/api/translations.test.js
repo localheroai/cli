@@ -10,6 +10,7 @@ describe('translations API', () => {
   let createTranslationJob;
   let checkJobStatus;
   let getTranslations;
+  let finalizeTranslationJobs;
 
   beforeEach(async () => {
     jest.resetModules();
@@ -25,7 +26,8 @@ describe('translations API', () => {
       getCurrentBranch: mockGetCurrentBranch
     }));
     await jest.unstable_mockModule('../../src/api/client.js', () => ({
-      apiRequest: mockApiRequest
+      apiRequest: mockApiRequest,
+      getApiHost: () => 'https://api.localhero.ai'
     }));
 
     const translationsModule = await import('../../src/api/translations.js');
@@ -33,6 +35,7 @@ describe('translations API', () => {
     createTranslationJob = translationsModule.createTranslationJob;
     checkJobStatus = translationsModule.checkJobStatus;
     getTranslations = translationsModule.getTranslations;
+    finalizeTranslationJobs = translationsModule.finalizeTranslationJobs;
   });
 
   afterEach(() => {
@@ -161,6 +164,61 @@ describe('translations API', () => {
         { apiKey: TEST_API_KEY }
       );
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('finalizeTranslationJobs', () => {
+    let mockFetch;
+
+    beforeEach(() => {
+      mockFetch = jest.fn().mockResolvedValue({ ok: true });
+      global.fetch = mockFetch;
+    });
+
+    it('sends finalize request with manifest', async () => {
+      const manifest = {
+        'locales/en.yml': [{ name: 'signup.title' }, { name: 'signup.button' }]
+      };
+
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: manifest,
+        commitSha: 'sha456'
+      });
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/v1/projects/proj_123/translation_jobs/finalize'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            job_group_id: 'grp_abc',
+            pr_key_manifest: manifest,
+            commit_sha: 'sha456'
+          })
+        })
+      );
+    });
+
+    it('sends null commit_sha when not provided', async () => {
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {}
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.commit_sha).toBeNull();
+    });
+
+    it('throws on non-ok response', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500 });
+
+      await expect(finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {}
+      })).rejects.toThrow('Finalize failed with status 500');
     });
   });
 

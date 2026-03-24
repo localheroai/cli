@@ -662,6 +662,166 @@ msgstr[1] "Delete items"
   });
 });
 
+describe('getChangedKeysPerFile', () => {
+  let mockConfig;
+  let originalProcessEnv;
+
+  beforeEach(() => {
+    originalProcessEnv = { ...process.env };
+    delete process.env.CI;
+    delete process.env.GITHUB_BASE_REF;
+    jest.clearAllMocks();
+
+    mockConfig = {
+      schemaVersion: '1.0',
+      projectId: 'test',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['locales/'] },
+      lastSyncedAt: null
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalProcessEnv;
+  });
+
+  it('returns Map with per-file key arrays', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    const oldContent = JSON.stringify({ greeting: 'Hi' });
+    const newContent = JSON.stringify({ greeting: 'Hi', farewell: 'Bye' });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+    expect(result).toBeInstanceOf(Map);
+    expect(result.size).toBe(1);
+
+    const keys = result.get('locales/en.json');
+    expect(keys).toHaveLength(1);
+    expect(keys[0]).toEqual({ name: 'farewell' });
+  });
+
+  it('returns empty Map for no changes', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    const content = JSON.stringify({ greeting: 'Hi' });
+    setupGitMock({ oldContent: content });
+    mockReadFileSync.mockReturnValue(content);
+
+    const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+    expect(result).toBeInstanceOf(Map);
+    expect(result.size).toBe(1);
+    expect(result.get('locales/en.json')).toEqual([]);
+  });
+
+  it('returns null on ref resolution failure', () => {
+    setupGitMock({ branchExists: false });
+
+    const result = gitDiffModule.getChangedKeysPerFile(
+      [{ path: 'locales/en.json', format: 'json', locale: 'en' }],
+      mockConfig,
+      false
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('includes all source files in manifest with empty arrays for unchanged', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' },
+      { path: 'locales/common.json', format: 'json', locale: 'en' }
+    ];
+
+    const content = JSON.stringify({ key: 'value' });
+    setupGitMock({ oldContent: content });
+    mockReadFileSync.mockReturnValue(content);
+
+    const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+    expect(result.size).toBe(2);
+    expect(result.get('locales/en.json')).toEqual([]);
+    expect(result.get('locales/common.json')).toEqual([]);
+  });
+});
+
+describe('getManifestForFinalize', () => {
+  let mockConfig;
+  let originalProcessEnv;
+
+  beforeEach(() => {
+    originalProcessEnv = { ...process.env };
+    delete process.env.CI;
+    delete process.env.GITHUB_BASE_REF;
+    jest.clearAllMocks();
+
+    mockConfig = {
+      schemaVersion: '1.0',
+      projectId: 'test',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['locales/'] },
+      lastSyncedAt: null
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalProcessEnv;
+  });
+
+  it('returns plain object from Map', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    const oldContent = JSON.stringify({ greeting: 'Hi' });
+    const newContent = JSON.stringify({ greeting: 'Hi', farewell: 'Bye' });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({
+      'locales/en.json': [{ name: 'farewell' }]
+    });
+  });
+
+  it('returns null on failure', () => {
+    setupGitMock({ branchExists: false });
+
+    const result = gitDiffModule.getManifestForFinalize(
+      [{ path: 'locales/en.json', format: 'json', locale: 'en' }],
+      mockConfig,
+      false
+    );
+
+    expect(result).toBeNull();
+  });
+
+  it('returns empty object when no changes', () => {
+    const content = JSON.stringify({ greeting: 'Hi' });
+    setupGitMock({ oldContent: content });
+    mockReadFileSync.mockReturnValue(content);
+
+    const result = gitDiffModule.getManifestForFinalize(
+      [{ path: 'locales/en.json', format: 'json', locale: 'en' }],
+      mockConfig,
+      false
+    );
+
+    expect(result).toEqual({ 'locales/en.json': [] });
+  });
+});
+
 describe('extractLocaleContent', () => {
   it('extracts content under locale key when present', () => {
     const obj = {

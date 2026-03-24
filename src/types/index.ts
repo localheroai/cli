@@ -132,6 +132,12 @@ export interface TranslationFilesResult {
   targetFilesByLocale: Record<string, TranslationFile[]>;
 }
 
+// Key identifier for manifest (used in finalize endpoint)
+export interface KeyIdentifier {
+  name: string;
+  context?: string;
+}
+
 // Prunable key from API (for --prune functionality)
 export interface PrunableKey {
   id: string;

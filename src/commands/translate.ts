@@ -3,10 +3,11 @@ import { nanoid } from 'nanoid';
 import { execSync } from 'child_process';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
-import { createTranslationJob, checkJobStatus } from '../api/translations.js';
+import { createTranslationJob, checkJobStatus, finalizeTranslationJobs } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
-import { filterByGitChanges, isGitAvailable } from '../utils/git-changes.js';
+import { filterByGitChanges, isGitAvailable, getManifestForFinalize } from '../utils/git-changes.js';
+import { getCurrentBranch } from '../utils/git.js';
 import {
   findMissingTranslations,
   batchKeysWithMissing,
@@ -174,6 +175,28 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.log(chalk.blue(`ℹ Found ${sourceFiles.length} source files for locale ${config.sourceLocale}`));
   }
 
+  const projectId = config.projectId;
+
+  async function sendFinalize(manifest: Record<string, any>, jobGroupId: string): Promise<void> {
+    try {
+      const branch = await getCurrentBranch();
+      await finalizeTranslationJobs({
+        projectId,
+        jobGroupId,
+        prKeyManifest: manifest,
+        commitSha: process.env.GITHUB_SHA,
+        branch: branch || undefined
+      });
+      if (verbose) {
+        console.log(chalk.dim('Sent key manifest for PR reconciliation'));
+      }
+    } catch (err) {
+      if (verbose) {
+        console.log(chalk.dim(`Finalize call skipped: ${(err as Error).message}`));
+      }
+    }
+  }
+
   if (options.changedOnly && !isGitAvailable()) {
     console.error(chalk.red('\n✖ Git is required for the --changed-only flag but is not available.\n'));
     console.error(chalk.yellow('Please ensure you are in a git repository.\n'));
@@ -189,7 +212,12 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console
   );
 
+  // Capture the full manifest BEFORE filtering down to missing-only keys.
+  // This is the complete snapshot of "what differs from main" for this push.
+  let manifest: Record<string, any> | null = null;
   if (options.changedOnly) {
+    manifest = getManifestForFinalize(sourceFiles, config, !!verbose);
+
     const filtered = filterByGitChanges(
       sourceFiles,
       missingByLocale,
@@ -199,6 +227,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     if (filtered !== null) {
       if (Object.keys(filtered).length === 0) {
+        if (manifest !== null) {
+          await sendFinalize(manifest, nanoid());
+        }
         console.log(chalk.green('✓ All changed keys are already translated'));
         return;
       }
@@ -261,6 +292,10 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       jobGroupId
     );
 
+    if (manifest !== null) {
+      await sendFinalize(manifest, jobGroupId);
+    }
+
     await configUtils.updateLastSyncedAt();
 
     if (translationResult.failedLanguages.length > 0) {
@@ -275,7 +310,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
     }
-
 
     if (translationResult.uniqueKeysTranslated.size > 0) {
       if (translationResult.jobGroupShortUrl) {

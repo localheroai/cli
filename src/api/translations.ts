@@ -1,6 +1,7 @@
 import { getApiKey } from '../utils/auth.js';
-import { apiRequest } from './client.js';
+import { apiRequest, getApiHost } from './client.js';
 import { getCurrentBranch } from '../utils/git.js';
+import type { KeyIdentifier } from '../types/index.js';
 
 // Source file for translation
 export interface SourceFile {
@@ -168,4 +169,35 @@ export async function getUpdates(
   }
 
   return apiRequest(`/api/v1/projects/${projectId}/updates?${queryParams}`, { apiKey });
+}
+
+export interface FinalizeParams {
+  projectId: string;
+  jobGroupId: string;
+  prKeyManifest: Record<string, KeyIdentifier[]>;
+  commitSha?: string;
+  branch?: string;
+}
+
+export async function finalizeTranslationJobs(params: FinalizeParams): Promise<void> {
+  const apiKey = await getApiKey();
+  const apiHost = getApiHost();
+
+  const response = await fetch(`${apiHost}/api/v1/projects/${params.projectId}/translation_jobs/finalize`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify({
+      job_group_id: params.jobGroupId,
+      pr_key_manifest: params.prKeyManifest,
+      commit_sha: params.commitSha || null,
+      ...(params.branch && { branch: params.branch })
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Finalize failed with status ${response.status}`);
+  }
 }
