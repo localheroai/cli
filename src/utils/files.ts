@@ -108,12 +108,23 @@ export function isValidLocale(locale: string): boolean {
   return /^[a-zA-Z]{2}(?:-[a-zA-Z]{2})?$/.test(locale);
 }
 
+const PO_LEAF_KEYS = new Set(['value', 'context', 'metadata']);
+
+function isPoStructuredEntry(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.value !== 'string') return false;
+  return Object.keys(obj).every(k => PO_LEAF_KEYS.has(k));
+}
+
 /**
  * Flatten a nested object into dot notation
  * Handles null/undefined values by returning an empty object
+ * When format is 'po' or 'pot', preserves structured entries ({value, context?, metadata?}) as leaf nodes
  */
-export function flattenTranslations(obj: Record<string, any> | null | undefined, parentKey: string = ''): Record<string, any> {
+export function flattenTranslations(obj: Record<string, any> | null | undefined, parentKey: string = '', format?: string): Record<string, any> {
   const result: Record<string, any> = {};
+  const isPo = format === 'po' || format === 'pot';
 
   if (!obj) {
     return result;
@@ -122,10 +133,12 @@ export function flattenTranslations(obj: Record<string, any> | null | undefined,
   for (const [key, value] of Object.entries(obj)) {
     const newKey = parentKey ? `${parentKey}.${key}` : key;
 
-    if (value === null || value === undefined) {
-      result[newKey] = value;
-    } else if (typeof value === 'object' && !Array.isArray(value)) {
-      Object.assign(result, flattenTranslations(value, newKey));
+    const shouldRecurse = value !== null && value !== undefined
+      && typeof value === 'object' && !Array.isArray(value)
+      && !(isPo && isPoStructuredEntry(value));
+
+    if (shouldRecurse) {
+      Object.assign(result, flattenTranslations(value, newKey, format));
     } else {
       result[newKey] = value;
     }
@@ -405,7 +418,7 @@ export async function findTranslationFiles(
             result.hasLanguageWrapper = hasLanguageWrapper;
             const translationData = hasLanguageWrapper ? (parsedContent[locale] || {}) : (parsedContent || {});
             result.translations = translationData;
-            const flattened = flattenTranslations(translationData);
+            const flattened = flattenTranslations(translationData, '', format);
             // @ts-expect-error - Keep original behavior for test compatibility
             result.keys = flattened;
           }

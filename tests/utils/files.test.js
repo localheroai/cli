@@ -992,6 +992,68 @@ en:
       expect(unflattenTranslations(flat)).toEqual(expected);
     });
 
+    it('treats PO structured entries as leaf nodes when format is po', () => {
+      const poApiFormat = {
+        'Account settings': {
+          value: 'Account settings',
+          metadata: {
+            source_references: ['src/Component.tsx:10']
+          }
+        },
+        'Delete account': {
+          value: 'Delete account',
+          metadata: {
+            source_references: ['src/Other.tsx:5', 'src/Another.tsx:10']
+          }
+        },
+        'Simple key': {
+          value: 'Simple key'
+        },
+        'Key with context': {
+          value: 'Key with context',
+          context: 'menu',
+          metadata: {
+            source_references: ['src/Menu.tsx:3']
+          }
+        }
+      };
+
+      const result = flattenTranslations(poApiFormat, '', 'po');
+
+      expect(result).toEqual({
+        'Account settings': {
+          value: 'Account settings',
+          metadata: { source_references: ['src/Component.tsx:10'] }
+        },
+        'Delete account': {
+          value: 'Delete account',
+          metadata: { source_references: ['src/Other.tsx:5', 'src/Another.tsx:10'] }
+        },
+        'Simple key': { value: 'Simple key' },
+        'Key with context': {
+          value: 'Key with context',
+          context: 'menu',
+          metadata: { source_references: ['src/Menu.tsx:3'] }
+        }
+      });
+    });
+
+    it('flattens PO-like objects when format is not po', () => {
+      const jsonWithPoLikeStructure = {
+        button: {
+          value: 'Submit',
+          context: 'form'
+        }
+      };
+
+      const result = flattenTranslations(jsonWithPoLikeStructure);
+
+      expect(result).toEqual({
+        'button.value': 'Submit',
+        'button.context': 'form'
+      });
+    });
+
     it('handles empty YAML files and null/undefined values correctly', () => {
       const emptyYamlContent = { nb: null };
       expect(flattenTranslations(emptyYamlContent)).toEqual({ nb: null });

@@ -203,7 +203,9 @@ export function findMissingTranslationsByLocale(
     const sourceKeys = flattenTranslations(
       sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
         ? sourceWrapper
-        : sourceContent
+        : sourceContent,
+      '',
+      sourceFile.format
     );
 
     for (const targetLocale of config.outputLocales) {
@@ -472,16 +474,17 @@ export function generateTargetPath(
  */
 export function processTargetContent(
   targetContent: Record<string, any>,
-  targetLocale: string
+  targetLocale: string,
+  format?: string
 ): Record<string, any> {
   // Check null, undefined, non-objects, and arrays
   if (!targetContent || typeof targetContent !== 'object' || Array.isArray(targetContent)) {
     return {};
   }
   if (targetContent[targetLocale]) {
-    return flattenTranslations(targetContent[targetLocale]);
+    return flattenTranslations(targetContent[targetLocale], '', format);
   }
-  return flattenTranslations(targetContent);
+  return flattenTranslations(targetContent, '', format);
 }
 
 /**
@@ -518,7 +521,7 @@ export function processLocaleTranslations(
     if (targetFile) {
       const targetContentRaw = Buffer.from(targetFile.content || '', 'base64').toString();
       const targetContent = parseFile(targetContentRaw, targetFile.format, targetFile.path);
-      targetKeys = processTargetContent(targetContent, targetLocale);
+      targetKeys = processTargetContent(targetContent, targetLocale, targetFile.format);
       targetPath = targetFile.path;
     } else {
       targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
