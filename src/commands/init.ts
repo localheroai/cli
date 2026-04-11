@@ -8,7 +8,7 @@ import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
 import { createGitHubActionFile, workflowExists } from '../utils/github.js';
-import { directoryExists, findFirstExistingPath, getDirectoryContents } from '../utils/files.js';
+import { directoryExists, findFirstExistingPath, getDirectoryContents, DirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
@@ -92,6 +92,20 @@ interface ProjectDetectionResult {
   };
 }
 
+export interface InitOptions {
+  yes?: boolean;
+  projectId?: string;
+  projectName?: string;
+  sourceLocale?: string;
+  targetLocales?: string;
+  path?: string;
+  pattern?: string;
+  ignore?: string;
+  apiKey?: string;
+  skipImport?: boolean;
+  githubAction?: boolean;
+}
+
 interface InitDependencies {
   console?: Console;
   basePath?: string;
@@ -106,18 +120,33 @@ interface InitDependencies {
     createProject: typeof createProject;
     listProjects: typeof listProjects;
   };
+  githubUtils?: {
+    createGitHubActionFile: typeof createGitHubActionFile;
+    workflowExists: typeof workflowExists;
+  };
   login?: typeof login;
+  options?: InitOptions;
 }
 
-interface InitAnswers {
-  projectId: string;
+export class MissingFlagsError extends Error {
+  flags: string[];
+  constructor(flags: string[]) {
+    const hint = '\n(or use --project-id to reuse an existing project)';
+    super(`Missing required flags for --yes: ${flags.join(', ')}${hint}`);
+    this.name = 'MissingFlagsError';
+    this.flags = flags;
+  }
+}
+
+interface RawInitInputs {
+  mode: 'new' | 'existing';
+  existingProject?: ProjectDetails;
+  projectName?: string;
   sourceLocale: string;
   outputLocales: string[];
-  translationPath?: string;
-  filePattern?: string;
-  ignorePaths?: string[];
-  newProject?: boolean;
-  url?: string | null;
+  translationPath: string;
+  filePattern: string;
+  ignorePaths: string[];
 }
 
 const PROJECT_TYPES: ProjectTypes = {
@@ -310,6 +339,21 @@ async function detectFramework(config: ProjectTypeConfig): Promise<boolean> {
   return false;
 }
 
+export function buildFilePatternFromContents(contents: DirectoryContents): string {
+  const formats: string[] = [];
+  if (contents.jsonFiles.length > 0) formats.push('json');
+  if (contents.yamlFiles.length > 0) formats.push('yml', 'yaml');
+  if (contents.poFiles.length > 0) formats.push('po');
+
+  if (formats.length === 0) {
+    return '**/*.{json,yml,yaml,po}';
+  }
+  if (formats.length === 1 && formats[0] !== 'yml') {
+    return `**/*.${formats[0]}`;
+  }
+  return `**/*.{${formats.join(',')}}`;
+}
+
 async function detectProjectType(): Promise<ProjectDetectionResult> {
   for (const [type, config] of Object.entries(PROJECT_TYPES)) {
     if (!config.directIndicators?.length && !config.packageCheck) continue;
@@ -349,16 +393,7 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
         defaults: {
           commonPaths: commonPaths,
           translationPath: `${translationPath}/`,
-          filePattern: (() => {
-            const formats: string[] = [];
-            if (contents.jsonFiles.length > 0) formats.push('json');
-            if (contents.yamlFiles.length > 0) formats.push('yml', 'yaml');
-            if (contents.poFiles.length > 0) formats.push('po');
-
-            return formats.length === 1 && formats[0] !== 'yml'
-              ? `**/*.${formats[0]}`
-              : `**/*.{${formats.join(',')}}`;
-          })()
+          filePattern: buildFilePatternFromContents(contents)
         }
       };
     }
@@ -464,9 +499,11 @@ async function handleGitHubWorkflowSetup(
   basePath: string,
   translationPaths: string[],
   promptService: IPromptService,
-  console: Console
+  console: Console,
+  githubUtils: { createGitHubActionFile: typeof createGitHubActionFile; workflowExists: typeof workflowExists },
+  autoAnswer?: boolean
 ): Promise<WorkflowSetupResult> {
-  if (workflowExists(basePath)) {
+  if (githubUtils.workflowExists(basePath)) {
     console.log(chalk.green('✓ GitHub Actions workflow found'));
     console.log(chalk.yellow('\n⚠️  Remember to add your API key to repository secrets:'));
     console.log('   Name: LOCALHERO_API_KEY');
@@ -475,17 +512,22 @@ async function handleGitHubWorkflowSetup(
     return { created: false };
   }
 
-  const shouldSetupGitHubAction = await promptService.confirm({
-    message: 'Would you like to set up GitHub Actions for automatic translations?',
-    default: true
-  });
+  let shouldSetupGitHubAction: boolean;
+  if (autoAnswer !== undefined) {
+    shouldSetupGitHubAction = autoAnswer;
+  } else {
+    shouldSetupGitHubAction = await promptService.confirm({
+      message: 'Would you like to set up GitHub Actions for automatic translations?',
+      default: true
+    });
+  }
 
   if (!shouldSetupGitHubAction) {
     return { created: false };
   }
 
   try {
-    const workflowFile = await createGitHubActionFile(basePath, translationPaths);
+    const workflowFile = await githubUtils.createGitHubActionFile(basePath, translationPaths);
     console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
     console.log('\nNext steps:');
     console.log('1. Add your API key to your repository\'s secrets:');
@@ -527,9 +569,11 @@ function displayFinalInstructions(
 
 async function handleExistingConfiguration(
   existingConfig: BaseProjectConfig,
-  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'login'>>
+  options: InitOptions,
+  nonInteractive: boolean,
+  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login'>>
 ): Promise<void> {
-  const { console, basePath, promptService, authUtils, projectApi, login: loginFn, importUtils, configUtils } = deps;
+  const { console, basePath, promptService, authUtils, projectApi, importUtils, configUtils, githubUtils } = deps;
 
   let workflowCreated = false;
   console.log(chalk.green('✓ Configuration found! Let\'s verify and set up your API access.\n'));
@@ -547,19 +591,9 @@ async function handleExistingConfiguration(
   console.log(`   Targets: ${existingConfig.outputLocales.join(', ')}`);
   console.log(`   Pattern: ${existingConfig.translationFiles?.pattern || 'not specified'}\n`);
 
-  const isAuthenticated = await authUtils.checkAuth();
-  if (!isAuthenticated) {
-    console.log('Let\'s connect to your LocalHero account.');
+  await ensureAuthenticated(nonInteractive, options, deps);
 
-    await loginFn({
-      console,
-      basePath,
-      promptService,
-      configUtils: deps.configUtils,
-      verifyApiKey: authUtils.verifyApiKey,
-      isCalledFromInit: true
-    });
-  } else {
+  if (await authUtils.checkAuth()) {
     console.log(chalk.green('✓ API key found and valid'));
 
     try {
@@ -572,18 +606,25 @@ async function handleExistingConfiguration(
       }
       console.log(chalk.green('✓ Project access verified'));
     } catch {
+      if (nonInteractive) {
+        throw new Error('Could not verify project access against the Localhero API');
+      }
       console.log(chalk.yellow('⚠️  Could not verify project access. Continuing anyway...\n'));
     }
   }
 
-  // Check if we've previously imported files
   if (existingConfig.lastSyncedAt) {
     console.log(chalk.green('✓ Translation files previously imported'));
   } else {
-    const shouldImport = await promptService.confirm({
-      message: 'Would you like to import existing translation files? (recommended)',
-      default: true
-    });
+    let shouldImport: boolean;
+    if (nonInteractive) {
+      shouldImport = !options.skipImport;
+    } else {
+      shouldImport = await promptService.confirm({
+        message: 'Would you like to import existing translation files? (recommended)',
+        default: true
+      });
+    }
 
     if (shouldImport) {
       await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils);
@@ -594,75 +635,67 @@ async function handleExistingConfiguration(
     basePath,
     existingConfig.translationFiles?.paths || [''],
     promptService,
-    console
+    console,
+    githubUtils,
+    nonInteractive ? options.githubAction === true : undefined
   );
   workflowCreated = workflowResult.created;
 
-  displayFinalInstructions(workflowCreated, workflowExists(basePath), false, console);
+  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), false, console);
 }
 
 async function handleNewProjectSetup(
-  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'login'>>
+  options: InitOptions,
+  nonInteractive: boolean,
+  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login'>>
 ): Promise<void> {
-  const { console, basePath, promptService, authUtils, projectApi, login: loginFn, importUtils, configUtils } = deps;
+  const { console, basePath, promptService, projectApi, importUtils, configUtils, githubUtils } = deps;
 
-  const isAuthenticated = await authUtils.checkAuth();
-  if (!isAuthenticated) {
-    console.log('LocalHero.ai - Automate your i18n translations\n');
-    console.log(chalk.yellow('No API key found. Let\'s get you authenticated.'));
+  await ensureAuthenticated(nonInteractive, options, deps);
 
-    await loginFn({
-      console,
-      basePath,
-      promptService,
-      configUtils,
-      verifyApiKey: authUtils.verifyApiKey || verifyApiKey,
-      isCalledFromInit: true
-    });
+  if (!nonInteractive) {
+    console.log('\nLet\'s set up configuration for your project.\n');
   }
-
-  console.log('\nLet\'s set up configuration for your project.\n');
 
   let workflowCreated = false;
   const projectDefaults = await detectProjectType();
-  const answers: InitAnswers | null = await promptForConfig(projectDefaults, projectApi, promptService, console);
-  if (!answers) {
+
+  const inputs = nonInteractive
+    ? await collectInputsFromFlags(options, projectDefaults, projectApi, console)
+    : await collectInputsInteractive(projectDefaults, projectApi, promptService, console);
+
+  const finalized = await finalizeProjectAndBuildConfig(inputs, projectDefaults, projectApi, console);
+  if (!finalized) {
     return;
   }
-
-  const config: BaseProjectConfig = {
-    schemaVersion: '1.0',
-    projectId: answers.projectId,
-    sourceLocale: answers.sourceLocale,
-    outputLocales: answers.outputLocales,
-    translationFiles: {
-      paths: answers.translationPath ? [answers.translationPath] : [],
-      pattern: answers.filePattern || '**/*.{json,yml,yaml,po}',
-      ignore: answers.ignorePaths || [],
-      ...(projectDefaults.defaults.workflow && { workflow: projectDefaults.defaults.workflow as 'default' | 'django' })
-    },
-    lastSyncedAt: null
-  };
+  const { config, newProject, url } = finalized;
 
   await configUtils.saveProjectConfig(config, basePath);
   console.log(chalk.green('\n✓ Created localhero.json'));
 
-  if (answers.newProject) {
-    console.log(chalk.green(`✓ Project created, view it at: ${answers.url}\n`));
+  if (newProject && url) {
+    console.log(chalk.green(`✓ Project created, view it at: ${url}\n`));
   }
 
   const workflowResult = await handleGitHubWorkflowSetup(
     basePath,
-    answers.translationPath ? [answers.translationPath] : [''],
+    config.translationFiles.paths.length > 0 ? config.translationFiles.paths : [''],
     promptService,
-    console
+    console,
+    githubUtils,
+    nonInteractive ? options.githubAction === true : undefined
   );
   workflowCreated = workflowResult.created;
 
-  const shouldImport = await promptService.confirm({
-    message: 'Would you like to import existing translation files? (recommended)',
-    default: true
-  });
+  let shouldImport: boolean;
+  if (nonInteractive) {
+    shouldImport = !options.skipImport;
+  } else {
+    shouldImport = await promptService.confirm({
+      message: 'Would you like to import existing translation files? (recommended)',
+      default: true
+    });
+  }
 
   let hasErrors = false;
   if (shouldImport) {
@@ -673,62 +706,67 @@ async function handleNewProjectSetup(
     hasErrors = !importResult.success;
   }
 
-  displayFinalInstructions(workflowCreated, workflowExists(basePath), hasErrors, console);
+  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), hasErrors, console);
 }
 
-async function promptForConfig(
+function normalizeTrailingSlash(p: string): string {
+  return p.endsWith('/') ? p : `${p}/`;
+}
+
+function parseCsv(raw?: string): string[] {
+  return (raw ?? '').split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function filterSourceFromTargets(
+  sourceLocale: string,
+  rawTargets: string[],
+  console: Console
+): string[] {
+  const filtered = rawTargets.filter(lang => lang !== sourceLocale);
+  if (filtered.length < rawTargets.length) {
+    console.log(chalk.yellow(`⚠️  Source language '${sourceLocale}' removed from target languages`));
+  }
+  return filtered;
+}
+
+async function collectInputsInteractive(
   projectDefaults: ProjectDetectionResult,
   projectService: { createProject: typeof createProject; listProjects: typeof listProjects },
   promptService: IPromptService,
-  console: Console = global.console
-): Promise<InitAnswers | null> {
+  console: Console
+): Promise<RawInitInputs> {
   const { choice: projectChoice, project: existingProject } = await promptService.selectProject(projectService);
   if (!projectChoice) {
     throw new Error('Project selection is required');
   }
-  let projectId = projectChoice;
-  let newProject: ProjectDetails | null = null;
-  let projectUrl: string | null = null;
-  let config: {
-    projectName: string;
-    sourceLocale: string;
-    outputLocales: string[];
-  };
+
+  let projectName: string | undefined;
+  let sourceLocale: string;
+  let outputLocales: string[];
 
   if (!existingProject) {
-    const sourceLocale = await promptService.input({
+    sourceLocale = await promptService.input({
       message: 'Source language locale:',
       default: 'en',
       hint: '\nThis is the language we will translate FROM. Enter the locale code as it appears in your I18n files. Examples:\n\n  Framework    File Structure                   Enter\n  -----------  --------------------------------  --------\n  Rails        config/locales/en.yml             en\n  React        locales/en_GB.json                en_GB\n  Next.js      public/locales/en-US/common.json  en-US\n'
     });
 
-    const rawOutputLocales = (await promptService.input({
+    const rawOutputLocales = parseCsv(await promptService.input({
       message: 'Target language locales (comma-separated):',
       hint: '\nThese are the languages we will translate TO. Enter locale codes as they appear in your files:\n\n  Pattern Type        Target Files                      Enter\n  ------------------  --------------------------------  --------------------\n  Basic               de.json, fr.json, es.json          de,fr,es\n  Region-specific     fr-CA.json, es-MX.json, de-AT.json fr-CA,es-MX,de-AT\n  Directory-based     /locales/ja/, /locales/zh/         ja,zh\n'
-    })).split(',').map(lang => lang.trim()).filter(Boolean);
+    }));
 
-    const outputLocales = rawOutputLocales.filter(lang => lang !== sourceLocale);
+    outputLocales = filterSourceFromTargets(sourceLocale, rawOutputLocales, console);
 
-    if (outputLocales.length < rawOutputLocales.length) {
-      console.log(chalk.yellow(`⚠️  Source language '${sourceLocale}' removed from target languages`));
-    }
-
-    config = {
-      projectName: await promptService.input({
-        message: 'Project name:',
-        default: path.basename(process.cwd()),
-      }),
-      sourceLocale,
-      outputLocales
-    };
+    projectName = await promptService.input({
+      message: 'Project name:',
+      default: path.basename(process.cwd()),
+    });
   } else {
-    // existingProject is guaranteed to exist here since !existingProject was false
     const project = existingProject as ProjectDetails;
-    config = {
-      projectName: project.name,
-      sourceLocale: project.source_language,
-      outputLocales: project.target_languages
-    };
+    projectName = project.name;
+    sourceLocale = project.source_language;
+    outputLocales = project.target_languages;
   }
 
   const commonPaths = projectDefaults.defaults.commonPaths || [];
@@ -758,42 +796,185 @@ async function promptForConfig(
   const filePattern = projectDefaults.defaults.filePattern;
 
   const defaultIgnorePaths = projectDefaults.defaults.ignorePaths || [];
-  const ignorePaths = await promptService.input({
+  const ignorePathsRaw = await promptService.input({
     message: 'Paths to ignore (comma-separated, leave empty for none):',
     hint: '  Example: locales/ignored,locales/temp',
     default: defaultIgnorePaths.join(', ')
   });
 
-  if (!existingProject) {
+  return {
+    mode: existingProject ? 'existing' : 'new',
+    existingProject: existingProject as ProjectDetails | undefined,
+    projectName,
+    sourceLocale,
+    outputLocales,
+    translationPath,
+    filePattern,
+    ignorePaths: parseCsv(ignorePathsRaw)
+  };
+}
+
+async function collectInputsFromFlags(
+  options: InitOptions,
+  projectDefaults: ProjectDetectionResult,
+  projectService: { createProject: typeof createProject; listProjects: typeof listProjects },
+  console: Console
+): Promise<RawInitInputs> {
+  const filePattern = options.pattern ?? projectDefaults.defaults.filePattern;
+  const ignorePaths = options.ignore !== undefined
+    ? parseCsv(options.ignore)
+    : (projectDefaults.defaults.ignorePaths ?? []);
+
+  if (options.projectId) {
+    const projects = await projectService.listProjects();
+    const match = projects.find(p => p.id === options.projectId);
+    if (!match) {
+      throw new Error(`Project ${options.projectId} not found in your organization`);
+    }
+
+    const providedSource = options.sourceLocale;
+    const providedTargets = options.targetLocales ? parseCsv(options.targetLocales) : undefined;
+    const conflictsSource = providedSource !== undefined && providedSource !== match.source_language;
+    const conflictsTargets = providedTargets !== undefined &&
+      (providedTargets.length !== match.target_languages.length ||
+       providedTargets.some(l => !match.target_languages.includes(l)));
+
+    if (conflictsSource || conflictsTargets) {
+      const warnings: string[] = [];
+      if (conflictsSource) warnings.push('--source-locale');
+      if (conflictsTargets) warnings.push('--target-locales');
+      console.log(chalk.yellow(
+        `⚠️  Ignoring ${warnings.join(' and ')}; using project '${match.name}' locales (source: ${match.source_language}, targets: ${match.target_languages.join(', ')})`
+      ));
+    }
+
+    if (!options.path) {
+      throw new MissingFlagsError(['--path']);
+    }
+
+    return {
+      mode: 'existing',
+      existingProject: match,
+      projectName: match.name,
+      sourceLocale: match.source_language,
+      outputLocales: match.target_languages,
+      translationPath: normalizeTrailingSlash(options.path),
+      filePattern,
+      ignorePaths
+    };
+  }
+
+  const missing: string[] = [];
+  if (!options.sourceLocale) missing.push('--source-locale');
+  if (!options.targetLocales || parseCsv(options.targetLocales).length === 0) missing.push('--target-locales');
+  if (!options.path) missing.push('--path');
+  if (missing.length > 0) {
+    throw new MissingFlagsError(missing);
+  }
+
+  const sourceLocale = options.sourceLocale as string;
+  const outputLocales = filterSourceFromTargets(
+    sourceLocale,
+    parseCsv(options.targetLocales as string),
+    console
+  );
+
+  if (outputLocales.length === 0) {
+    throw new Error('After removing the source locale, no target locales remain');
+  }
+
+  return {
+    mode: 'new',
+    projectName: options.projectName ?? path.basename(process.cwd()),
+    sourceLocale,
+    outputLocales,
+    translationPath: normalizeTrailingSlash(options.path as string),
+    filePattern,
+    ignorePaths
+  };
+}
+
+async function finalizeProjectAndBuildConfig(
+  inputs: RawInitInputs,
+  projectDefaults: ProjectDetectionResult,
+  projectService: { createProject: typeof createProject; listProjects: typeof listProjects },
+  console: Console
+): Promise<{ config: BaseProjectConfig; newProject: boolean; url: string | null } | null> {
+  let projectId: string;
+  let projectUrl: string | null;
+  let isNewProject: boolean;
+
+  if (inputs.mode === 'new') {
     try {
-      newProject = await projectService.createProject({
-        name: config.projectName,
-        sourceLocale: config.sourceLocale,
-        targetLocales: config.outputLocales
+      const created = await projectService.createProject({
+        name: inputs.projectName as string,
+        sourceLocale: inputs.sourceLocale,
+        targetLocales: inputs.outputLocales
       });
-      projectId = newProject.id;
-      projectUrl = newProject.url;
+      projectId = created.id;
+      projectUrl = created.url;
+      isNewProject = true;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.log(chalk.red(`\n✗ Failed to create project: ${errorMessage}`));
       return null;
     }
   } else {
-    const project = existingProject as ProjectDetails;
+    const project = inputs.existingProject as ProjectDetails;
     projectId = project.id;
     projectUrl = project.url;
+    isNewProject = false;
   }
 
-  return {
+  const config: BaseProjectConfig = {
+    schemaVersion: '1.0',
     projectId,
-    sourceLocale: config.sourceLocale,
-    outputLocales: config.outputLocales,
-    translationPath,
-    filePattern,
-    ignorePaths: ignorePaths.split(',').map(p => p.trim()).filter(Boolean),
-    newProject: !existingProject,
-    url: projectUrl
+    sourceLocale: inputs.sourceLocale,
+    outputLocales: inputs.outputLocales,
+    translationFiles: {
+      paths: inputs.translationPath ? [inputs.translationPath] : [],
+      pattern: inputs.filePattern || '**/*.{json,yml,yaml,po}',
+      ignore: inputs.ignorePaths,
+      ...(projectDefaults.defaults.workflow && { workflow: projectDefaults.defaults.workflow as 'default' | 'django' })
+    },
+    lastSyncedAt: null
   };
+
+  return { config, newProject: isNewProject, url: projectUrl };
+}
+
+async function ensureAuthenticated(
+  nonInteractive: boolean,
+  options: InitOptions,
+  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'login'>>
+): Promise<void> {
+  const { console, basePath, promptService, configUtils, authUtils, login: loginFn } = deps;
+
+  if (await authUtils.checkAuth()) {
+    return;
+  }
+
+  const envKey = process.env.LOCALHERO_API_KEY;
+  const apiKey = options.apiKey || (envKey && envKey.length > 0 ? envKey : undefined);
+
+  if (apiKey || !nonInteractive) {
+    if (!nonInteractive && !apiKey) {
+      console.log('Localhero.ai - Automate your i18n translations\n');
+      console.log(chalk.yellow('No API key found. Let\'s get you authenticated.'));
+    }
+    await loginFn({
+      console,
+      basePath,
+      promptService,
+      configUtils,
+      verifyApiKey: authUtils.verifyApiKey || verifyApiKey,
+      isCalledFromInit: true,
+      ...(apiKey ? { apiKey } : {})
+    });
+    return;
+  }
+
+  throw new Error('API key required: pass --api-key, set LOCALHERO_API_KEY, or run `localhero login` first');
 }
 
 export async function init(deps: InitDependencies = {}): Promise<void> {
@@ -805,8 +986,12 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     authUtils = { checkAuth },
     importUtils = importService,
     projectApi = { createProject, listProjects },
-    login: loginFn = login
+    githubUtils = { createGitHubActionFile, workflowExists },
+    login: loginFn = login,
+    options = {}
   } = deps;
+
+  const nonInteractive = options.yes === true;
 
   const requiredDeps = {
     console,
@@ -816,14 +1001,15 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     authUtils,
     importUtils,
     projectApi,
+    githubUtils,
     login: loginFn
   };
 
   const existingConfig = await configUtils.getProjectConfig(basePath);
 
   if (existingConfig) {
-    await handleExistingConfiguration(existingConfig, requiredDeps);
+    await handleExistingConfiguration(existingConfig, options, nonInteractive, requiredDeps);
   } else {
-    await handleNewProjectSetup(requiredDeps);
+    await handleNewProjectSetup(options, nonInteractive, requiredDeps);
   }
 }

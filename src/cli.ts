@@ -8,7 +8,7 @@ import { dirname, resolve } from 'path';
 import { login } from './commands/login.js';
 import { pull } from './commands/pull.js';
 import { push } from './commands/push.js';
-import { init } from './commands/init.js';
+import { init, InitOptions } from './commands/init.js';
 import { translate, TranslationOptions } from './commands/translate.js';
 import { ci, CiOptions } from './commands/ci.js';
 import { clone } from './commands/clone.js';
@@ -85,7 +85,18 @@ program
 program
   .command('init')
   .description('Initialize a new LocalHero.ai project')
-  .action(wrapCommandAction(() => init()));
+  .option('-y, --yes', 'Non-interactive mode: use flag values and never prompt')
+  .option('--project-id <id>', 'Use an existing project (skips creation)')
+  .option('--project-name <name>', 'Name for a new project (defaults to current directory name)')
+  .option('--source-locale <code>', 'Source locale, e.g. "en"')
+  .option('--target-locales <codes>', 'Comma-separated target locales, e.g. "sv,de,fr,nb-NO"')
+  .option('--path <dir>', 'Translation files directory, e.g. "config/locales/"')
+  .option('--pattern <glob>', 'Override detected file pattern')
+  .option('--ignore <paths>', 'Comma-separated ignore paths')
+  .option('--api-key <key>', 'API key for non-interactive authentication')
+  .option('--skip-import', 'Do not import existing translation files')
+  .option('--github-action', 'Create a GitHub Actions workflow (off by default in --yes mode)')
+  .action(wrapCommandAction((options: InitOptions) => init({ options })));
 
 program
   .command('translate')

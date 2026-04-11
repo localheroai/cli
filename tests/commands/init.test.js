@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { init } from '../../src/commands/init.js';
+import { init, buildFilePatternFromContents } from '../../src/commands/init.js';
 
 describe('init command', () => {
   let mockConsole;
@@ -302,6 +302,185 @@ describe('init command', () => {
     expect(allConsoleOutput).toContain('⚠️  Source language \'en\' removed from target languages');
   });
 
+  describe('non-interactive mode', () => {
+    const baseFlags = {
+      yes: true,
+      sourceLocale: 'en',
+      targetLocales: 'fr,es',
+      path: 'locales/'
+    };
+
+    it('creates a new project using flag values without any prompts', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_new',
+        name: 'noodling',
+        url: 'https://localhero.ai/projects/proj_new'
+      });
+
+      await init(createInitDeps({ options: { ...baseFlags, projectName: 'noodling' } }));
+
+      expect(promptService.selectProject).not.toHaveBeenCalled();
+      expect(promptService.input).not.toHaveBeenCalled();
+      expect(promptService.confirm).not.toHaveBeenCalled();
+      expect(projectApi.createProject).toHaveBeenCalledWith({
+        name: 'noodling',
+        sourceLocale: 'en',
+        targetLocales: ['fr', 'es']
+      });
+      expect(configUtils.saveProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj_new',
+          sourceLocale: 'en',
+          outputLocales: ['fr', 'es'],
+          translationFiles: expect.objectContaining({
+            paths: ['locales/'],
+            pattern: expect.any(String)
+          })
+        }),
+        expect.any(String)
+      );
+    });
+
+    it('uses an existing project when --project-id is passed', async () => {
+      const existing = {
+        id: 'proj_existing',
+        name: 'Existing',
+        source_language: 'en',
+        target_languages: ['sv', 'de'],
+        url: 'https://localhero.ai/projects/proj_existing'
+      };
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([existing]);
+
+      await init(createInitDeps({
+        options: { yes: true, projectId: 'proj_existing', path: 'locales/' }
+      }));
+
+      expect(projectApi.createProject).not.toHaveBeenCalled();
+      expect(configUtils.saveProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: 'proj_existing',
+          sourceLocale: 'en',
+          outputLocales: ['sv', 'de']
+        }),
+        expect.any(String)
+      );
+    });
+
+    it('throws a clear error when required flags are missing', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+
+      await expect(init(createInitDeps({
+        options: { yes: true, sourceLocale: 'en' }
+      }))).rejects.toThrow(/Missing required flags.*--target-locales.*--path/s);
+
+      expect(configUtils.saveProjectConfig).not.toHaveBeenCalled();
+      expect(projectApi.createProject).not.toHaveBeenCalled();
+    });
+
+    it('throws when --project-id is not found in the organization', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([{ id: 'other', name: 'other' }]);
+
+      await expect(init(createInitDeps({
+        options: { yes: true, projectId: 'missing', path: 'locales/' }
+      }))).rejects.toThrow(/Project missing not found/);
+
+      expect(configUtils.saveProjectConfig).not.toHaveBeenCalled();
+    });
+
+    it('authenticates via --api-key when no existing auth config is present', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(false);
+      projectApi.listProjects.mockResolvedValue([]);
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_new',
+        name: 'x',
+        url: null
+      });
+      const loginFn = jest.fn().mockResolvedValue(true);
+
+      await init(createInitDeps({
+        login: loginFn,
+        options: { ...baseFlags, apiKey: 'tk_test_key_123' }
+      }));
+
+      expect(loginFn).toHaveBeenCalledWith(
+        expect.objectContaining({ apiKey: 'tk_test_key_123', isCalledFromInit: true })
+      );
+    });
+
+    it('fails with an actionable error when no auth is available', async () => {
+      const previousEnvKey = process.env.LOCALHERO_API_KEY;
+      delete process.env.LOCALHERO_API_KEY;
+      try {
+        configUtils.getProjectConfig.mockResolvedValue(null);
+        authUtils.checkAuth.mockResolvedValue(false);
+
+        await expect(init(createInitDeps({
+          options: baseFlags
+        }))).rejects.toThrow(/API key required.*--api-key.*LOCALHERO_API_KEY/s);
+      } finally {
+        if (previousEnvKey !== undefined) {
+          process.env.LOCALHERO_API_KEY = previousEnvKey;
+        }
+      }
+    });
+
+    it('verifies existing localhero.json and runs import when not yet synced', async () => {
+      const existingConfig = {
+        projectId: 'proj_123',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'], pattern: '**/*.json' },
+        lastSyncedAt: null
+      };
+      configUtils.getProjectConfig.mockResolvedValue(existingConfig);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([{ id: 'proj_123', name: 'X' }]);
+      importUtils.importTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { total_keys: 0, languages: [] },
+        files: { source: [], target: [] }
+      });
+
+      await init(createInitDeps({ options: { yes: true } }));
+
+      expect(importUtils.importTranslations).toHaveBeenCalled();
+      expect(promptService.confirm).not.toHaveBeenCalled();
+    });
+
+    it('creates a GitHub Action workflow when --github-action is passed', async () => {
+      const githubUtils = {
+        createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero.yml'),
+        workflowExists: jest.fn().mockReturnValue(false)
+      };
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_new',
+        name: 'x',
+        url: null
+      });
+
+      await init(createInitDeps({
+        githubUtils,
+        options: { ...baseFlags, githubAction: true }
+      }));
+
+      expect(githubUtils.createGitHubActionFile).toHaveBeenCalled();
+      expect(promptService.confirm).not.toHaveBeenCalled();
+    });
+
+  });
+
   it('configures Django workflow for Django projects', async () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
@@ -341,5 +520,38 @@ describe('init command', () => {
 
     // Restore original stat function
     fs.promises.stat = originalStat;
+  });
+});
+
+describe('buildFilePatternFromContents', () => {
+  const emptyContents = () => ({ files: [], jsonFiles: [], yamlFiles: [], poFiles: [] });
+
+  it('returns the generic fallback pattern when no files are detected', () => {
+    const contents = emptyContents();
+    expect(buildFilePatternFromContents(contents)).toBe('**/*.{json,yml,yaml,po}');
+  });
+
+  it('returns a plain json pattern when only json files are present', () => {
+    const contents = { ...emptyContents(), jsonFiles: ['en.json', 'fr.json'] };
+    expect(buildFilePatternFromContents(contents)).toBe('**/*.json');
+  });
+
+  it('returns a plain po pattern when only po files are present', () => {
+    const contents = { ...emptyContents(), poFiles: ['en.po'] };
+    expect(buildFilePatternFromContents(contents)).toBe('**/*.po');
+  });
+
+  it('returns the yml/yaml brace pattern when only yaml files are present', () => {
+    const contents = { ...emptyContents(), yamlFiles: ['en.yml'] };
+    expect(buildFilePatternFromContents(contents)).toBe('**/*.{yml,yaml}');
+  });
+
+  it('combines formats when multiple extensions are present', () => {
+    const contents = {
+      ...emptyContents(),
+      jsonFiles: ['en.json'],
+      yamlFiles: ['fr.yml']
+    };
+    expect(buildFilePatternFromContents(contents)).toBe('**/*.{json,yml,yaml}');
   });
 });
