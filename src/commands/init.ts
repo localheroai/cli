@@ -174,6 +174,21 @@ const PROJECT_TYPES: ProjectTypes = {
       'config/locales'
     ]
   },
+  nextIntl: {
+    directIndicators: [],
+    packageCheck: {
+      requires: ['next', 'next-intl']
+    },
+    defaults: {
+      translationPath: 'messages/',
+      filePattern: '**/*.json'
+    },
+    commonPaths: [
+      'messages',
+      'src/messages',
+      'app/messages'
+    ]
+  },
   nextjs: {
     directIndicators: ['next.config.js', 'next.config.mjs'],
     packageCheck: {
@@ -288,7 +303,10 @@ const PROJECT_TYPES: ProjectTypes = {
       'public/locales',
       'config/locales',
       'locales',
+      'messages',
+      'src/messages',
       'src/i18n',
+      'app/i18n',
       'src/translations',
       'src/lang',
       'assets/i18n',
