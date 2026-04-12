@@ -71,6 +71,7 @@ interface ProjectTypeConfig {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    sourceCodePaths?: string[];
   };
   commonPaths?: string[];
 }
@@ -89,6 +90,7 @@ interface ProjectDetectionResult {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    sourceCodePaths?: string[];
   };
 }
 
@@ -236,6 +238,29 @@ const PROJECT_TYPES: ProjectTypes = {
       'locales',
       'src/i18n',
       'i18n'
+    ]
+  },
+  lingui: {
+    directIndicators: [
+      'lingui.config.js',
+      'lingui.config.ts',
+      'lingui.config.cjs',
+      'lingui.config.mjs',
+      '.linguirc',
+      '.linguirc.json'
+    ],
+    packageCheck: {
+      oneOf: ['@lingui/cli', '@lingui/core', '@lingui/react', '@lingui/macro']
+    },
+    defaults: {
+      translationPath: 'src/locales/',
+      filePattern: '**/*.po',
+      sourceCodePaths: ['src/**/*.{ts,tsx,js,jsx}']
+    },
+    commonPaths: [
+      'src/locales',
+      'locales',
+      'locale'
     ]
   },
   reactIntl: {
@@ -519,7 +544,8 @@ async function handleGitHubWorkflowSetup(
   promptService: IPromptService,
   console: Console,
   githubUtils: { createGitHubActionFile: typeof createGitHubActionFile; workflowExists: typeof workflowExists },
-  autoAnswer?: boolean
+  autoAnswer?: boolean,
+  sourceCodePaths?: string[]
 ): Promise<WorkflowSetupResult> {
   if (githubUtils.workflowExists(basePath)) {
     console.log(chalk.green('✓ GitHub Actions workflow found'));
@@ -545,7 +571,7 @@ async function handleGitHubWorkflowSetup(
   }
 
   try {
-    const workflowFile = await githubUtils.createGitHubActionFile(basePath, translationPaths);
+    const workflowFile = await githubUtils.createGitHubActionFile(basePath, translationPaths, sourceCodePaths);
     console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
     console.log('\nNext steps:');
     console.log('1. Add your API key to your repository\'s secrets:');
@@ -559,6 +585,18 @@ async function handleGitHubWorkflowSetup(
     console.log(chalk.yellow('Failed to create GitHub Action workflow:'), errorMessage);
     return { created: false, error: errorMessage };
   }
+}
+
+function printLinguiWorkflowNotice(console: Console): void {
+  console.log(chalk.yellow('\n⚠️  Lingui projects need an extract step in the workflow'));
+  console.log('\nLingui generates .po files from your source code via `lingui extract`.');
+  console.log('Add this step to the workflow before the localhero-action step:\n');
+  console.log(chalk.gray('      - uses: actions/setup-node@v4'));
+  console.log(chalk.gray('        with:'));
+  console.log(chalk.gray('          node-version: \'20\''));
+  console.log(chalk.gray('      - run: npm ci'));
+  console.log(chalk.gray('      - run: npx lingui extract'));
+  console.log('\nWithout this, the workflow will not pick up new translatable strings.\n');
 }
 
 function displayFinalInstructions(
@@ -701,9 +739,14 @@ async function handleNewProjectSetup(
     promptService,
     console,
     githubUtils,
-    nonInteractive ? options.githubAction === true : undefined
+    nonInteractive ? options.githubAction === true : undefined,
+    projectDefaults.defaults.sourceCodePaths
   );
   workflowCreated = workflowResult.created;
+
+  if (workflowCreated && projectDefaults.type === 'lingui') {
+    printLinguiWorkflowNotice(console);
+  }
 
   let shouldImport: boolean;
   if (nonInteractive) {

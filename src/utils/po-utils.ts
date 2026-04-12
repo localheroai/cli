@@ -46,9 +46,9 @@ export interface PoEntry {
   msgctxt?: string;
   msgid_plural?: string;
   comments?: {
-    reference?: string[];
-    extracted?: string[];
-    flag?: string[];
+    reference?: string | string[];
+    extracted?: string | string[];
+    flag?: string;
     previous?: string;
   };
 }
@@ -127,6 +127,77 @@ export function normalizeReferences(reference: string | string[]): string[] {
   return normalized;
 }
 
+function parsePoFlags(flag: string | undefined): string[] | undefined {
+  if (!flag) return undefined;
+  const flags = flag.split(/,\s*/).map(f => f.trim()).filter(Boolean);
+  return flags.length > 0 ? flags : undefined;
+}
+
+/**
+ * Extract translator comments from #. lines.
+ *
+ * Two conventions are supported:
+ *   - Django/gettext: "Translators:" prefixed lines, joined with ", "
+ *   - Lingui and other tools: unprefixed comments, joined with newline
+ *
+ * Prefixed comments take precedence. Tool-generated markers like
+ * Lingui's "js-lingui-explicit-id" are filtered out.
+ */
+function extractTranslatorComments(extracted: string | string[] | undefined): string | undefined {
+  if (!extracted) return undefined;
+
+  const comments = (Array.isArray(extracted) ? extracted : [extracted])
+    .filter(c => !c.startsWith('js-lingui-'));
+
+  const prefixed = comments
+    .filter(c => c.startsWith('Translators:'))
+    .map(c => c.replace(/^Translators:\s*/, '').trim())
+    .filter(c => c.length > 0);
+
+  if (prefixed.length > 0) {
+    return prefixed.join(', ');
+  }
+
+  const unprefixed = comments
+    .map(c => c.trim())
+    .filter(c => c.length > 0);
+
+  if (unprefixed.length > 0) {
+    return unprefixed.join('\n');
+  }
+
+  return undefined;
+}
+
+function applyCommonMetadata(
+  keyData: any,
+  entry: PoEntry,
+  translatorComments: string | undefined,
+  poFlags: string[] | undefined
+): void {
+  if (translatorComments) {
+    if (!keyData.metadata) keyData.metadata = {};
+    keyData.metadata.translator_comments = translatorComments;
+  }
+
+  if (entry.comments?.reference) {
+    const references = normalizeReferences(entry.comments.reference);
+    if (references.length > 0) {
+      if (!keyData.metadata) keyData.metadata = {};
+      keyData.metadata.source_references = references;
+    }
+  }
+
+  if (poFlags) {
+    if (!keyData.metadata) keyData.metadata = {};
+    keyData.metadata.po_flags = poFlags;
+  }
+
+  if (entry.msgctxt) {
+    keyData.context = entry.msgctxt;
+  }
+}
+
 /**
  * Convert .po file to API compatible format
  */
@@ -140,27 +211,12 @@ export function poEntriesToApiFormat(
   parsed.entries.forEach(entry => {
     const uniqueKey = createUniqueKey(entry.msgid, entry.msgctxt);
 
-    let translatorComments: string | undefined;
-    if (entry.comments?.extracted) {
-      const extractedComments = Array.isArray(entry.comments.extracted)
-        ? entry.comments.extracted
-        : [entry.comments.extracted];
-
-      const comments = extractedComments
-        .filter((comment: string) => comment.startsWith('Translators:'))
-        .map((comment: string) => comment.replace(/^Translators:\s*/, '').trim())
-        .filter((comment: string) => comment.length > 0);
-
-      if (comments.length > 0) {
-        translatorComments = comments.join(', ');
-      }
-    }
+    const translatorComments = extractTranslatorComments(entry.comments?.extracted);
+    const poFlags = parsePoFlags(entry.comments?.flag);
+    const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
+      options.sourceLanguage === options.currentLanguage;
 
     if (entry.msgid_plural) {
-      const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
-        options.sourceLanguage === options.currentLanguage;
-
-      // Generate all plural forms based on nplurals
       for (let i = 0; i < nplurals; i++) {
         const suffix = i === 0 ? '' : `${PLURAL_PREFIX}${i}`;
         const keyName = uniqueKey + suffix;
@@ -181,27 +237,10 @@ export function poEntriesToApiFormat(
           keyData.metadata.msgid = entry.msgid;
         }
 
-        if (translatorComments) {
-          keyData.metadata.translator_comments = translatorComments;
-        }
-
-        if (entry.comments?.reference) {
-          const references = normalizeReferences(entry.comments.reference);
-          if (references.length > 0) {
-            keyData.metadata.source_references = references;
-          }
-        }
-
-        if (entry.msgctxt) {
-          keyData.context = entry.msgctxt;
-        }
-
+        applyCommonMetadata(keyData, entry, translatorComments, poFlags);
         keys[keyName] = keyData;
       }
     } else {
-      // Handle regular (non-plural) entries
-      const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
-        options.sourceLanguage === options.currentLanguage;
       const value = entry.msgstr && entry.msgstr[0] ? entry.msgstr[0] :
         (isSourceLanguage ? entry.msgid : '');
 
@@ -209,25 +248,7 @@ export function poEntriesToApiFormat(
         value: value
       };
 
-      if (translatorComments || entry.comments?.reference) {
-        keyData.metadata = {};
-
-        if (translatorComments) {
-          keyData.metadata.translator_comments = translatorComments;
-        }
-
-        if (entry.comments?.reference) {
-          const references = normalizeReferences(entry.comments.reference);
-          if (references.length > 0) {
-            keyData.metadata.source_references = references;
-          }
-        }
-      }
-
-      if (entry.msgctxt) {
-        keyData.context = entry.msgctxt;
-      }
-
+      applyCommonMetadata(keyData, entry, translatorComments, poFlags);
       keys[uniqueKey] = keyData;
     }
   });
@@ -286,6 +307,7 @@ export interface MissingTranslation {
   metadata?: {
     source_references?: string[];
     translator_comments?: string;
+    po_flags?: string[];
     [key: string]: unknown;
   };
 }
@@ -314,15 +336,20 @@ export function findMissingPoTranslations(
     const key = createUniqueKey(entry.msgid, entry.msgctxt);
     const targetEntry = targetMap.get(key);
 
-    const metadata: { source_references?: string[]; translator_comments?: string } = {};
+    const metadata: { source_references?: string[]; translator_comments?: string; po_flags?: string[] } = {};
     if (entry.comments?.reference) {
       const references = normalizeReferences(entry.comments.reference);
       if (references.length > 0) {
         metadata.source_references = references;
       }
     }
-    if (entry.comments?.extracted && entry.comments.extracted.length > 0) {
-      metadata.translator_comments = entry.comments.extracted.join('\n');
+    const translatorComments = extractTranslatorComments(entry.comments?.extracted);
+    if (translatorComments) {
+      metadata.translator_comments = translatorComments;
+    }
+    const poFlags = parsePoFlags(entry.comments?.flag);
+    if (poFlags) {
+      metadata.po_flags = poFlags;
     }
 
     const hasMetadata = Object.keys(metadata).length > 0;

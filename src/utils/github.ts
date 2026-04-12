@@ -82,26 +82,27 @@ export const githubService = {
    * @param basePath Base path of the project
    * @param translationPaths Paths to translation files
    */
-  async createGitHubActionFile(basePath: string, translationPaths: string[]): Promise<string> {
+  async createGitHubActionFile(basePath: string, translationPaths: string[], sourceCodePaths?: string[]): Promise<string> {
     const { fs } = this.deps;
     const workflowDir = this.getWorkflowDir(basePath);
     const workflowFile = this.getGithubActionWorkflowFilePath(basePath);
 
     await fs.mkdir(workflowDir, { recursive: true });
 
+    const translationPathEntries = translationPaths.map(p => {
+      const hasPattern = /[*?{}]/.test(p);
+      const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
+      return `- "${formattedPath}"`;
+    });
+    const sourceCodePathEntries = (sourceCodePaths || []).map(p => `- "${p}"`);
+    const allPathEntries = [...translationPathEntries, ...sourceCodePathEntries, '- "localhero.json"'];
+
     const actionContent = `name: Localhero.ai - Automatic I18n translation
 
 on:
   pull_request:
     paths:
-      ${translationPaths.map(p => {
-    // Check if path already contains a file pattern (*, ?, or {})
-    const hasPattern = /[*?{}]/.test(p);
-    // If it has a pattern, use it as is; otherwise, append /**
-    const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
-    return `- "${formattedPath}"`;
-  }).join('\n      ')}
-      - "localhero.json"
+      ${allPathEntries.join('\n      ')}
   workflow_dispatch:
 
 concurrency:
@@ -417,8 +418,8 @@ jobs:
  * @param basePath Base path of the project
  * @param translationPaths Paths to translation files
  */
-export function createGitHubActionFile(basePath: string, translationPaths: string[]): Promise<string> {
-  return githubService.createGitHubActionFile(basePath, translationPaths);
+export function createGitHubActionFile(basePath: string, translationPaths: string[], sourceCodePaths?: string[]): Promise<string> {
+  return githubService.createGitHubActionFile(basePath, translationPaths, sourceCodePaths);
 }
 
 /**

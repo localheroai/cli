@@ -521,6 +521,173 @@ describe('init command', () => {
     // Restore original stat function
     fs.promises.stat = originalStat;
   });
+
+  describe('Lingui project detection', () => {
+    async function runInitWithMocks({ statIndicator, packageDeps }) {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      promptService.selectProject.mockResolvedValue({ choice: 'new' });
+      promptService.input
+        .mockResolvedValueOnce('en')
+        .mockResolvedValueOnce('sv,de')
+        .mockResolvedValueOnce('lingui-project')
+        .mockResolvedValueOnce('src/locales/')
+        .mockResolvedValueOnce('');
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_lingui',
+        name: 'lingui-project'
+      });
+      promptService.confirm
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce(false);
+
+      const fs = await import('fs');
+      const originalStat = fs.promises.stat;
+      const originalReadFile = fs.promises.readFile;
+
+      fs.promises.stat = jest.fn().mockImplementation((path) => {
+        if (statIndicator && path === statIndicator) {
+          return Promise.resolve({ isFile: () => true, isDirectory: () => false });
+        }
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+
+      if (packageDeps) {
+        fs.promises.readFile = jest.fn().mockImplementation((path, encoding) => {
+          if (path === 'package.json') {
+            return Promise.resolve(JSON.stringify(packageDeps));
+          }
+          return originalReadFile(path, encoding);
+        });
+      }
+
+      try {
+        await init(createInitDeps());
+      } finally {
+        fs.promises.stat = originalStat;
+        fs.promises.readFile = originalReadFile;
+      }
+
+      return configUtils.saveProjectConfig.mock.calls[0][0];
+    }
+
+    it('detects Lingui via config file and package dependencies', async () => {
+      const savedConfig = await runInitWithMocks({
+        statIndicator: 'lingui.config.js',
+        packageDeps: { devDependencies: { '@lingui/cli': '^5.9.5' } }
+      });
+
+      expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+      expect(savedConfig.translationFiles.paths).toEqual(['src/locales/']);
+      expect(savedConfig.translationFiles.workflow).toBeUndefined();
+    });
+
+    it('detects Lingui via package dependencies when no config file exists', async () => {
+      const savedConfig = await runInitWithMocks({
+        statIndicator: null,
+        packageDeps: { dependencies: { '@lingui/react': '^5.9.5', '@lingui/core': '^5.9.5' } }
+      });
+
+      expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+    });
+
+    it('prefers Lingui over React when both are present', async () => {
+      const savedConfig = await runInitWithMocks({
+        statIndicator: null,
+        packageDeps: {
+          dependencies: { 'react': '^18.0.0', '@lingui/core': '^5.9.5' },
+          devDependencies: { '@lingui/cli': '^5.9.5' }
+        }
+      });
+
+      expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+    });
+
+    it('prints a Lingui post-setup notice when creating a workflow for a Lingui project', async () => {
+      const githubUtils = {
+        createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+        workflowExists: jest.fn().mockReturnValue(false)
+      };
+
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      promptService.selectProject.mockResolvedValue({ choice: 'new' });
+      promptService.input
+        .mockResolvedValueOnce('en')
+        .mockResolvedValueOnce('sv,de')
+        .mockResolvedValueOnce('lingui-project')
+        .mockResolvedValueOnce('src/locales/')
+        .mockResolvedValueOnce('');
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_lingui',
+        name: 'lingui-project'
+      });
+      promptService.confirm
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+
+      const fs = await import('fs');
+      const originalStat = fs.promises.stat;
+      const originalReadFile = fs.promises.readFile;
+
+      fs.promises.stat = jest.fn().mockImplementation((path) => {
+        if (path === 'lingui.config.js') {
+          return Promise.resolve({ isFile: () => true, isDirectory: () => false });
+        }
+        return Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      });
+      fs.promises.readFile = jest.fn().mockImplementation((path, encoding) => {
+        if (path === 'package.json') {
+          return Promise.resolve(JSON.stringify({ devDependencies: { '@lingui/cli': '^5.9.5' } }));
+        }
+        return originalReadFile(path, encoding);
+      });
+
+      try {
+        await init(createInitDeps({ githubUtils }));
+      } finally {
+        fs.promises.stat = originalStat;
+        fs.promises.readFile = originalReadFile;
+      }
+
+      const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+      expect(allConsoleOutput).toContain('Lingui');
+      expect(allConsoleOutput).toContain('lingui extract');
+      expect(allConsoleOutput).toContain('npm ci');
+    });
+
+    it('does not print the Lingui notice for non-Lingui projects', async () => {
+      const githubUtils = {
+        createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+        workflowExists: jest.fn().mockReturnValue(false)
+      };
+
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      promptService.selectProject.mockResolvedValue({ choice: 'new' });
+      promptService.input
+        .mockResolvedValueOnce('en')
+        .mockResolvedValueOnce('sv')
+        .mockResolvedValueOnce('generic-project')
+        .mockResolvedValueOnce('locales/')
+        .mockResolvedValueOnce('');
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_generic',
+        name: 'generic-project'
+      });
+      promptService.confirm
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+
+      await init(createInitDeps({ githubUtils }));
+
+      const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+      expect(allConsoleOutput).not.toContain('lingui extract');
+    });
+  });
 });
 
 describe('buildFilePatternFromContents', () => {

@@ -1,4 +1,11 @@
 import { jest } from '@jest/globals';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const loadFixture = (name) => {
+  const fixturePath = join(process.cwd(), 'tests', 'fixtures', 'po', `${name}.po`);
+  return readFileSync(fixturePath, 'utf-8');
+};
 
 describe('po-utils', () => {
   let parsePoFile;
@@ -330,6 +337,170 @@ msgstr[1] "%(count)d items"
           source_references: ['app/views/forms/edit.html.erb:42']
         }
       });
+    });
+
+    it('should preserve unprefixed extracted comments (Lingui convention)', () => {
+      const entries = [
+        {
+          msgid: 'uxV9Xq',
+          msgstr: ['Sign in'],
+          msgctxt: undefined,
+          msgid_plural: undefined,
+          comments: {
+            extracted: 'Button in the header navigation, keep short',
+            reference: 'src/components/Header.tsx:14'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['uxV9Xq']).toEqual({
+        value: 'Sign in',
+        metadata: {
+          translator_comments: 'Button in the header navigation, keep short',
+          source_references: ['src/components/Header.tsx:14']
+        }
+      });
+    });
+
+    it('should preserve multi-line unprefixed extracted comments joined by newline', () => {
+      const entries = [
+        {
+          msgid: 'welcome',
+          msgstr: ['Welcome'],
+          comments: {
+            extracted: ['First line of context', 'Second line of context']
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['welcome'].metadata.translator_comments).toBe('First line of context\nSecond line of context');
+    });
+
+    it('should still strip Translators: prefix when present (Django convention)', () => {
+      const entries = [
+        {
+          msgid: 'Save',
+          msgstr: ['Spara'],
+          comments: {
+            extracted: 'Translators: Button text'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Save'].metadata.translator_comments).toBe('Button text');
+    });
+
+    it('should preserve fuzzy flag in metadata.po_flags', () => {
+      const entries = [
+        {
+          msgid: 'Copyright notice',
+          msgstr: ['Old copyright text'],
+          comments: {
+            flag: 'fuzzy',
+            reference: 'src/components/Footer.tsx:9'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Copyright notice'].metadata.po_flags).toEqual(['fuzzy']);
+      expect(result['Copyright notice'].metadata.source_references).toEqual(['src/components/Footer.tsx:9']);
+    });
+
+    it('should preserve fuzzy flag in plural forms', () => {
+      const entries = [
+        {
+          msgid: '%(count)d item',
+          msgstr: ['%(count)d objekt', '%(count)d objekt'],
+          msgid_plural: '%(count)d items',
+          comments: {
+            flag: 'fuzzy'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['%(count)d item'].metadata.po_flags).toEqual(['fuzzy']);
+      expect(result['%(count)d item__plural_1'].metadata.po_flags).toEqual(['fuzzy']);
+    });
+
+    it('should filter out Lingui js-lingui-* internal markers from translator comments', () => {
+      const entries = [
+        {
+          msgid: 'footer.copyright',
+          msgstr: ['© 2026 LocalHero'],
+          comments: {
+            extracted: 'js-lingui-explicit-id'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['footer.copyright'].metadata).toBeUndefined();
+    });
+
+    it('should filter out js-lingui-* markers but preserve other comments on the same entry', () => {
+      const entries = [
+        {
+          msgid: 'test.key',
+          msgstr: ['Test'],
+          comments: {
+            extracted: ['js-lingui-explicit-id', 'Developer note for translators']
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['test.key'].metadata.translator_comments).toBe('Developer note for translators');
+    });
+
+    it('should split compound flags into separate entries', () => {
+      const entries = [
+        {
+          msgid: 'Hello %s',
+          msgstr: ['Hej %s'],
+          comments: {
+            flag: 'fuzzy, c-format'
+          }
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Hello %s'].metadata.po_flags).toEqual(['fuzzy', 'c-format']);
+    });
+
+    it('should not add po_flags when no flags are present', () => {
+      const entries = [
+        {
+          msgid: 'Hello',
+          msgstr: ['Hej'],
+          comments: undefined
+        }
+      ];
+
+      const parsed = { headers: {}, entries };
+      const result = poEntriesToApiFormat(parsed);
+
+      expect(result['Hello'].metadata).toBeUndefined();
     });
   });
 
@@ -813,6 +984,99 @@ msgstr[2] ""
         isPlural: true,
         pluralForm: '%(count)d tasks'
       });
+    });
+  });
+
+  describe('Lingui .po file handling (regression)', () => {
+    // These tests lock in the data contract that Rails CodePatchOrchestrator
+    // depends on for Lingui projects: source references must be "path:line",
+    // preserved in order (CodePatchOrchestrator uses source_refs.first), with
+    // multi-reference lines split correctly. Any regression here would silently
+    // degrade code-patching for Lingui users (patches skipped, no error).
+
+    let fixture;
+
+    beforeEach(() => {
+      fixture = loadFixture('lingui-messages');
+    });
+
+    it('captures source references as "path:line" with order preserved', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Sign in'].metadata.source_references).toEqual(['src/components/Header.tsx:14']);
+      expect(result['button|Save'].metadata.source_references).toEqual(['src/components/Form.tsx:42']);
+    });
+
+    it('splits multi-reference #: lines into separate entries', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Welcome to our site'].metadata.source_references).toEqual([
+        'src/pages/Home.tsx:7',
+        'src/pages/About.tsx:12'
+      ]);
+    });
+
+    it('preserves developer-authored #. comments from <Trans comment="...">', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Sign in'].metadata.translator_comments).toBe('Button in the header navigation, keep short');
+    });
+
+    it('filters out Lingui js-lingui-explicit-id internal marker', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['footer.copyright']).toBeDefined();
+      expect(result['footer.copyright'].value).toBe('© 2026 LocalHero');
+      // The js-lingui-explicit-id marker must not leak into user-visible translator_comments
+      expect(result['footer.copyright'].metadata?.translator_comments).toBeUndefined();
+    });
+
+    it('records fuzzy flag as metadata.po_flags without dropping the translation', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Copyright notice'].value).toBe('Old copyright text');
+      expect(result['Copyright notice'].metadata.po_flags).toEqual(['fuzzy']);
+    });
+
+    it('treats ICU MessageFormat plurals as a single key (Lingui default)', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      const icuKey = '{count, plural, one {# item} other {# items}}';
+      expect(result[icuKey]).toBeDefined();
+      expect(result[icuKey].value).toBe(icuKey);
+      // No __plural_1 suffix: Lingui does not use gettext msgid_plural by default
+      expect(result[icuKey + '__plural_1']).toBeUndefined();
+    });
+
+    it('forms unique keys from msgctxt + msgid', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['button|Save']).toBeDefined();
+      expect(result['button|Save'].context).toBe('button');
+      expect(result['Save']).toBeUndefined();
+    });
+
+    it('skips obsolete #~ entries entirely', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['removed string']).toBeUndefined();
+    });
+
+    it('uses natural-language msgids as keys with English text in value (Lingui v5 default)', () => {
+      const parsed = parsePoFile(fixture);
+      const result = poEntriesToApiFormat(parsed, { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Sign in']).toBeDefined();
+      expect(result['Sign in'].value).toBe('Sign in');
+      expect(result['Welcome to our site']).toBeDefined();
     });
   });
 });
