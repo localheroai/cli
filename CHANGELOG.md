@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.43] - 2026-04-12
+
+### Added
+- Lingui framework detection/support
+- Non-interactive mode for `init` command (`--yes` flag) for AI agents and CI scripts
+- next-intl project detection with `messages/` as default translation path
+
+### Changed
+- Improved PO file comment handling to preserve Lingui extracted comments and filter internal markers
+- Improved PO file fuzzy flag preservation in metadata
+
+## [0.0.42] - 2026-04-01
+
+### Fixed
+- Fixed PO file metadata being flattened into separate keys during translate
+
 ## [0.0.41] - 2026-03-24
 
 ### Added
@@ -165,7 +181,9 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.41...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.43...HEAD
+[0.0.43]: https://github.com/localheroai/cli/compare/v0.0.42...v0.0.43
+[0.0.42]: https://github.com/localheroai/cli/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/localheroai/cli/compare/v0.0.40...v0.0.41
 [0.0.40]: https://github.com/localheroai/cli/compare/v0.0.39...v0.0.40
 [0.0.39]: https://github.com/localheroai/cli/compare/v0.0.38...v0.0.39
