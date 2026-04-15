@@ -255,7 +255,7 @@ const PROJECT_TYPES: ProjectTypes = {
     defaults: {
       translationPath: 'src/locales/',
       filePattern: '**/*.po',
-      sourceCodePaths: ['src/**/*.{ts,tsx,js,jsx}']
+      sourceCodePaths: ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.js', 'src/**/*.jsx']
     },
     commonPaths: [
       'src/locales',
