@@ -108,6 +108,11 @@ describe('githubService', () => {
       expect(fileContent).toContain('name: Localhero.ai - Automatic I18n translation');
       expect(fileContent).toContain('- "locales/**/*.json"');
       expect(fileContent).toContain('- "translations/*.yml"');
+      expect(fileContent).toContain('repository_dispatch:');
+      expect(fileContent).toContain('types: [localhero-sync]');
+      expect(fileContent).toContain('workflow_dispatch:');
+      expect(fileContent).toContain('ref: ${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}');
+      expect(fileContent).toContain('group: translate-${{ github.event.client_payload.branch || github.head_ref || github.run_id }}');
       expect(fileContent).toContain('fetch-depth: 0');
       expect(fileContent).toContain('uses: localheroai/localhero-action@v1');
       expect(fileContent).toContain('api-key: ${{ secrets.LOCALHERO_API_KEY }}');

@@ -105,10 +105,12 @@ on:
   pull_request:
     paths:
       ${allPathEntries.join('\n      ')}
+  repository_dispatch:
+    types: [localhero-sync]
   workflow_dispatch:
 
 concurrency:
-  group: translate-\${{ github.head_ref || github.run_id }}
+  group: translate-\${{ github.event.client_payload.branch || github.head_ref || github.run_id }}
   cancel-in-progress: true
 
 jobs:
@@ -122,7 +124,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          ref: \${{ github.head_ref }}
+          ref: \${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Translate
