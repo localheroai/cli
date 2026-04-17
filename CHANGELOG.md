@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.44] - 2026-04-17
+
+### Fixed
+- Generated GitHub Actions workflow now includes a `repository_dispatch` trigger
+- Generated workflow checkout `ref` and concurrency `group` now fall back through `client_payload.branch`, `GITHUB_HEAD_REF`, and `GITHUB_REF_NAME` so sync-triggered runs check out the correct branch
+- YAML files with duplicate keys no longer crash; the last value is used and a warning is printed
+- Lingui `sourceCodePaths` brace expansion is now preserved correctly in generated GitHub Actions workflows
+
 ## [0.0.43] - 2026-04-12
 
 ### Added
@@ -181,7 +189,8 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.43...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.44...HEAD
+[0.0.44]: https://github.com/localheroai/cli/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/localheroai/cli/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/localheroai/cli/compare/v0.0.41...v0.0.42
 [0.0.41]: https://github.com/localheroai/cli/compare/v0.0.40...v0.0.41
