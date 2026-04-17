@@ -94,6 +94,8 @@ export const githubService = {
       const formattedPath = hasPattern ? p : `${p}${p.endsWith('/') ? '' : '/'}**`;
       return `- "${formattedPath}"`;
     });
+    // GitHub Actions paths: filter does not support brace expansion ({a,b}).
+    // Patterns must already be expanded to one entry per extension.
     const sourceCodePathEntries = (sourceCodePaths || []).map(p => `- "${p}"`);
     const allPathEntries = [...translationPathEntries, ...sourceCodePathEntries, '- "localhero.json"'];
 

@@ -71,6 +71,8 @@ interface ProjectTypeConfig {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    // Literal glob patterns for the GitHub Actions paths: filter.
+    // Do not use brace expansion ({ts,tsx}); list one entry per extension.
     sourceCodePaths?: string[];
   };
   commonPaths?: string[];
@@ -90,6 +92,8 @@ interface ProjectDetectionResult {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    // Literal glob patterns for the GitHub Actions paths: filter.
+    // Do not use brace expansion ({ts,tsx}); list one entry per extension.
     sourceCodePaths?: string[];
   };
 }

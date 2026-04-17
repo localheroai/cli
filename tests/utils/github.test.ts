@@ -132,6 +132,18 @@ describe('githubService', () => {
       expect(fileContent).toContain('- "translations/**"');
       expect(fileContent).toContain('- "i18n/*.json"');
     });
+
+    it('writes sourceCodePaths as literal patterns without brace expansion', async () => {
+      const sourceCodePaths = ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.js', 'src/**/*.jsx'];
+      await createGitHubActionFile('/project', ['src/locales/**'], sourceCodePaths);
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('- "src/**/*.ts"');
+      expect(fileContent).toContain('- "src/**/*.tsx"');
+      expect(fileContent).toContain('- "src/**/*.js"');
+      expect(fileContent).toContain('- "src/**/*.jsx"');
+      expect(fileContent).not.toContain('{ts,tsx');
+    });
   });
 
   describe('workflowExists', () => {
