@@ -818,4 +818,44 @@ en:
         .toEqual([]);
     });
   });
+
+  describe('duplicate YAML keys', () => {
+    it('updates YAML files with duplicate keys without crashing', async () => {
+      const filePath = path.join(tempDir, 'de.yml');
+      const yamlWithDuplicates = [
+        'de:',
+        '  translation:',
+        '    greeting: "Hallo"',
+        '    farewell: "Tschüss"',
+        '    greeting: "Hallo Welt"',
+        ''
+      ].join('\n');
+      fs.writeFileSync(filePath, yamlWithDuplicates);
+
+      const result = await updateTranslationFile(filePath, { 'translation.farewell': 'Auf Wiedersehen' }, 'de');
+
+      expect(result.updatedKeys).toEqual(['translation.farewell']);
+      const content = fs.readFileSync(filePath, 'utf8');
+      expect(content).toContain('Auf Wiedersehen');
+    });
+
+    it('deletes keys from YAML files with duplicate keys without crashing', async () => {
+      const filePath = path.join(tempDir, 'sv.yml');
+      const yamlWithDuplicates = [
+        'sv:',
+        '  section:',
+        '    keep_me: "Behåll"',
+        '    remove_me: "Ta bort"',
+        '    keep_me: "Behåll igen"',
+        ''
+      ].join('\n');
+      fs.writeFileSync(filePath, yamlWithDuplicates);
+
+      const deleted = await deleteKeysFromTranslationFile(filePath, ['section.remove_me'], 'sv');
+
+      expect(deleted).toEqual(['section.remove_me']);
+      const content = fs.readFileSync(filePath, 'utf8');
+      expect(content).not.toContain('remove_me');
+    });
+  });
 });

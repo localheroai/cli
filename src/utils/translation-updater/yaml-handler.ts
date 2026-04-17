@@ -104,11 +104,22 @@ async function createYamlDocument(filePath: string): Promise<YamlDocumentResult>
   const content = await fs.readFile(filePath, 'utf8');
   const options = detectYamlOptions(content);
   const doc = yaml.parseDocument(content);
+  clearDuplicateKeyErrors(doc, filePath);
   return {
     doc,
     created: false,
     options
   };
+}
+
+function clearDuplicateKeyErrors(doc: yaml.Document, filePath: string): void {
+  if (doc.errors.length === 0) return;
+
+  const duplicateKeyErrors = doc.errors.filter(e => e.code === 'DUPLICATE_KEY');
+  if (duplicateKeyErrors.length === 0) return;
+
+  console.warn(`Warning: ${filePath} has ${duplicateKeyErrors.length} duplicate key(s), using last value for each`);
+  doc.errors = doc.errors.filter(e => e.code !== 'DUPLICATE_KEY');
 }
 
 async function updateYamlTranslations(
@@ -215,6 +226,7 @@ export async function deleteKeysFromYamlFile(
   try {
     const content = await fs.readFile(filePath, 'utf8');
     const yamlDoc = yaml.parseDocument(content);
+    clearDuplicateKeyErrors(yamlDoc, filePath);
     const contents = yamlDoc.contents as YamlMap | null;
 
     if (!contents || !contents.has(languageCode)) {
