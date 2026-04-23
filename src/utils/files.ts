@@ -12,6 +12,7 @@ import type {
 } from '../types/index.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from './file-size.js';
+import { detectMultiLanguage } from './multi-language-detection.js';
 
 
 /**
@@ -374,6 +375,63 @@ export async function findTranslationFiles(
       try {
         const filePath = file;
         const format = path.extname(file).slice(1);
+
+        if (
+          translationFiles?.multiLanguageFiles &&
+          parseContent &&
+          (format === 'yml' || format === 'yaml' || format === 'json')
+        ) {
+          const fileSize = await getFileSize(filePath);
+          if (isFileTooLarge(fileSize)) {
+            console.error(chalk.red(
+              `✖ File too large: ${filePath} (${formatFileSize(fileSize)}) exceeds maximum size limit of ${formatFileSize(FILE_SIZE_LIMITS.MAX_SIZE)}. Skipping.`
+            ));
+            continue;
+          }
+
+          const rawContent = await readFile(filePath, 'utf8');
+          const parsedContent = parseFile(rawContent, format, filePath, {
+            sourceLanguage: sourceLocale,
+            currentLanguage: sourceLocale
+          });
+
+          if (detectMultiLanguage(parsedContent, knownLocales)) {
+            const parsedObj = parsedContent as Record<string, unknown>;
+            const base64 = Buffer.from(rawContent).toString('base64');
+
+            for (const fileLocale of Object.keys(parsedObj)) {
+              const entry: TranslationFile = {
+                path: filePath,
+                format,
+                locale: fileLocale,
+                hasLanguageWrapper: true,
+                multiLanguage: true
+              };
+              if (includeContent) {
+                entry.content = base64;
+              }
+
+              if (extractKeys) {
+                const subtree = parsedObj[fileLocale];
+                const translationData =
+                  subtree && typeof subtree === 'object' && !Array.isArray(subtree)
+                    ? (subtree as Record<string, string>)
+                    : {};
+                entry.translations = translationData;
+                const flattened = flattenTranslations(translationData, '', format);
+                // @ts-expect-error - Keep original behavior for test compatibility
+                entry.keys = flattened;
+              }
+
+              if (includeNamespace) {
+                entry.namespace = extractNamespace(filePath);
+              }
+
+              processedFiles.push(entry);
+            }
+            continue;
+          }
+        }
 
         let locale: string;
         if (format === 'pot') {
