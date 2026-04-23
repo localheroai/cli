@@ -33,6 +33,7 @@ export interface TranslationOptions {
   verbose?: boolean;
   commit?: boolean;
   changedOnly?: boolean;
+  skipCommit?: boolean;
   [key: string]: any;
 }
 
@@ -334,15 +335,17 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         }
       }
 
-      try {
-        await gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
-          keysTranslated: translationResult.uniqueKeysTranslated.size,
-          languages: translationResult.languages,
-          viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
-        });
-      } catch (error) {
-        const err = error as Error;
-        console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+      if (!options.skipCommit) {
+        try {
+          await gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
+            keysTranslated: translationResult.uniqueKeysTranslated.size,
+            languages: translationResult.languages,
+            viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
+          });
+        } catch (error) {
+          const err = error as Error;
+          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+        }
       }
     }
 

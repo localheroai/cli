@@ -21,6 +21,11 @@ interface CiDependencies {
   githubUtils: typeof githubService;
   env: NodeJS.ProcessEnv;
   translateCommand: (options: TranslationOptions) => Promise<void>;
+  syncApi: {
+    getSyncTranslations: typeof getSyncTranslations;
+    completeSyncUpdate: typeof completeSyncUpdate;
+  };
+  updateTranslationFile: typeof updateTranslationFile;
 }
 
 const defaultDeps: CiDependencies = {
@@ -29,7 +34,9 @@ const defaultDeps: CiDependencies = {
   authUtils: { checkAuth },
   githubUtils: githubService,
   env: process.env,
-  translateCommand: translate
+  translateCommand: translate,
+  syncApi: { getSyncTranslations, completeSyncUpdate },
+  updateTranslationFile
 };
 
 /**
@@ -80,9 +87,9 @@ async function runTranslateMode(
 async function runSyncMode(
   syncId: string,
   deps: CiDependencies,
-  options?: { verbose?: boolean; syncUpdateVersion?: number }
+  options?: { verbose?: boolean; syncUpdateVersion?: number; skipCommit?: boolean }
 ): Promise<void> {
-  const { console, configUtils, githubUtils } = deps;
+  const { console, configUtils, githubUtils, syncApi, updateTranslationFile } = deps;
   const verbose = options?.verbose || false;
 
   console.log(chalk.blue('🔄 Syncing translations from LocalHero...\n'));
@@ -96,7 +103,7 @@ async function runSyncMode(
 
   try {
     while (currentPage <= totalPages) {
-      const response = await getSyncTranslations(syncId, { page: currentPage });
+      const response = await syncApi.getSyncTranslations(syncId, { page: currentPage });
 
       if (!response || !response.sync || !response.pagination) {
         throw new Error(`Invalid response from Sync API for page ${currentPage}`);
@@ -166,7 +173,7 @@ async function runSyncMode(
   const keysUpdated = modifiedKeysCount ?? keysProcessed;
   console.log(chalk.green(`\n✓ Synced ${keysUpdated} keys across ${filesUpdated} files`));
 
-  if (githubUtils.isGitHubAction()) {
+  if (githubUtils.isGitHubAction() && !options?.skipCommit) {
     const languages = [...new Set(allFiles.map(f => f.language))];
     await githubUtils.autoCommitSyncChanges(
       modifiedFiles,
@@ -177,7 +184,7 @@ async function runSyncMode(
 
   if (options?.syncUpdateVersion) {
     try {
-      await completeSyncUpdate(syncId, options.syncUpdateVersion);
+      await syncApi.completeSyncUpdate(syncId, options.syncUpdateVersion);
       if (verbose) {
         console.log(chalk.gray(`  Marked sync update ${options.syncUpdateVersion} as completed`));
       }
@@ -225,7 +232,7 @@ export async function ci(
       console.log(chalk.blue('📥 Sync mode detected'));
     }
     try {
-      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion });
+      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion, skipCommit: options.skipCommit });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(chalk.red('\n✖ Sync failed:', errorMessage));

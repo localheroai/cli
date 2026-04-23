@@ -359,5 +359,104 @@ describe('ci command', () => {
         })
       );
     });
+
+    it('should pass skipCommit option to translate command', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+
+      await ci({ skipCommit: true }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          skipCommit: true,
+          changedOnly: true
+        })
+      );
+    });
+  });
+
+  describe('sync mode auto-commit', () => {
+    const syncResponse = {
+      sync: {
+        sync_id: 'sync_abc',
+        status: 'completed',
+        created_at: '2026-04-23T00:00:00Z',
+        sync_url: 'https://example.com/sync',
+        branch_name: 'localhero/sync',
+        modified_keys_count: 1,
+        files: [
+          {
+            path: 'locales/fr.json',
+            language: 'fr',
+            translations: [{
+              key: 'hello',
+              name: 'hello',
+              value: 'Bonjour',
+              updated_at: '2026-04-23T00:00:00Z'
+            }]
+          }
+        ]
+      },
+      pagination: {
+        current_page: 1,
+        total_pages: 1,
+        total_count: 1,
+        next_page: null,
+        prev_page: null,
+        items_per_page: 500
+      }
+    };
+
+    function buildSyncDeps() {
+      mockConfigUtils.getValidProjectConfig = jest.fn().mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] }
+      });
+      mockConfigUtils.saveProjectConfig = jest.fn().mockResolvedValue(undefined);
+
+      return {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: {
+          ...mockGithubUtils,
+          autoCommitSyncChanges: jest.fn().mockResolvedValue(undefined)
+        },
+        env: mockEnv,
+        translateCommand: mockTranslateCommand,
+        syncApi: {
+          getSyncTranslations: jest.fn().mockResolvedValue(syncResponse),
+          completeSyncUpdate: jest.fn().mockResolvedValue({ success: true })
+        },
+        updateTranslationFile: jest.fn().mockResolvedValue(undefined)
+      };
+    }
+
+    it('skips autoCommitSyncChanges when skipCommit is set', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      const deps = buildSyncDeps();
+
+      await ci({ skipCommit: true }, deps);
+
+      expect(deps.updateTranslationFile).toHaveBeenCalled();
+      expect(deps.githubUtils.autoCommitSyncChanges).not.toHaveBeenCalled();
+    });
+
+    it('calls autoCommitSyncChanges when skipCommit is not set', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      const deps = buildSyncDeps();
+
+      await ci({}, deps);
+
+      expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledTimes(1);
+    });
   });
 });

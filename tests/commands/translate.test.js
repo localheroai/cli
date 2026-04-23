@@ -855,4 +855,70 @@ describe('translate command', () => {
 
     expect(mockExecSync).toHaveBeenCalledWith('npm run build-translations', { stdio: 'pipe' });
   });
+
+  it('skips auto-commit when skipCommit option is set', async () => {
+    const sourceFilePath = 'locales/en/common.json';
+    const targetFilePath = 'locales/fr/common.json';
+
+    translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+      'fr:locales/en/common.json': {
+        locale: 'fr',
+        path: sourceFilePath,
+        targetPath: targetFilePath,
+        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+        keyCount: 1
+      }
+    });
+
+    translationUtils.batchKeysWithMissing.mockReturnValue({
+      batches: [{
+        sourceFilePath,
+        sourceFile: {
+          path: sourceFilePath,
+          format: 'json',
+          content: Buffer.from(JSON.stringify({
+            keys: { farewell: { value: 'Goodbye' } }
+          })).toString('base64')
+        },
+        localeEntries: ['fr:locales/en/common.json'],
+        locales: ['fr']
+      }],
+      errors: []
+    });
+
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [{
+        path: sourceFilePath,
+        format: 'json',
+        content: Buffer.from(JSON.stringify({ farewell: 'Goodbye' })).toString('base64')
+      }],
+      targetFilesByLocale: {
+        fr: [{
+          path: targetFilePath,
+          format: 'json',
+          content: Buffer.from(JSON.stringify({})).toString('base64'),
+          locale: 'fr'
+        }]
+      },
+      allFiles: [
+        { path: sourceFilePath, locale: 'en' },
+        { path: targetFilePath, locale: 'fr' }
+      ]
+    });
+
+    translationUtils.createTranslationJob.mockResolvedValue({
+      jobs: [{ id: 'job-123', language: { code: 'fr' } }]
+    });
+
+    translationUtils.checkJobStatus.mockResolvedValue({
+      status: 'completed',
+      translations: { data: { farewell: 'Au revoir' } },
+      language: { code: 'fr' }
+    });
+
+    await translate({ skipCommit: true }, createTranslateDeps());
+
+    expect(translationUtils.updateTranslationFile).toHaveBeenCalled();
+    expect(gitUtils.autoCommitChanges).not.toHaveBeenCalled();
+  });
 });

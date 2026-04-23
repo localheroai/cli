@@ -110,6 +110,7 @@ program
   .command('ci')
   .description('Run translations in CI/CD (auto-detects PR vs main context)')
   .option('-v, --verbose', 'Show detailed progress information')
+  .option('--skip-commit', 'Skip auto-commit (translations still run on backend)')
   .action(wrapCommandAction((options: CiOptions) => ci(options)));
 
 program
