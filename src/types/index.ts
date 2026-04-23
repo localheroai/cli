@@ -12,6 +12,7 @@ export interface TranslationFileConfig {
   localeRegex?: string;
   workflow?: 'default' | 'django';
   baseBranch?: string;
+  multiLanguageFiles?: boolean;
 }
 
 // Translation file interface
@@ -23,6 +24,7 @@ export interface TranslationFile {
   namespace?: string;
   content?: string;
   hasLanguageWrapper?: boolean;
+  multiLanguage?: boolean;
   translations?: Record<string, string>;
   keys?: string[];
 }
