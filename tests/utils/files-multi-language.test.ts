@@ -364,4 +364,48 @@ pt-BR:
       expect(file.keys).toBeUndefined();
     });
   });
+
+  it('emits the beta notice exactly once per invocation, even for multiple multi-language files', async () => {
+    mockGlob.mockResolvedValue([
+      'config/locales/one.i18n.yml',
+      'config/locales/two.i18n.yml',
+      'config/locales/three.i18n.yml'
+    ]);
+    mockReadFile.mockResolvedValue(multiLangYaml);
+
+    await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv', 'nb', 'fi'],
+      translationFiles: {
+        paths: ['config/locales/'],
+        multiLanguageFiles: true
+      }
+    });
+
+    const logCalls = (console.log as jest.Mock).mock.calls;
+    const noticeCalls = logCalls.filter(([msg]) =>
+      typeof msg === 'string' && msg.includes('Multi-language files: beta feature')
+    );
+    expect(noticeCalls).toHaveLength(1);
+  });
+
+  it('does not emit the beta notice when no file matches the multi-language heuristic', async () => {
+    mockGlob.mockResolvedValue(['config/locales/en.yml']);
+    mockReadFile.mockResolvedValue('hello: "Hello"\n');
+
+    await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv'],
+      translationFiles: {
+        paths: ['config/locales/'],
+        multiLanguageFiles: true
+      }
+    });
+
+    const logCalls = (console.log as jest.Mock).mock.calls;
+    const noticeCalls = logCalls.filter(([msg]) =>
+      typeof msg === 'string' && msg.includes('Multi-language files: beta feature')
+    );
+    expect(noticeCalls).toHaveLength(0);
+  });
 });

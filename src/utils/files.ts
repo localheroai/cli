@@ -328,6 +328,7 @@ export async function findTranslationFiles(
   } = translationFiles || {};
 
   const processedFiles: TranslationFile[] = [];
+  let betaNoticeEmitted = false;
 
   // Adjustment to handle single-item braces, common mistake to use {json} instead of *.json, its not supported by glob
   const adjustPattern = (originalPattern: string): string => {
@@ -396,6 +397,10 @@ export async function findTranslationFiles(
           });
 
           if (detectMultiLanguage(parsedContent, knownLocales)) {
+            if (!betaNoticeEmitted) {
+              console.log(chalk.blue('ℹ Multi-language files: beta feature — please report issues'));
+              betaNoticeEmitted = true;
+            }
             const parsedObj = parsedContent as Record<string, unknown>;
             const base64 = Buffer.from(rawContent).toString('base64');
 
