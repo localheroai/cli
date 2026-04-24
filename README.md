@@ -99,6 +99,28 @@ Detection rule: every top-level key in the file must be a configured locale (in 
 
 This is a beta feature — please report issues.
 
+## Ignoring keys
+
+Some keys shouldn't be translated by LocalHero — for example, Rails validation
+errors served in English by an API, or internal admin strings. Add them to
+`ignoreKeys` in your `localhero.json`:
+
+```json
+{
+  "ignoreKeys": [
+    "activerecord.errors.*",
+    "admin.internal.*"
+  ]
+}
+```
+
+Matching keys are skipped during `push` and `translate`. Two pattern forms are
+supported: exact names (`foo.bar.baz`) and trailing wildcards (`foo.bar.*`,
+recursive). Use `--verbose` to see a summary of what was ignored.
+
+Not yet supported for `.po` / `.pot` files — those are uploaded unfiltered with
+a warning.
+
 ## Commands
 
 ### Initialize a Project
