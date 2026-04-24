@@ -29,7 +29,8 @@ describe('API Client', () => {
     const mockResponse = { data: 'test' };
     global.fetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve(mockResponse)
+      status: 200,
+      text: () => Promise.resolve(JSON.stringify(mockResponse))
     });
 
     const result = await apiRequest('/test-endpoint');
@@ -50,7 +51,8 @@ describe('API Client', () => {
     const errorMessage = 'API request failed';
     global.fetch.mockResolvedValueOnce({
       ok: false,
-      json: () => Promise.resolve({ error: { message: errorMessage } })
+      status: 400,
+      text: () => Promise.resolve(JSON.stringify({ error: { message: errorMessage } }))
     });
 
     await expect(apiRequest('/test-endpoint'))
@@ -67,7 +69,8 @@ describe('API Client', () => {
       .mockRejectedValueOnce(networkError)
       .mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve(mockResponse)
+        status: 200,
+        text: () => Promise.resolve(JSON.stringify(mockResponse))
       });
 
     const result = await apiRequest('/test-endpoint');
@@ -81,7 +84,7 @@ describe('API Client', () => {
     global.fetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
-      json: () => Promise.resolve({ error: { code: 'invalid_api_key', message: 'Unauthorized' } })
+      text: () => Promise.resolve(JSON.stringify({ error: { code: 'invalid_api_key', message: 'Unauthorized' } }))
     });
 
     await expect(apiRequest('/test-endpoint')).rejects.toThrow('Your API key is invalid');
