@@ -945,4 +945,126 @@ describe('translate command', () => {
     expect(translationUtils.updateTranslationFile).toHaveBeenCalled();
     expect(gitUtils.autoCommitChanges).not.toHaveBeenCalled();
   });
+
+  describe('ignoreKeys', () => {
+    it('passes an ignoreMatcher to findMissingTranslationsByLocale', async () => {
+      configUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] },
+        ignoreKeys: ['admin.*']
+      });
+
+      fileUtils.findTranslationFiles.mockResolvedValue({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+        allFiles: [
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' }
+        ]
+      });
+
+      translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+        missing: {},
+        removed: []
+      });
+
+      await translate({}, createTranslateDeps());
+
+      expect(translationUtils.findMissingTranslationsByLocale).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
+      );
+    });
+
+    it('passes an ignoreMatcher even when ignoreKeys is absent', async () => {
+      fileUtils.findTranslationFiles.mockResolvedValue({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+        allFiles: [
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' }
+        ]
+      });
+
+      translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+        missing: {},
+        removed: []
+      });
+
+      await translate({}, createTranslateDeps());
+
+      expect(translationUtils.findMissingTranslationsByLocale).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
+      );
+    });
+
+    it('logs ignore summary in verbose mode when keys are filtered', async () => {
+      configUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] },
+        ignoreKeys: ['admin.*']
+      });
+
+      fileUtils.findTranslationFiles.mockResolvedValue({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+        allFiles: [
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' }
+        ]
+      });
+
+      translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+        missing: {},
+        removed: [{ name: 'admin.internal' }]
+      });
+
+      await translate({ verbose: true }, createTranslateDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored 1 keys'))).toBe(true);
+    });
+
+    it('does not log ignore summary in non-verbose mode', async () => {
+      configUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr'],
+        translationFiles: { paths: ['locales/'] },
+        ignoreKeys: ['admin.*']
+      });
+
+      fileUtils.findTranslationFiles.mockResolvedValue({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+        allFiles: [
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' }
+        ]
+      });
+
+      translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+        missing: {},
+        removed: [{ name: 'admin.internal' }]
+      });
+
+      await translate({}, createTranslateDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored'))).toBe(false);
+    });
+  });
 });
