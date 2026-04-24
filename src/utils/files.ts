@@ -379,7 +379,6 @@ export async function findTranslationFiles(
 
         if (
           translationFiles?.multiLanguageFiles &&
-          parseContent &&
           (format === 'yml' || format === 'yaml' || format === 'json')
         ) {
           const fileSize = await getFileSize(filePath);

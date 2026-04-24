@@ -408,4 +408,33 @@ pt-BR:
     );
     expect(noticeCalls).toHaveLength(0);
   });
+
+  it('fans out multi-language files even when parseContent is false (used by push/import-service)', async () => {
+    mockGlob.mockResolvedValue(['config/locales/invitation.i18n.yml']);
+    mockReadFile.mockResolvedValue(multiLangYaml);
+
+    const result = await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv', 'nb', 'fi'],
+      translationFiles: {
+        paths: ['config/locales/'],
+        multiLanguageFiles: true
+      }
+    }, {
+      parseContent: false,
+      includeContent: false,
+      extractKeys: false
+    });
+
+    const files = result as Array<{ locale: string; multiLanguage?: boolean; content?: string; translations?: unknown; keys?: unknown }>;
+    expect(files).toHaveLength(4);
+    const locales = files.map(f => f.locale).sort();
+    expect(locales).toEqual(['en', 'fi', 'nb', 'sv']);
+    files.forEach(file => {
+      expect(file.multiLanguage).toBe(true);
+      expect(file.content).toBeUndefined();
+      expect(file.translations).toBeUndefined();
+      expect(file.keys).toBeUndefined();
+    });
+  });
 });
