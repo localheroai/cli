@@ -7,7 +7,8 @@ import { findTranslationFiles as findFiles, flattenTranslations } from './files.
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
 import { detectMultiLanguage } from './multi-language-detection.js';
-import type { RemovedKey } from './ignore-keys.js';
+import type { IgnoreSummary, RemovedKey } from './ignore-keys.js';
+import { summarizeRemoved } from './ignore-keys.js';
 import type {
   ProjectConfig,
   TranslationFile,
@@ -37,6 +38,7 @@ export interface ImportResult {
   poll_interval?: number;
   id?: string;
   prunable_keys?: PrunableKey[];
+  ignoreSummary?: IgnoreSummary;
 }
 
 export interface KeyIdentifier {
@@ -421,12 +423,20 @@ export const importService = {
   async pushTranslations(
     config: ProjectConfig,
     basePath = process.cwd(),
-    options: { force?: boolean; verbose?: boolean; prune?: boolean } = {}
+    options: {
+      force?: boolean;
+      verbose?: boolean;
+      prune?: boolean;
+      ignoreMatcher?: (keyName: string) => boolean;
+    } = {}
   ): Promise<ImportResult> {
+    const ignorePatterns = config.ignoreKeys ?? [];
+    const emptySummary = summarizeRemoved([], ignorePatterns);
+
     let files = await this.findTranslationFiles(config, basePath);
 
     if (!files.length) {
-      return { status: 'no_files' };
+      return { status: 'no_files', ignoreSummary: emptySummary };
     }
 
     if (!options.force) {
@@ -435,7 +445,8 @@ export const importService = {
         if (filteredFiles.length === 0) {
           return {
             status: 'no_changes',
-            files: { source: [], target: [] }
+            files: { source: [], target: [] },
+            ignoreSummary: emptySummary
           };
         }
         files = filteredFiles;
@@ -448,12 +459,23 @@ export const importService = {
     const targetFiles = files.filter(file => file.language !== config.sourceLocale);
     const allTranslations: TranslationRecord[] = [];
 
+    const knownLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];
+    const filterOpts: FilterOptions | undefined = options.ignoreMatcher
+      ? { ignoreMatcher: options.ignoreMatcher, knownLocales, sourceLocale: config.sourceLocale }
+      : undefined;
+    const allRemoved: RemovedKey[] = [];
+
     for (const file of sourceFiles) {
       const fullPath = path.join(basePath, file.path);
-      const fileResult = await readFileContentWithKeys(fullPath, {
-        sourceLanguage: config.sourceLocale,
-        currentLanguage: file.language
-      });
+      const fileResult = await readFileContentWithKeys(
+        fullPath,
+        {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        },
+        filterOpts
+      );
+      allRemoved.push(...fileResult.removed);
 
       const record: TranslationRecord = {
         language: file.language,
@@ -472,17 +494,25 @@ export const importService = {
 
     for (const file of targetFiles) {
       const fullPath = path.join(basePath, file.path);
+      const fileResult = await readFileContentWithKeys(
+        fullPath,
+        {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        },
+        filterOpts
+      );
       allTranslations.push({
         language: file.language,
         format: normalizeFormat(file.format),
         filename: file.path,
-        content: await readFileContent(fullPath, {
-          sourceLanguage: config.sourceLocale,
-          currentLanguage: file.language
-        }),
+        content: fileResult.content,
         multi_language: file.multi_language ?? false
       });
+      allRemoved.push(...fileResult.removed);
     }
+
+    const ignoreSummary = summarizeRemoved(allRemoved, ignorePatterns);
 
     if (options.verbose) {
       console.log(chalk.blue(`Sending ${allTranslations.length} translation files to API`));
@@ -500,7 +530,8 @@ export const importService = {
     if (importResult.import?.status === 'failed') {
       return {
         ...importResult.import,
-        files: { source: [], target: files }
+        files: { source: [], target: files },
+        ignoreSummary
       };
     }
 
@@ -513,7 +544,8 @@ export const importService = {
       if (finalImportResult.import?.status === 'failed') {
         return {
           ...finalImportResult.import,
-          files: { source: [], target: files }
+          files: { source: [], target: files },
+          ignoreSummary
         };
       }
     }
@@ -536,7 +568,8 @@ export const importService = {
       translations_url,
       sourceImport,
       files: { source: sourceFiles, target: targetFiles },
-      prunable_keys
+      prunable_keys,
+      ignoreSummary
     };
   }
 };
