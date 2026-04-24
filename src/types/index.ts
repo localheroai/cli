@@ -69,6 +69,9 @@ export interface ProjectConfig {
   /** Command to run after translations are updated but before commit */
   postTranslateCommand?: string;
 
+  /** Glob patterns for keys to skip entirely (client-side filter). */
+  ignoreKeys?: string[];
+
   /** Django workflow configuration */
   django?: {
     updateSources?: boolean;
