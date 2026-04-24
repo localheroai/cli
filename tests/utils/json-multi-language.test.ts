@@ -78,3 +78,51 @@ describe('JSON multi-language sequential writes', () => {
     expect(after.sv).toEqual({ ...before.sv, cta: 'Signera' });
   });
 });
+
+describe('JSON handler with flat files that have 2-letter object keys', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'localhero-flat-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('does not wrap a flat file with a single 2-letter object-valued key when the target locale is absent', async () => {
+    const filePath = path.join(tempDir, 'sv.json');
+    const initial = {
+      id: { type: 'uuid', value: 'abc' },
+      greeting: 'Hej'
+    };
+    await fs.writeFile(filePath, JSON.stringify(initial, null, 2), 'utf8');
+
+    await updateTranslationFile(filePath, { farewell: 'Hej då' }, 'sv', filePath, 'en');
+
+    const after = JSON.parse(await fs.readFile(filePath, 'utf8'));
+
+    expect(after).toEqual({
+      id: { type: 'uuid', value: 'abc' },
+      greeting: 'Hej',
+      farewell: 'Hej då'
+    });
+    expect(after.sv).toBeUndefined();
+  });
+
+  it('wraps the new locale when 2+ locale-shape sibling entries already exist', async () => {
+    const filePath = path.join(tempDir, 'greet.i18n.json');
+    const initial = {
+      en: { greeting: 'Hello' },
+      sv: { greeting: 'Hej' }
+    };
+    await fs.writeFile(filePath, JSON.stringify(initial, null, 2), 'utf8');
+
+    await updateTranslationFile(filePath, { greeting: 'Hei' }, 'nb', filePath, 'en');
+
+    const after = JSON.parse(await fs.readFile(filePath, 'utf8'));
+
+    expect(Object.keys(after).sort()).toEqual(['en', 'nb', 'sv']);
+    expect(after.nb).toEqual({ greeting: 'Hei' });
+  });
+});

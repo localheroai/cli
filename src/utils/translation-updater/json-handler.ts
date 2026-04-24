@@ -33,13 +33,13 @@ function detectStructureFromContent(
     return { hasLanguageWrapper: true, jsonFormat: detectJsonFormat(innerContent) };
   }
 
-  const existingLocaleEntry = Object.entries(content).find(
+  const localeEntries = Object.entries(content).filter(
     ([key, value]) => LOCALE_KEY_REGEX.test(key) && typeof value === 'object' && value !== null
   );
-  if (existingLocaleEntry) {
+  if (localeEntries.length >= 2) {
     return {
       hasLanguageWrapper: true,
-      jsonFormat: detectJsonFormat(existingLocaleEntry[1] as Record<string, unknown>)
+      jsonFormat: detectJsonFormat(localeEntries[0][1] as Record<string, unknown>)
     };
   }
 
