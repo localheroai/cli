@@ -46,10 +46,13 @@ export function parseFile(
   }
 }
 
+const DEFAULT_LOCALE_REGEX = '(?:^|[._-])([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$';
+
 /**
  * Extract locale from file path
  */
-function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
+export function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
+  const effectiveLocaleRegex = localeRegex ?? DEFAULT_LOCALE_REGEX;
   if (knownLocales && knownLocales.length > 0) {
     const basenameOriginal = path.basename(filePath, path.extname(filePath));
     const isBasenameAKnownLocale = knownLocales.some(
@@ -85,16 +88,20 @@ function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLoca
     return dirNameOriginal;
   }
 
-  if (localeRegex) {
-    const filenameOriginal = path.basename(filePath);
-    const regexPattern = new RegExp(localeRegex);
-    const regexMatch = filenameOriginal.match(regexPattern);
-    if (regexMatch && regexMatch[1]) {
-      const capturedLocale = regexMatch[1];
-      if (isValidLocale(capturedLocale)) {
-        return capturedLocale;
-      }
+  const filenameOriginal = path.basename(filePath);
+  const regexPattern = new RegExp(effectiveLocaleRegex);
+  const regexMatch = filenameOriginal.match(regexPattern);
+  if (regexMatch && regexMatch[1] && isValidLocale(regexMatch[1])) {
+    const capturedLocale = regexMatch[1];
+    const usingDefaultRegex = localeRegex === undefined;
+    const validKnownLocales = knownLocales.filter(Boolean);
+    if (!usingDefaultRegex || validKnownLocales.length === 0) {
+      return capturedLocale;
     }
+    const match = validKnownLocales.find(
+      (kl) => kl.toLowerCase() === capturedLocale.toLowerCase()
+    );
+    if (match) return match;
   }
 
   throw new Error(`Could not extract locale from path: ${filePath}`);
@@ -324,7 +331,7 @@ export async function findTranslationFiles(
     paths = [],
     pattern = '**/*.{json,yml,yaml,po,pot}',
     ignore = [],
-    localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
+    localeRegex = DEFAULT_LOCALE_REGEX
   } = translationFiles || {};
 
   const processedFiles: TranslationFile[] = [];
