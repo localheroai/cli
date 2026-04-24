@@ -947,7 +947,7 @@ describe('translate command', () => {
   });
 
   describe('ignoreKeys', () => {
-    it('passes an ignoreMatcher to findMissingTranslationsByLocale', async () => {
+    it('passes an ignoreMatcher that matches configured patterns', async () => {
       configUtils.getProjectConfig.mockResolvedValue({
         projectId: 'test-project',
         sourceLocale: 'en',
@@ -972,17 +972,14 @@ describe('translate command', () => {
 
       await translate({}, createTranslateDeps());
 
-      expect(translationUtils.findMissingTranslationsByLocale).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
-      );
+      const call = translationUtils.findMissingTranslationsByLocale.mock.calls[0];
+      const filterOptions = call[5];
+      expect(filterOptions.ignoreMatcher).toEqual(expect.any(Function));
+      expect(filterOptions.ignoreMatcher('admin.internal')).toBe(true);
+      expect(filterOptions.ignoreMatcher('navigation.home')).toBe(false);
     });
 
-    it('passes an ignoreMatcher even when ignoreKeys is absent', async () => {
+    it('passes an always-false matcher when ignoreKeys is absent', async () => {
       fileUtils.findTranslationFiles.mockResolvedValue({
         sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
         targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
@@ -999,14 +996,10 @@ describe('translate command', () => {
 
       await translate({}, createTranslateDeps());
 
-      expect(translationUtils.findMissingTranslationsByLocale).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.anything(),
-        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
-      );
+      const call = translationUtils.findMissingTranslationsByLocale.mock.calls[0];
+      const filterOptions = call[5];
+      expect(filterOptions.ignoreMatcher).toEqual(expect.any(Function));
+      expect(filterOptions.ignoreMatcher('anything')).toBe(false);
     });
 
     it('logs ignore summary in verbose mode when keys are filtered', async () => {

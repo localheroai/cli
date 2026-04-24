@@ -331,7 +331,7 @@ describe('push command', () => {
       zeroMatchPatterns: []
     };
 
-    it('passes an ignoreMatcher to pushTranslations when ignoreKeys is configured', async () => {
+    it('passes an ignoreMatcher that matches configured patterns', async () => {
       mockPrompt.confirm.mockResolvedValue(true);
       mockImportService.pushTranslations.mockResolvedValue({
         status: 'completed',
@@ -342,14 +342,14 @@ describe('push command', () => {
       const configWithIgnore = { ...mockConfig, ignoreKeys: ['admin.*'] };
       await push(configWithIgnore, { yes: true }, createPushDeps());
 
-      expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
-        configWithIgnore,
-        process.cwd(),
-        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
-      );
+      const call = mockImportService.pushTranslations.mock.calls[0];
+      const options = call[2];
+      expect(options.ignoreMatcher).toEqual(expect.any(Function));
+      expect(options.ignoreMatcher('admin.internal')).toBe(true);
+      expect(options.ignoreMatcher('navigation.home')).toBe(false);
     });
 
-    it('passes an ignoreMatcher even when ignoreKeys is absent', async () => {
+    it('passes an always-false matcher when ignoreKeys is absent', async () => {
       mockPrompt.confirm.mockResolvedValue(true);
       mockImportService.pushTranslations.mockResolvedValue({
         status: 'completed',
@@ -359,11 +359,11 @@ describe('push command', () => {
 
       await push(mockConfig, { yes: true }, createPushDeps());
 
-      expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
-        mockConfig,
-        process.cwd(),
-        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
-      );
+      const call = mockImportService.pushTranslations.mock.calls[0];
+      const options = call[2];
+      expect(options.ignoreMatcher).toEqual(expect.any(Function));
+      expect(options.ignoreMatcher('anything.at.all')).toBe(false);
+      expect(options.ignoreMatcher('admin.internal')).toBe(false);
     });
 
     it('does not log an ignore summary in non-verbose mode', async () => {
