@@ -99,6 +99,73 @@ describe('translation-utils', () => {
         }
       });
     });
+
+    describe('blank source placeholders', () => {
+      it('string branch: empty string source is skipped with reason blank_source', () => {
+        const sourceKeys = {
+          real_key: 'Hello',
+          placeholder: ''
+        };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({
+          real_key: { value: 'Hello', sourceKey: 'real_key' }
+        });
+        expect(result.skippedKeys).toEqual({
+          placeholder: { value: '', reason: 'blank_source' }
+        });
+      });
+
+      it('string branch: whitespace-only source is skipped with reason blank_source', () => {
+        const sourceKeys = { placeholder: '   ' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({});
+        expect(result.skippedKeys).toEqual({
+          placeholder: { value: '   ', reason: 'blank_source' }
+        });
+      });
+
+      it('string branch: non-blank source still triggers missing-key detection', () => {
+        const sourceKeys = { greeting: 'Hello' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({ greeting: { value: 'Hello', sourceKey: 'greeting' } });
+        expect(result.skippedKeys).toEqual({});
+      });
+
+      it('string branch: WIP markers still produce reason wip (not blank_source)', () => {
+        const sourceKeys = { wip_draft: 'wip_some draft' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.skippedKeys).toEqual({ wip_draft: { value: 'wip_some draft', reason: 'wip' } });
+        expect(result.missingKeys).toEqual({});
+      });
+
+      it('object-with-value branch: empty value string is skipped with reason blank_source', () => {
+        const sourceKeys = { placeholder: { value: '' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({});
+        expect(result.skippedKeys.placeholder).toMatchObject({ value: '', reason: 'blank_source' });
+      });
+
+      it('object-with-value branch: non-blank value flows through to missing-key detection', () => {
+        const sourceKeys = { greeting: { value: 'Hello' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({ greeting: { value: 'Hello', sourceKey: 'greeting' } });
+        expect(result.skippedKeys).toEqual({});
+      });
+
+      it('object-with-value branch: WIP marker in value still produces reason wip', () => {
+        const sourceKeys = { draft: { value: 'wip_some draft' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.skippedKeys).toEqual({ draft: { value: 'wip_some draft', reason: 'wip' } });
+        expect(result.missingKeys).toEqual({});
+      });
+    });
   });
 
   describe('findMissingTranslationsByLocale', () => {

@@ -125,6 +125,14 @@ export function findMissingTranslations(
         continue;
       }
 
+      if (details.trim() === '') {
+        skippedKeys[key] = {
+          value: details,
+          reason: 'blank_source'
+        };
+        continue;
+      }
+
       if (!targetKeys[key]) {
         missingKeys[key] = {
           value: details,
@@ -154,6 +162,18 @@ export function findMissingTranslations(
       skippedKeys[key] = {
         ...details,
         reason: 'wip'
+      };
+      continue;
+    }
+
+    if (
+      typeof details === 'object' && details !== null &&
+      typeof details.value === 'string' &&
+      details.value.trim() === ''
+    ) {
+      skippedKeys[key] = {
+        ...details,
+        reason: 'blank_source'
       };
       continue;
     }
@@ -237,7 +257,12 @@ export function findMissingTranslationsByLocale(
       }
 
       if (verbose && Object.keys(result.skippedKeys).length > 0) {
-        logger.log(`\nℹ Skipped ${Object.keys(result.skippedKeys).length} keys marked as WIP in ${sourceFile.path}`);
+        const wipCount = Object.values(result.skippedKeys).filter((d) => d.reason === 'wip').length;
+        const blankCount = Object.values(result.skippedKeys).filter((d) => d.reason === 'blank_source').length;
+        const parts: string[] = [];
+        if (wipCount > 0) parts.push(`${wipCount} marked as WIP`);
+        if (blankCount > 0) parts.push(`${blankCount} blank source placeholders`);
+        logger.log(`\nℹ Skipped ${Object.keys(result.skippedKeys).length} keys (${parts.join(', ')}) in ${sourceFile.path}`);
       }
     }
   }
