@@ -44,3 +44,25 @@ export function validateIgnoreKeys(raw: unknown): string[] {
   }
   return result;
 }
+
+export function createIgnoreMatcher(
+  patterns: string[]
+): (keyName: string) => boolean {
+  if (patterns.length === 0) return () => false;
+
+  const exacts = new Set<string>();
+  const prefixes: string[] = [];
+
+  for (const pattern of patterns) {
+    if (pattern.endsWith('.*')) {
+      prefixes.push(pattern.slice(0, -2) + '.');
+    } else {
+      exacts.add(pattern);
+    }
+  }
+
+  return (keyName: string) => {
+    if (exacts.has(keyName)) return true;
+    return prefixes.some((p) => keyName.startsWith(p));
+  };
+}
