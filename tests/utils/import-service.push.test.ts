@@ -80,8 +80,7 @@ describe('pushTranslations with ignoreMatcher', () => {
         projectId: 'test',
         sourceLocale: 'en',
         outputLocales: ['sv'],
-        translationFiles: { paths: ['.'] },
-        ignoreKeys: ['activerecord.errors.*'],
+        translationFiles: { paths: ['.'], ignoreKeys: ['activerecord.errors.*'] },
         lastSyncedAt: null
       },
       tmp,

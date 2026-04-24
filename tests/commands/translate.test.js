@@ -952,8 +952,7 @@ describe('translate command', () => {
         projectId: 'test-project',
         sourceLocale: 'en',
         outputLocales: ['fr'],
-        translationFiles: { paths: ['locales/'] },
-        ignoreKeys: ['admin.*']
+        translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }
       });
 
       fileUtils.findTranslationFiles.mockResolvedValue({
@@ -1007,8 +1006,7 @@ describe('translate command', () => {
         projectId: 'test-project',
         sourceLocale: 'en',
         outputLocales: ['fr'],
-        translationFiles: { paths: ['locales/'] },
-        ignoreKeys: ['admin.*']
+        translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }
       });
 
       fileUtils.findTranslationFiles.mockResolvedValue({
@@ -1036,8 +1034,7 @@ describe('translate command', () => {
         projectId: 'test-project',
         sourceLocale: 'en',
         outputLocales: ['fr'],
-        translationFiles: { paths: ['locales/'] },
-        ignoreKeys: ['admin.*']
+        translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }
       });
 
       fileUtils.findTranslationFiles.mockResolvedValue({

@@ -99,7 +99,7 @@ export async function push(
     }
   }
 
-  const ignoreMatcher = createIgnoreMatcher(config.ignoreKeys ?? []);
+  const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
   const result = await importService.pushTranslations(config, process.cwd(), {
     force,
     verbose,

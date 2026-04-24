@@ -103,14 +103,16 @@ This is a beta feature — please report issues.
 
 Some keys shouldn't be translated by LocalHero — for example, Rails validation
 errors served in English by an API, or internal admin strings. Add them to
-`ignoreKeys` in your `localhero.json`:
+`translationFiles.ignoreKeys` in your `localhero.json`:
 
 ```json
 {
-  "ignoreKeys": [
-    "activerecord.errors.*",
-    "admin.internal.*"
-  ]
+  "translationFiles": {
+    "ignoreKeys": [
+      "activerecord.errors.*",
+      "admin.internal.*"
+    ]
+  }
 }
 ```
 

@@ -13,6 +13,7 @@ export interface TranslationFileConfig {
   workflow?: 'default' | 'django';
   baseBranch?: string;
   multiLanguageFiles?: boolean;
+  ignoreKeys?: string[];
 }
 
 // Translation file interface
@@ -68,9 +69,6 @@ export interface ProjectConfig {
 
   /** Command to run after translations are updated but before commit */
   postTranslateCommand?: string;
-
-  /** Glob patterns for keys to skip entirely (client-side filter). */
-  ignoreKeys?: string[];
 
   /** Django workflow configuration */
   django?: {

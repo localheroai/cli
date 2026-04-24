@@ -211,7 +211,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return;
   }
 
-  const ignoreMatcher = createIgnoreMatcher(config.ignoreKeys ?? []);
+  const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
 
   const findResult = translationUtils.findMissingTranslationsByLocale(
     sourceFiles,
@@ -223,7 +223,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   );
   let missingByLocale = findResult.missing;
 
-  const ignoreSummary = summarizeRemoved(findResult.removed, config.ignoreKeys ?? []);
+  const ignoreSummary = summarizeRemoved(findResult.removed, config.translationFiles?.ignoreKeys ?? []);
   if (verbose && (ignoreSummary.totalKeysIgnored > 0 || ignoreSummary.zeroMatchPatterns.length > 0)) {
     logIgnoreSummary(ignoreSummary, console);
   }

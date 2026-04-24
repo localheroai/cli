@@ -430,7 +430,7 @@ export const importService = {
       ignoreMatcher?: (keyName: string) => boolean;
     } = {}
   ): Promise<ImportResult> {
-    const ignorePatterns = config.ignoreKeys ?? [];
+    const ignorePatterns = config.translationFiles?.ignoreKeys ?? [];
     const emptySummary = summarizeRemoved([], ignorePatterns);
 
     let files = await this.findTranslationFiles(config, basePath);

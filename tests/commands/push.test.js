@@ -339,7 +339,7 @@ describe('push command', () => {
         ignoreSummary: emptySummary
       });
 
-      const configWithIgnore = { ...mockConfig, ignoreKeys: ['admin.*'] };
+      const configWithIgnore = { ...mockConfig, translationFiles: { ...(mockConfig.translationFiles ?? {}), ignoreKeys: ['admin.*'] } };
       await push(configWithIgnore, { yes: true }, createPushDeps());
 
       const call = mockImportService.pushTranslations.mock.calls[0];

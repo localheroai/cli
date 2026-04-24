@@ -144,13 +144,16 @@ export const configService: ConfigService = {
       schemaVersion: DEFAULT_PROJECT_CONFIG.schemaVersion
     } as Record<string, unknown>;
 
-    const ignoreKeysValue = configWithSchema['ignoreKeys'];
-    if (
-      ignoreKeysValue === undefined ||
-      ignoreKeysValue === null ||
-      (Array.isArray(ignoreKeysValue) && ignoreKeysValue.length === 0)
-    ) {
-      delete configWithSchema['ignoreKeys'];
+    const translationFiles = configWithSchema['translationFiles'] as Record<string, unknown> | undefined;
+    if (translationFiles) {
+      const ignoreKeysValue = translationFiles['ignoreKeys'];
+      if (
+        ignoreKeysValue === undefined ||
+        ignoreKeysValue === null ||
+        (Array.isArray(ignoreKeysValue) && ignoreKeysValue.length === 0)
+      ) {
+        delete translationFiles['ignoreKeys'];
+      }
     }
 
     await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2));
@@ -175,7 +178,7 @@ export const configService: ConfigService = {
       throw new Error('translationFiles.paths must be an array of paths');
     }
 
-    validateIgnoreKeys(config.ignoreKeys);
+    validateIgnoreKeys(config.translationFiles?.ignoreKeys);
 
     return true;
   },
