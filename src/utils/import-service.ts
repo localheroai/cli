@@ -132,42 +132,58 @@ function readYaml(
   sourceLocale: string | undefined,
   currentLanguage: string | undefined
 ): FileReadResult {
-  try {
-    const parsed = yaml.parse(content);
-    if (!matcher) {
+  if (!matcher) {
+    try {
+      const parsed = yaml.parse(content);
       const flat = flattenTranslations(parsed);
       return {
         content: Buffer.from(content).toString('base64'),
         keys: Object.keys(flat).map((name) => ({ name, context: null })),
         removed: [],
       };
+    } catch {
+      return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
     }
+  }
 
-    const doc = yaml.parseDocument(content);
-    const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
-    const removed: RemovedKey[] = [];
-
-    for (const { obj, pathPrefix, locale } of subtrees) {
-      const flat = flattenTranslations(obj);
-      for (const flatKey of Object.keys(flat)) {
-        if (matcher(flatKey)) {
-          doc.deleteIn([...pathPrefix, ...flatKey.split('.')]);
-          removed.push({ name: flatKey, locale });
-        }
-      }
-    }
-
-    const serialized = doc.toString();
-    const postParsed = yaml.parse(serialized);
-    const postFlat = flattenTranslations(postParsed);
-    return {
-      content: Buffer.from(serialized).toString('base64'),
-      keys: Object.keys(postFlat).map((name) => ({ name, context: null })),
-      removed,
-    };
+  let parsed: unknown;
+  let doc: yaml.Document;
+  try {
+    parsed = yaml.parse(content);
+    doc = yaml.parseDocument(content);
   } catch {
     return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
   }
+
+  const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
+  const removed: RemovedKey[] = [];
+  const keptNames: string[] = [];
+
+  for (const { obj, pathPrefix, locale } of subtrees) {
+    const flat = flattenTranslations(obj);
+    for (const flatKey of Object.keys(flat)) {
+      const fullName = pathPrefix.length > 0 ? `${pathPrefix.join('.')}.${flatKey}` : flatKey;
+      if (matcher(flatKey)) {
+        doc.deleteIn([...pathPrefix, ...flatKey.split('.')]);
+        removed.push({ name: flatKey, locale });
+      } else {
+        keptNames.push(fullName);
+      }
+    }
+  }
+
+  let serialized: string;
+  try {
+    serialized = doc.toString();
+  } catch {
+    return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
+  }
+
+  return {
+    content: Buffer.from(serialized).toString('base64'),
+    keys: keptNames.map((name) => ({ name, context: null })),
+    removed,
+  };
 }
 
 function readJson(
@@ -218,12 +234,17 @@ function readPo(
   options: { sourceLanguage?: string; currentLanguage?: string } | undefined,
   matcher: ((k: string) => boolean) | undefined
 ): FileReadResult {
-  if (matcher && !poWarningEmitted) {
-    console.warn(chalk.yellow('⚠ ignoreKeys does not yet support PO files; PO files will be uploaded unfiltered.'));
-    poWarningEmitted = true;
-  }
   try {
     const parsed = parsePoFile(content);
+
+    if (matcher && !poWarningEmitted) {
+      const anyMatch = parsed.entries.some((e) => e.msgid && matcher(e.msgid));
+      if (anyMatch) {
+        console.warn(chalk.yellow('⚠ ignoreKeys does not yet support PO files; PO files will be uploaded unfiltered.'));
+        poWarningEmitted = true;
+      }
+    }
+
     const apiFormat = poEntriesToApiFormat(parsed, options);
     const keys: KeyIdentifier[] = [];
     for (const entry of parsed.entries) {

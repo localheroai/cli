@@ -143,6 +143,22 @@ describe('readFileContentWithKeys with ignoreMatcher', () => {
     expect(warnings.filter((w) => w.includes('ignoreKeys does not yet support PO files')).length).toBe(1);
   });
 
+  it('does not warn on PO files when matcher does not match any msgid', async () => {
+    const src = 'msgid "some_unrelated_string"\nmsgstr "bar"\n';
+    const p = path.join(tmp, 'unrelated.po');
+    await fs.writeFile(p, src, 'utf8');
+    const matcher = createIgnoreMatcher(['activerecord.errors.*']);
+    const warnings: string[] = [];
+    const origWarn = console.warn;
+    console.warn = (msg: string) => warnings.push(msg);
+    try {
+      await readFileContentWithKeys(p, undefined, { ignoreMatcher: matcher, knownLocales, sourceLocale: 'en' });
+    } finally {
+      console.warn = origWarn;
+    }
+    expect(warnings.filter((w) => w.includes('ignoreKeys'))).toEqual([]);
+  });
+
   it('behaves identically to legacy when no ignoreMatcher is provided (YAML, wrapped)', async () => {
     const src = 'en:\n  foo: bar\n';
     const p = path.join(tmp, 'en.yml');
