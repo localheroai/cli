@@ -84,8 +84,12 @@ interface TranslationDependencies {
       targetFilesByLocale: Record<string, OriginalTranslationFile[]>,
       config: { sourceLocale: string; outputLocales: string[] },
       verbose: boolean,
-      logger?: { log: (message?: any, ...optionalParams: any[]) => void }
-    ) => Record<string, MissingLocaleEntry>;
+      logger?: { log: (message?: any, ...optionalParams: any[]) => void },
+      filterOptions?: { ignoreMatcher?: (keyName: string) => boolean }
+    ) => {
+      missing: Record<string, MissingLocaleEntry>;
+      removed: Array<{ name: string; locale?: string }>;
+    };
   };
   gitUtils: {
     autoCommitChanges: (paths: string, translationSummary?: {
@@ -205,13 +209,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return;
   }
 
-  let missingByLocale = translationUtils.findMissingTranslationsByLocale(
+  const findResult = translationUtils.findMissingTranslationsByLocale(
     sourceFiles,
     targetFilesByLocale,
     config,
     !!verbose,
     console
   );
+  let missingByLocale = findResult.missing;
 
   // Capture the full manifest BEFORE filtering down to missing-only keys.
   // This is the complete snapshot of "what differs from main" for this push.

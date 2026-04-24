@@ -60,7 +60,7 @@ describe('translate command', () => {
         missingKeys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
         skippedKeys: {}
       }),
-      findMissingTranslationsByLocale: jest.fn().mockReturnValue({}),
+      findMissingTranslationsByLocale: jest.fn().mockReturnValue({ missing: {}, removed: [] }),
       batchKeysWithMissing: jest.fn().mockReturnValue({
         batches: [],
         errors: []
@@ -98,13 +98,16 @@ describe('translate command', () => {
 
     // Configure missing translations for this test
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en/common.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: targetFilePath,
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en/common.json': {
+          locale: 'fr',
+          path: sourceFilePath,
+          targetPath: targetFilePath,
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     // Configure batch for this test
@@ -246,20 +249,23 @@ describe('translate command', () => {
 
     // Configure missing translations for this test
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en/common.json': {
-        locale: 'fr',
-        path: 'locales/en/common.json',
-        targetPath: 'locales/fr/common.json',
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
+      missing: {
+        'fr:locales/en/common.json': {
+          locale: 'fr',
+          path: 'locales/en/common.json',
+          targetPath: 'locales/fr/common.json',
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        },
+        'fr:locales/en/home.json': {
+          locale: 'fr',
+          path: 'locales/en/home.json',
+          targetPath: 'locales/fr/home.json',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
       },
-      'fr:locales/en/home.json': {
-        locale: 'fr',
-        path: 'locales/en/home.json',
-        targetPath: 'locales/fr/home.json',
-        keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
-        keyCount: 1
-      }
+      removed: []
     });
 
     fileUtils.findTranslationFiles.mockResolvedValue({
@@ -460,13 +466,16 @@ describe('translate command', () => {
 
     // Configure missing translations for this test
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: 'locales/fr.json',
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: sourceFilePath,
+          targetPath: 'locales/fr.json',
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     fileUtils.findTranslationFiles.mockResolvedValue({
@@ -516,13 +525,16 @@ describe('translate command', () => {
 
     // Configure missing translations for this test
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: 'locales/fr.json',
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: sourceFilePath,
+          targetPath: 'locales/fr.json',
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     fileUtils.findTranslationFiles.mockResolvedValue({
@@ -603,13 +615,16 @@ describe('translate command', () => {
     });
 
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en/common.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: 'locales/fr/common.json',
-        keys: { 'en': { value: 'en', sourceKey: 'en' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en/common.json': {
+          locale: 'fr',
+          path: sourceFilePath,
+          targetPath: 'locales/fr/common.json',
+          keys: { 'en': { value: 'en', sourceKey: 'en' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     translationUtils.batchKeysWithMissing.mockReturnValue({
@@ -679,13 +694,16 @@ describe('translate command', () => {
 
     // Configure missing translations for this test - only Norwegian has missing translations
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'nb:locales/en.json': {
-        locale: 'nb',
-        path: sourceFilePath,
-        targetPath: 'locales/nb.json',
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
+      missing: {
+        'nb:locales/en.json': {
+          locale: 'nb',
+          path: sourceFilePath,
+          targetPath: 'locales/nb.json',
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     fileUtils.findTranslationFiles.mockResolvedValue({
@@ -822,13 +840,16 @@ describe('translate command', () => {
     });
 
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en.json': {
-        locale: 'fr',
-        path: 'locales/en.json',
-        targetPath: 'locales/fr.json',
-        keys: { hello: { value: 'Hello', sourceKey: 'hello' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { hello: { value: 'Hello', sourceKey: 'hello' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     translationUtils.batchKeysWithMissing.mockReturnValue({
@@ -861,13 +882,16 @@ describe('translate command', () => {
     const targetFilePath = 'locales/fr/common.json';
 
     translationUtils.findMissingTranslationsByLocale.mockReturnValue({
-      'fr:locales/en/common.json': {
-        locale: 'fr',
-        path: sourceFilePath,
-        targetPath: targetFilePath,
-        keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
-        keyCount: 1
-      }
+      missing: {
+        'fr:locales/en/common.json': {
+          locale: 'fr',
+          path: sourceFilePath,
+          targetPath: targetFilePath,
+          keys: { farewell: { value: 'Goodbye', sourceKey: 'farewell' } },
+          keyCount: 1
+        }
+      },
+      removed: []
     });
 
     translationUtils.batchKeysWithMissing.mockReturnValue({

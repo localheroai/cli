@@ -6,6 +6,7 @@ import {
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
 import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX } from './po-utils.js';
+import { filterKeys, RemovedKey } from './ignore-keys.js';
 
 const POT_EXTENSION = '.pot';
 
@@ -203,16 +204,23 @@ export function findMissingTranslations(
  * @param config Project configuration with sourceLocale and outputLocales
  * @param verbose Whether to show verbose output
  * @param logger Optional logger for console output
- * @returns Record of missing translations by locale and source file
+ * @param filterOptions Optional filters applied before diffing source/target keys
+ * @returns Missing translations by locale and source file, plus a list of removed keys
  */
 export function findMissingTranslationsByLocale(
   sourceFiles: TranslationFile[],
   targetFilesByLocale: Record<string, TranslationFile[]>,
   config: { sourceLocale: string; outputLocales: string[] },
   verbose: boolean,
-  logger: { log: (message?: any, ...optionalParams: any[]) => void } = console
-): Record<string, MissingLocaleEntry> {
+  logger: { log: (message?: any, ...optionalParams: any[]) => void } = console,
+  filterOptions?: { ignoreMatcher?: (keyName: string) => boolean }
+): {
+  missing: Record<string, MissingLocaleEntry>;
+  removed: RemovedKey[];
+} {
   const missingByLocale: Record<string, MissingLocaleEntry> = {};
+  const allRemoved: RemovedKey[] = [];
+  const matcher = filterOptions?.ignoreMatcher;
 
   for (const sourceFile of sourceFiles) {
     if (!sourceFile.content) continue;
@@ -228,9 +236,29 @@ export function findMissingTranslationsByLocale(
       sourceFile.format
     );
 
+    let effectiveSourceKeys = sourceKeys;
+    if (matcher) {
+      const { kept, removed } = filterKeys(sourceKeys, matcher);
+      effectiveSourceKeys = kept;
+      for (const name of removed) allRemoved.push({ name });
+    }
+
     for (const targetLocale of config.outputLocales) {
       const targetFiles = targetFilesByLocale[targetLocale] || [];
-      const result = processLocaleTranslations(sourceKeys, targetLocale, targetFiles, sourceFile, config.sourceLocale);
+      const result = processLocaleTranslations(
+        effectiveSourceKeys,
+        targetLocale,
+        targetFiles,
+        sourceFile,
+        config.sourceLocale,
+        matcher
+      );
+
+      if (result.targetRemoved && result.targetRemoved.length > 0) {
+        for (const name of result.targetRemoved) {
+          allRemoved.push({ name, locale: targetLocale });
+        }
+      }
 
       if (Object.keys(result.missingKeys).length > 0) {
         const sourceFilePath = sourceFile.path;
@@ -267,7 +295,7 @@ export function findMissingTranslationsByLocale(
     }
   }
 
-  return missingByLocale;
+  return { missing: missingByLocale, removed: allRemoved };
 }
 
 /**
@@ -529,15 +557,17 @@ export interface ProcessLocaleResult {
  * @param targetFiles Array of target translation files
  * @param sourceFile The source file
  * @param sourceLocale The source locale
- * @returns Result with target path and missing/skipped keys
+ * @param matcher Optional ignore matcher applied to target keys before diffing
+ * @returns Result with target path, missing/skipped keys, and any target keys filtered by the matcher
  */
 export function processLocaleTranslations(
   sourceKeys: Record<string, any>,
   targetLocale: string,
   targetFiles: TranslationFile[],
   sourceFile: TranslationFile,
-  sourceLocale: string
-): ProcessLocaleResult {
+  sourceLocale: string,
+  matcher?: (keyName: string) => boolean
+): ProcessLocaleResult & { targetRemoved?: string[] } {
   try {
     const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
     let targetKeys: Record<string, any> = {};
@@ -550,6 +580,13 @@ export function processLocaleTranslations(
       targetPath = targetFile.path;
     } else {
       targetPath = generateTargetPath(sourceFile, targetLocale, sourceLocale);
+    }
+
+    let targetRemoved: string[] = [];
+    if (matcher) {
+      const { kept, removed } = filterKeys(targetKeys, matcher);
+      targetKeys = kept;
+      targetRemoved = removed;
     }
 
     // Use .po-specific missing detection for .po/.pot files
@@ -612,7 +649,8 @@ export function processLocaleTranslations(
       targetPath,
       missingKeys,
       skippedKeys,
-      targetFile
+      targetFile,
+      targetRemoved
     };
   } catch (error: any) {
     throw new Error(`Failed to process translations for ${targetLocale}: ${error.message}`);
