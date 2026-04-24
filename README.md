@@ -74,6 +74,31 @@ We auto-detect your project during init.
 - **React / Next.js** - JSON translation files
 - **Generic** - any JSON or YAML structure
 
+### Multi-language files (beta)
+
+Some projects keep all locales in one file, with top-level locale keys. Common in Rails apps that co-locate i18n with mailer templates or view components:
+
+```yaml
+en:
+  subject: "You've been invited"
+sv:
+  subject: "Du har blivit inbjuden"
+```
+
+Opt in by adding `multiLanguageFiles: true` to your `localhero.json`:
+
+```json
+"translationFiles": {
+  "paths": ["config/locales/", "apps/"],
+  "pattern": "**/*.{yml,yaml}",
+  "multiLanguageFiles": true
+}
+```
+
+Detection rule: every top-level key in the file must be a configured locale (in `sourceLocale` or `outputLocales`), and there must be at least two. Supported formats: YAML and JSON. PO files are not supported.
+
+This is a beta feature — please report issues.
+
 ## Commands
 
 ### Initialize a Project
