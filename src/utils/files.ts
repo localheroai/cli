@@ -392,8 +392,7 @@ export async function findTranslationFiles(
 
           const rawContent = await readFile(filePath, 'utf8');
           const parsedContent = parseFile(rawContent, format, filePath, {
-            sourceLanguage: sourceLocale,
-            currentLanguage: sourceLocale
+            sourceLanguage: sourceLocale
           });
 
           if (detectMultiLanguage(parsedContent, knownLocales)) {

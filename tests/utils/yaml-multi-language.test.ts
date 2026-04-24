@@ -128,7 +128,7 @@ describe('YAML multi-language sequential writes preserve Qasa-shape formatting',
     expect(fiBlock).toContain("  subject: ''");
     expect(fiBlock).toContain("  headline: ''");
 
-    expect(raw).toMatch(/subject: '?Du har blivit inbjuden'?/);
+    expect(raw).toMatch(/^ {2}subject: 'Du har blivit inbjuden'$/m);
   });
 
   it('source locale stays untouched when target-lang change matches English value', async () => {
