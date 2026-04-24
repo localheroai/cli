@@ -321,4 +321,109 @@ describe('push command', () => {
       }))).rejects.toThrow('API error');
     });
   });
+
+  describe('ignoreKeys', () => {
+    const emptySummary = {
+      totalKeysIgnored: 0,
+      totalTargetTranslationsIgnored: 0,
+      targetTranslationsPerLocale: {},
+      perPattern: [],
+      zeroMatchPatterns: []
+    };
+
+    it('passes an ignoreMatcher to pushTranslations when ignoreKeys is configured', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: emptySummary
+      });
+
+      const configWithIgnore = { ...mockConfig, ignoreKeys: ['admin.*'] };
+      await push(configWithIgnore, { yes: true }, createPushDeps());
+
+      expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
+        configWithIgnore,
+        process.cwd(),
+        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
+      );
+    });
+
+    it('passes an ignoreMatcher even when ignoreKeys is absent', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: emptySummary
+      });
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      expect(mockImportService.pushTranslations).toHaveBeenCalledWith(
+        mockConfig,
+        process.cwd(),
+        expect.objectContaining({ ignoreMatcher: expect.any(Function) })
+      );
+    });
+
+    it('does not log an ignore summary in non-verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 3,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'admin.*', count: 3, example: 'admin.a' }],
+          zeroMatchPatterns: []
+        }
+      });
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored'))).toBe(false);
+    });
+
+    it('logs an ignore summary in verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 3,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'admin.*', count: 3, example: 'admin.a' }],
+          zeroMatchPatterns: []
+        }
+      });
+
+      await push(mockConfig, { yes: true, verbose: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored 3 keys'))).toBe(true);
+    });
+
+    it('logs a stale-pattern warning in verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 0,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'obsolete.*', count: 0 }],
+          zeroMatchPatterns: ['obsolete.*']
+        }
+      });
+
+      await push(mockConfig, { yes: true, verbose: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('obsolete.*') && line.includes('stale'))).toBe(true);
+    });
+  });
 });

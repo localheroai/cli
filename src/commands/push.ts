@@ -2,6 +2,8 @@ import chalk from 'chalk';
 import { importService as defaultImportService } from '../utils/import-service.js';
 import { createPromptService, ConfirmOptions, defaultInquirerAdapter } from '../utils/prompt-service.js';
 import { bulkDeleteKeys as defaultBulkDeleteKeys } from '../api/keys.js';
+import { createIgnoreMatcher, IgnoreSummary } from '../utils/ignore-keys.js';
+import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import { ProjectConfig, PrunableKey, ImportFile } from '../types/index.js';
 
 const MAX_KEYS_TO_DISPLAY = 10;
@@ -22,6 +24,7 @@ interface PushResult {
     target: ImportFile[];
   };
   prunable_keys?: PrunableKey[];
+  ignoreSummary?: IgnoreSummary;
 }
 
 interface PushDependencies {
@@ -29,7 +32,12 @@ interface PushDependencies {
     pushTranslations: (
       config: ProjectConfig,
       basePath?: string,
-      options?: { force?: boolean; verbose?: boolean; prune?: boolean }
+      options?: {
+        force?: boolean;
+        verbose?: boolean;
+        prune?: boolean;
+        ignoreMatcher?: (keyName: string) => boolean;
+      }
     ) => Promise<PushResult>;
   };
   prompt: {
@@ -91,7 +99,13 @@ export async function push(
     }
   }
 
-  const result = await importService.pushTranslations(config, process.cwd(), { force, verbose, prune });
+  const ignoreMatcher = createIgnoreMatcher(config.ignoreKeys ?? []);
+  const result = await importService.pushTranslations(config, process.cwd(), {
+    force,
+    verbose,
+    prune,
+    ignoreMatcher
+  });
 
   if (result.status === 'no_files') {
     consoleLog.log(chalk.yellow('No translation files found'));
@@ -113,6 +127,15 @@ export async function push(
     if (totalFiles > 0) {
       consoleLog.log(chalk.green(`✓ Found ${totalFiles} translation files`));
     }
+  }
+
+  const summary = result.ignoreSummary;
+  if (
+    verbose &&
+    summary &&
+    (summary.totalKeysIgnored > 0 || summary.zeroMatchPatterns.length > 0)
+  ) {
+    logIgnoreSummary(summary, consoleLog);
   }
 
   const { statistics } = result;
