@@ -1,3 +1,5 @@
+const UNSUPPORTED_PATTERN_HINT = 'only exact matches and trailing ".*" wildcards are currently supported. Example: "activerecord.errors.*"';
+
 export function validateIgnoreKeys(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
@@ -5,7 +7,9 @@ export function validateIgnoreKeys(raw: unknown): string[] {
       `Invalid ignoreKeys: must be an array of strings. Got: ${typeof raw}`
     );
   }
-  raw.forEach((entry, idx) => {
+
+  const result: string[] = [];
+  for (const [idx, entry] of (raw as unknown[]).entries()) {
     if (typeof entry !== 'string') {
       throw new Error(
         `Invalid ignoreKeys: all entries must be strings. Got: ${String(entry)} at index ${idx}`
@@ -21,13 +25,13 @@ export function validateIgnoreKeys(raw: unknown): string[] {
     }
     if (entry.includes('**') || entry.includes('{') || entry.includes('}')) {
       throw new Error(
-        `Unsupported ignoreKeys pattern "${entry}": only exact matches and trailing ".*" wildcards are currently supported. Example: "activerecord.errors.*"`
+        `Unsupported ignoreKeys pattern "${entry}": ${UNSUPPORTED_PATTERN_HINT}`
       );
     }
     if (entry.includes('*')) {
       if (!entry.endsWith('.*') || entry.slice(0, -2).includes('*')) {
         throw new Error(
-          `Unsupported ignoreKeys pattern "${entry}": only exact matches and trailing ".*" wildcards are currently supported. Example: "activerecord.errors.*"`
+          `Unsupported ignoreKeys pattern "${entry}": ${UNSUPPORTED_PATTERN_HINT}`
         );
       }
     }
@@ -36,6 +40,7 @@ export function validateIgnoreKeys(raw: unknown): string[] {
         `Invalid ignoreKeys pattern "${entry}": patterns cannot end with a bare dot. Did you mean "${entry}*"?`
       );
     }
-  });
-  return raw as string[];
+    result.push(entry);
+  }
+  return result;
 }

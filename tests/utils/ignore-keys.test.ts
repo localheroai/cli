@@ -20,7 +20,7 @@ describe('validateIgnoreKeys', () => {
   });
 
   it('throws when an entry is not a string', () => {
-    expect(() => validateIgnoreKeys(['ok', 42 as unknown as string]))
+    expect(() => validateIgnoreKeys(['ok', 42]))
       .toThrow(/all entries must be strings.*at index 1/);
   });
 
