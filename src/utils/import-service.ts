@@ -48,6 +48,7 @@ export interface TranslationRecord {
   filename: string;
   content: string;
   keys?: KeyIdentifier[];
+  multi_language?: boolean;
 }
 
 interface FileReadResult {
@@ -174,7 +175,8 @@ export const importService = {
       path: path.isAbsolute(file.path) ? path.relative(basePath, file.path) : file.path,
       language: file.locale,
       format: normalizeFormat(file.format),
-      namespace: file.namespace || ''
+      namespace: file.namespace || '',
+      multi_language: file.multiLanguage ?? false
     }));
   },
 
@@ -214,7 +216,8 @@ export const importService = {
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
-        })
+        }),
+        multi_language: file.multi_language ?? false
       });
     }
 
@@ -227,7 +230,8 @@ export const importService = {
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
-        })
+        }),
+        multi_language: file.multi_language ?? false
       });
     }
 
@@ -318,7 +322,8 @@ export const importService = {
         language: file.language,
         format: normalizeFormat(file.format),
         filename: file.path,
-        content: fileResult.content
+        content: fileResult.content,
+        multi_language: file.multi_language ?? false
       };
 
       if (options.prune) {
@@ -337,7 +342,8 @@ export const importService = {
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
-        })
+        }),
+        multi_language: file.multi_language ?? false
       });
     }
 

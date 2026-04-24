@@ -153,9 +153,9 @@ describe('importService', () => {
       );
 
       expect(result).toEqual([
-        { path: 'locales/en.json', language: 'en', format: 'json', namespace: '' },
-        { path: 'locales/fr.yml', language: 'fr', format: 'yaml', namespace: '' },
-        { path: 'locales/es.yaml', language: 'es', format: 'yaml', namespace: '' }
+        { path: 'locales/en.json', language: 'en', format: 'json', namespace: '', multi_language: false },
+        { path: 'locales/fr.yml', language: 'fr', format: 'yaml', namespace: '', multi_language: false },
+        { path: 'locales/es.yaml', language: 'es', format: 'yaml', namespace: '', multi_language: false }
       ]);
     });
 
@@ -213,8 +213,8 @@ describe('importService', () => {
 
       expect(result.status).toBe('completed');
       expect(result.files).toEqual({
-        source: [{ path: 'locales/en.json', language: 'en', format: 'json', namespace: '' }],
-        target: [{ path: 'locales/fr.json', language: 'fr', format: 'json', namespace: '' }]
+        source: [{ path: 'locales/en.json', language: 'en', format: 'json', namespace: '', multi_language: false }],
+        target: [{ path: 'locales/fr.json', language: 'fr', format: 'json', namespace: '', multi_language: false }]
       });
 
       expect(mockImportsApi.createImport).toHaveBeenCalledWith({
@@ -224,13 +224,15 @@ describe('importService', () => {
             filename: 'locales/en.json',
             language: 'en',
             format: 'json',
-            content: 'eyJoZWxsbyI6IkhlbGxvIn0='
+            content: 'eyJoZWxsbyI6IkhlbGxvIn0=',
+            multi_language: false
           },
           {
             filename: 'locales/fr.json',
             language: 'fr',
             format: 'json',
-            content: 'eyJoZWxsbyI6IkJvbmpvdXIifQ=='
+            content: 'eyJoZWxsbyI6IkJvbmpvdXIifQ==',
+            multi_language: false
           }
         ]
       });
@@ -303,7 +305,8 @@ describe('importService', () => {
             filename: 'locales/en.json',
             language: 'en',
             format: 'json',
-            content: 'eyJoZWxsbyI6IkhlbGxvIn0='
+            content: 'eyJoZWxsbyI6IkhlbGxvIn0=',
+            multi_language: false
           }
         ]
       });

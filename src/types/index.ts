@@ -154,6 +154,7 @@ export interface ImportFile {
   language: string;
   format: string;
   namespace: string;
+  multi_language?: boolean;
 }
 
 // Translation Command Dependencies
