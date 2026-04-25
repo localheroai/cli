@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.45] - 2026-04-26
+
+### Added
+- Multi-language file support (beta) for YAML and JSON files where one file contains multiple locales as top-level keys; opt-in via `translationFiles.multiLanguageFiles`
+- `translationFiles.ignoreKeys` config to skip key patterns during push and translate
+- `--skip-commit` flag for `ci` command
+
 ## [0.0.44] - 2026-04-17
 
 ### Fixed
@@ -189,7 +196,8 @@ All notable changes to this project will be documented in this file.
 - Enhanced init command to track setup state for better user experience
 - Improved error handling with simplified stack trace printing for better readability
 
-[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.44...HEAD
+[Unreleased]: https://github.com/localheroai/cli/compare/v0.0.45...HEAD
+[0.0.45]: https://github.com/localheroai/cli/compare/v0.0.44...v0.0.45
 [0.0.44]: https://github.com/localheroai/cli/compare/v0.0.43...v0.0.44
 [0.0.43]: https://github.com/localheroai/cli/compare/v0.0.42...v0.0.43
 [0.0.42]: https://github.com/localheroai/cli/compare/v0.0.41...v0.0.42
