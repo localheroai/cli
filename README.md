@@ -76,7 +76,7 @@ We auto-detect your project during init.
 
 ### Multi-language files (beta)
 
-Some projects keep all locales in one file, with top-level locale keys. Common in Rails apps that co-locate i18n with mailer templates or view components:
+Some projects keep all locales in one file, with top-level locale keys:
 
 ```yaml
 en:
@@ -85,43 +85,21 @@ sv:
   subject: "Du har blivit inbjuden"
 ```
 
-Opt in by adding `multiLanguageFiles: true` to your `localhero.json`:
-
-```json
-"translationFiles": {
-  "paths": ["config/locales/", "apps/"],
-  "pattern": "**/*.{yml,yaml}",
-  "multiLanguageFiles": true
-}
-```
-
-Detection rule: every top-level key in the file must be a configured locale (in `sourceLocale` or `outputLocales`), and there must be at least two. Supported formats: YAML and JSON. PO files are not supported.
-
-This is a beta feature — please report issues.
+Opt in by setting `translationFiles.multiLanguageFiles: true`. YAML and JSON only, not PO. A file is treated as multi-language when every top-level key is a configured locale (source or output), with at least two locales present.
 
 ## Ignoring keys
 
-Some keys shouldn't be translated by LocalHero — for example, Rails validation
-errors served in English by an API, or internal admin strings. Add them to
-`translationFiles.ignoreKeys` in your `localhero.json`:
+Skip keys you don't want translated (e.g. Rails validation errors, internal admin strings) via `translationFiles.ignoreKeys`:
 
 ```json
 {
   "translationFiles": {
-    "ignoreKeys": [
-      "activerecord.errors.*",
-      "admin.internal.*"
-    ]
+    "ignoreKeys": ["activerecord.errors.*", "admin.internal.*"]
   }
 }
 ```
 
-Matching keys are skipped during `push` and `translate`. Two pattern forms are
-supported: exact names (`foo.bar.baz`) and trailing wildcards (`foo.bar.*`,
-recursive). Use `--verbose` to see a summary of what was ignored.
-
-Not yet supported for `.po` / `.pot` files — those are uploaded unfiltered with
-a warning.
+Patterns are exact names or trailing wildcards (`foo.*`, recursive). Matches are skipped during `push` and `translate`; use `--verbose` for a summary. Not supported for `.po` / `.pot` files.
 
 ## Commands
 
