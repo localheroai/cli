@@ -6,6 +6,9 @@ import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
+import { detectMultiLanguage } from './multi-language-detection.js';
+import type { IgnoreSummary, RemovedKey } from './ignore-keys.js';
+import { summarizeRemoved } from './ignore-keys.js';
 import type {
   ProjectConfig,
   TranslationFile,
@@ -35,6 +38,7 @@ export interface ImportResult {
   poll_interval?: number;
   id?: string;
   prunable_keys?: PrunableKey[];
+  ignoreSummary?: IgnoreSummary;
 }
 
 export interface KeyIdentifier {
@@ -48,11 +52,19 @@ export interface TranslationRecord {
   filename: string;
   content: string;
   keys?: KeyIdentifier[];
+  multi_language?: boolean;
 }
 
-interface FileReadResult {
+export interface FilterOptions {
+  ignoreMatcher?: (keyName: string) => boolean;
+  knownLocales?: string[];
+  sourceLocale?: string;
+}
+
+export interface FileReadResult {
   content: string;
   keys: KeyIdentifier[];
+  removed: RemovedKey[];
 }
 
 function getFileFormat(filePath: string): FileFormat {
@@ -70,80 +82,208 @@ function normalizeFormat(format: string): string {
   return format;
 }
 
-async function readFileContentWithKeys(
-  filePath: string,
-  options?: { sourceLanguage?: string; currentLanguage?: string }
-): Promise<FileReadResult> {
-  const content = await fs.readFile(filePath, 'utf8');
-  const format = getFileFormat(filePath);
+let poWarningEmitted = false;
 
-  if (format === 'json') {
+export function resetPoWarning(): void {
+  poWarningEmitted = false;
+}
+
+type Subtree = {
+  obj: Record<string, unknown>;
+  pathPrefix: string[];
+  locale: string | undefined;
+};
+
+function buildSubtrees(
+  parsed: unknown,
+  knownLocales: string[],
+  sourceLocale: string | undefined,
+  currentLanguage: string | undefined
+): Subtree[] {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
+  const obj = parsed as Record<string, unknown>;
+  const topKeys = Object.keys(obj);
+
+  if (detectMultiLanguage(parsed, knownLocales)) {
+    return topKeys.map((loc) => ({
+      obj: (obj[loc] ?? {}) as Record<string, unknown>,
+      pathPrefix: [loc],
+      locale: loc === sourceLocale ? undefined : loc,
+    }));
+  }
+
+  if (topKeys.length === 1 && knownLocales.includes(topKeys[0])) {
+    const loc = topKeys[0];
+    return [
+      {
+        obj: (obj[loc] ?? {}) as Record<string, unknown>,
+        pathPrefix: [loc],
+        locale: loc === sourceLocale ? undefined : loc,
+      },
+    ];
+  }
+
+  const tag = currentLanguage && currentLanguage !== sourceLocale ? currentLanguage : undefined;
+  return [{ obj, pathPrefix: [], locale: tag }];
+}
+
+function readYaml(
+  content: string,
+  matcher: ((k: string) => boolean) | undefined,
+  knownLocales: string[],
+  sourceLocale: string | undefined,
+  currentLanguage: string | undefined
+): FileReadResult {
+  if (!matcher) {
     try {
-      const jsonContent = JSON.parse(content);
-      const flattened = flattenTranslations(jsonContent);
-      const keys = Object.keys(flattened).map(name => ({ name, context: null }));
-
-      return {
-        content: Buffer.from(JSON.stringify(flattened)).toString('base64'),
-        keys
-      };
-    } catch {
+      const parsed = yaml.parse(content);
+      const flat = flattenTranslations(parsed);
       return {
         content: Buffer.from(content).toString('base64'),
-        keys: []
+        keys: Object.keys(flat).map((name) => ({ name, context: null })),
+        removed: [],
       };
+    } catch {
+      return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
     }
   }
 
-  if (format === 'yaml') {
-    try {
-      const yamlContent = yaml.parse(content);
-      const flattened = flattenTranslations(yamlContent);
-      const keys = Object.keys(flattened).map(name => ({ name, context: null }));
-
-      return {
-        content: Buffer.from(content).toString('base64'),
-        keys
-      };
-    } catch {
-      return {
-        content: Buffer.from(content).toString('base64'),
-        keys: []
-      };
-    }
+  let parsed: unknown;
+  let doc: yaml.Document;
+  try {
+    parsed = yaml.parse(content);
+    doc = yaml.parseDocument(content);
+  } catch {
+    return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
   }
 
-  if (format === 'po' || format === 'pot') {
-    try {
-      const parsed = parsePoFile(content);
-      const apiFormat = poEntriesToApiFormat(parsed, options);
+  const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
+  const removed: RemovedKey[] = [];
+  const keptNames: string[] = [];
 
-      const keys: KeyIdentifier[] = [];
-      for (const entry of parsed.entries) {
-        if (entry.msgid) {
-          keys.push({
-            name: entry.msgid,
-            context: entry.msgctxt || null
-          });
-        }
+  for (const { obj, pathPrefix, locale } of subtrees) {
+    const flat = flattenTranslations(obj);
+    for (const flatKey of Object.keys(flat)) {
+      const fullName = pathPrefix.length > 0 ? `${pathPrefix.join('.')}.${flatKey}` : flatKey;
+      if (matcher(flatKey)) {
+        doc.deleteIn([...pathPrefix, ...flatKey.split('.')]);
+        removed.push({ name: flatKey, locale });
+      } else {
+        keptNames.push(fullName);
       }
-
-      return {
-        content: Buffer.from(JSON.stringify(apiFormat)).toString('base64'),
-        keys
-      };
-    } catch {
-      return {
-        content: Buffer.from(content).toString('base64'),
-        keys: []
-      };
     }
+  }
+
+  let serialized: string;
+  try {
+    serialized = doc.toString();
+  } catch {
+    return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
   }
 
   return {
-    content: Buffer.from(content).toString('base64'),
-    keys: []
+    content: Buffer.from(serialized).toString('base64'),
+    keys: keptNames.map((name) => ({ name, context: null })),
+    removed,
   };
+}
+
+function readJson(
+  content: string,
+  matcher: ((k: string) => boolean) | undefined,
+  knownLocales: string[],
+  sourceLocale: string | undefined,
+  currentLanguage: string | undefined
+): FileReadResult {
+  try {
+    const parsed = JSON.parse(content);
+    if (!matcher) {
+      const flat = flattenTranslations(parsed);
+      return {
+        content: Buffer.from(JSON.stringify(flat)).toString('base64'),
+        keys: Object.keys(flat).map((name) => ({ name, context: null })),
+        removed: [],
+      };
+    }
+
+    const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
+    const removed: RemovedKey[] = [];
+    const keptFlat: Record<string, unknown> = {};
+
+    for (const { obj, pathPrefix, locale } of subtrees) {
+      const flat = flattenTranslations(obj);
+      for (const [name, value] of Object.entries(flat)) {
+        if (matcher(name)) {
+          removed.push({ name, locale });
+          continue;
+        }
+        const fullKey = pathPrefix.length > 0 ? `${pathPrefix.join('.')}.${name}` : name;
+        keptFlat[fullKey] = value;
+      }
+    }
+    return {
+      content: Buffer.from(JSON.stringify(keptFlat)).toString('base64'),
+      keys: Object.keys(keptFlat).map((name) => ({ name, context: null })),
+      removed,
+    };
+  } catch {
+    return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
+  }
+}
+
+function readPo(
+  content: string,
+  options: { sourceLanguage?: string; currentLanguage?: string } | undefined,
+  matcher: ((k: string) => boolean) | undefined
+): FileReadResult {
+  try {
+    const parsed = parsePoFile(content);
+
+    if (matcher && !poWarningEmitted) {
+      const anyMatch = parsed.entries.some((e) => e.msgid && matcher(e.msgid));
+      if (anyMatch) {
+        console.warn(chalk.yellow('⚠ ignoreKeys does not yet support PO files; PO files will be uploaded unfiltered.'));
+        poWarningEmitted = true;
+      }
+    }
+
+    const apiFormat = poEntriesToApiFormat(parsed, options);
+    const keys: KeyIdentifier[] = [];
+    for (const entry of parsed.entries) {
+      if (entry.msgid) keys.push({ name: entry.msgid, context: entry.msgctxt || null });
+    }
+    return {
+      content: Buffer.from(JSON.stringify(apiFormat)).toString('base64'),
+      keys,
+      removed: [],
+    };
+  } catch {
+    return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
+  }
+}
+
+export async function readFileContentWithKeys(
+  filePath: string,
+  options?: { sourceLanguage?: string; currentLanguage?: string },
+  filterOptions?: FilterOptions
+): Promise<FileReadResult> {
+  const content = await fs.readFile(filePath, 'utf8');
+  const format = getFileFormat(filePath);
+  const matcher = filterOptions?.ignoreMatcher;
+  const knownLocales = filterOptions?.knownLocales ?? [];
+  const sourceLocale = filterOptions?.sourceLocale;
+  const currentLanguage = options?.currentLanguage;
+
+  if (format === 'yaml') {
+    return readYaml(content, matcher, knownLocales, sourceLocale, currentLanguage);
+  }
+  if (format === 'json') {
+    return readJson(content, matcher, knownLocales, sourceLocale, currentLanguage);
+  }
+  if (format === 'po' || format === 'pot') {
+    return readPo(content, options, matcher);
+  }
+  return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
 }
 
 async function readFileContent(
@@ -174,7 +314,8 @@ export const importService = {
       path: path.isAbsolute(file.path) ? path.relative(basePath, file.path) : file.path,
       language: file.locale,
       format: normalizeFormat(file.format),
-      namespace: file.namespace || ''
+      namespace: file.namespace || '',
+      multi_language: file.multiLanguage ?? false
     }));
   },
 
@@ -214,7 +355,8 @@ export const importService = {
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
-        })
+        }),
+        multi_language: file.multi_language ?? false
       });
     }
 
@@ -227,7 +369,8 @@ export const importService = {
         content: await readFileContent(fullPath, {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
-        })
+        }),
+        multi_language: file.multi_language ?? false
       });
     }
 
@@ -280,12 +423,20 @@ export const importService = {
   async pushTranslations(
     config: ProjectConfig,
     basePath = process.cwd(),
-    options: { force?: boolean; verbose?: boolean; prune?: boolean } = {}
+    options: {
+      force?: boolean;
+      verbose?: boolean;
+      prune?: boolean;
+      ignoreMatcher?: (keyName: string) => boolean;
+    } = {}
   ): Promise<ImportResult> {
+    const ignorePatterns = config.translationFiles?.ignoreKeys ?? [];
+    const emptySummary = summarizeRemoved([], ignorePatterns);
+
     let files = await this.findTranslationFiles(config, basePath);
 
     if (!files.length) {
-      return { status: 'no_files' };
+      return { status: 'no_files', ignoreSummary: emptySummary };
     }
 
     if (!options.force) {
@@ -294,7 +445,8 @@ export const importService = {
         if (filteredFiles.length === 0) {
           return {
             status: 'no_changes',
-            files: { source: [], target: [] }
+            files: { source: [], target: [] },
+            ignoreSummary: emptySummary
           };
         }
         files = filteredFiles;
@@ -307,18 +459,30 @@ export const importService = {
     const targetFiles = files.filter(file => file.language !== config.sourceLocale);
     const allTranslations: TranslationRecord[] = [];
 
+    const knownLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];
+    const filterOpts: FilterOptions | undefined = options.ignoreMatcher
+      ? { ignoreMatcher: options.ignoreMatcher, knownLocales, sourceLocale: config.sourceLocale }
+      : undefined;
+    const allRemoved: RemovedKey[] = [];
+
     for (const file of sourceFiles) {
       const fullPath = path.join(basePath, file.path);
-      const fileResult = await readFileContentWithKeys(fullPath, {
-        sourceLanguage: config.sourceLocale,
-        currentLanguage: file.language
-      });
+      const fileResult = await readFileContentWithKeys(
+        fullPath,
+        {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        },
+        filterOpts
+      );
+      allRemoved.push(...fileResult.removed);
 
       const record: TranslationRecord = {
         language: file.language,
         format: normalizeFormat(file.format),
         filename: file.path,
-        content: fileResult.content
+        content: fileResult.content,
+        multi_language: file.multi_language ?? false
       };
 
       if (options.prune) {
@@ -330,16 +494,25 @@ export const importService = {
 
     for (const file of targetFiles) {
       const fullPath = path.join(basePath, file.path);
+      const fileResult = await readFileContentWithKeys(
+        fullPath,
+        {
+          sourceLanguage: config.sourceLocale,
+          currentLanguage: file.language
+        },
+        filterOpts
+      );
       allTranslations.push({
         language: file.language,
         format: normalizeFormat(file.format),
         filename: file.path,
-        content: await readFileContent(fullPath, {
-          sourceLanguage: config.sourceLocale,
-          currentLanguage: file.language
-        })
+        content: fileResult.content,
+        multi_language: file.multi_language ?? false
       });
+      allRemoved.push(...fileResult.removed);
     }
+
+    const ignoreSummary = summarizeRemoved(allRemoved, ignorePatterns);
 
     if (options.verbose) {
       console.log(chalk.blue(`Sending ${allTranslations.length} translation files to API`));
@@ -357,7 +530,8 @@ export const importService = {
     if (importResult.import?.status === 'failed') {
       return {
         ...importResult.import,
-        files: { source: [], target: files }
+        files: { source: [], target: files },
+        ignoreSummary
       };
     }
 
@@ -370,7 +544,8 @@ export const importService = {
       if (finalImportResult.import?.status === 'failed') {
         return {
           ...finalImportResult.import,
-          files: { source: [], target: files }
+          files: { source: [], target: files },
+          ignoreSummary
         };
       }
     }
@@ -393,7 +568,8 @@ export const importService = {
       translations_url,
       sourceImport,
       files: { source: sourceFiles, target: targetFiles },
-      prunable_keys
+      prunable_keys,
+      ignoreSummary
     };
   }
 };

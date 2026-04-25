@@ -10,6 +10,7 @@ export interface TranslationPayload {
   filename: string;
   content: string;
   keys?: Array<{ name: string; context: string | null }>;
+  multi_language?: boolean;
 }
 
 export interface CreateImportParams {

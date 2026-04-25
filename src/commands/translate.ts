@@ -17,6 +17,8 @@ import {
 } from '../utils/translation-utils.js';
 import { autoCommitChanges } from '../utils/github.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
+import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
+import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import type {
   TranslationResult
 } from '../utils/translation-processor.js';
@@ -84,8 +86,12 @@ interface TranslationDependencies {
       targetFilesByLocale: Record<string, OriginalTranslationFile[]>,
       config: { sourceLocale: string; outputLocales: string[] },
       verbose: boolean,
-      logger?: { log: (message?: any, ...optionalParams: any[]) => void }
-    ) => Record<string, MissingLocaleEntry>;
+      logger?: { log: (message?: any, ...optionalParams: any[]) => void },
+      filterOptions?: { ignoreMatcher?: (keyName: string) => boolean }
+    ) => {
+      missing: Record<string, MissingLocaleEntry>;
+      removed: Array<{ name: string; locale?: string }>;
+    };
   };
   gitUtils: {
     autoCommitChanges: (paths: string, translationSummary?: {
@@ -205,13 +211,22 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return;
   }
 
-  let missingByLocale = translationUtils.findMissingTranslationsByLocale(
+  const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
+
+  const findResult = translationUtils.findMissingTranslationsByLocale(
     sourceFiles,
     targetFilesByLocale,
     config,
     !!verbose,
-    console
+    console,
+    { ignoreMatcher }
   );
+  let missingByLocale = findResult.missing;
+
+  const ignoreSummary = summarizeRemoved(findResult.removed, config.translationFiles?.ignoreKeys ?? []);
+  if (verbose && (ignoreSummary.totalKeysIgnored > 0 || ignoreSummary.zeroMatchPatterns.length > 0)) {
+    logIgnoreSummary(ignoreSummary, console);
+  }
 
   // Capture the full manifest BEFORE filtering down to missing-only keys.
   // This is the complete snapshot of "what differs from main" for this push.

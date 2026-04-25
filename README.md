@@ -74,6 +74,33 @@ We auto-detect your project during init.
 - **React / Next.js** - JSON translation files
 - **Generic** - any JSON or YAML structure
 
+### Multi-language files (beta)
+
+Some projects keep all locales in one file, with top-level locale keys:
+
+```yaml
+en:
+  subject: "You've been invited"
+sv:
+  subject: "Du har blivit inbjuden"
+```
+
+Opt in by setting `translationFiles.multiLanguageFiles: true`. YAML and JSON only, not PO. A file is treated as multi-language when every top-level key is a configured locale (source or output), with at least two locales present.
+
+## Ignoring keys
+
+Skip keys you don't want translated (e.g. Rails validation errors, internal admin strings) via `translationFiles.ignoreKeys`:
+
+```json
+{
+  "translationFiles": {
+    "ignoreKeys": ["activerecord.errors.*", "admin.internal.*"]
+  }
+}
+```
+
+Patterns are exact names or trailing wildcards (`foo.*`, recursive). Matches are skipped during `push` and `translate`; use `--verbose` for a summary. Not supported for `.po` / `.pot` files.
+
 ## Commands
 
 ### Initialize a Project

@@ -4,6 +4,7 @@ import { updateYamlFile, deleteKeysFromYamlFile } from './yaml-handler.js';
 import { updateJsonFile, deleteKeysFromJsonFile } from './json-handler.js';
 import { updatePoFile, deleteKeysFromPoFile } from './po-handler.js';
 import { isDjangoWorkflow, getDjangoSourcePath } from '../translation-utils.js';
+import { runSerializedByPath } from './path-serializer.js';
 import type { ProjectConfig, TranslationWithMetadata } from '../../types/index.js';
 
 /**
@@ -34,13 +35,15 @@ export async function updateTranslationFile(
   const actualLanguageCode = languageCode || 'en';
   const actualSourceFilePath = sourceFilePath || null;
 
-  return _updateTranslationFile(
-    filePath,
-    translations,
-    actualLanguageCode,
-    actualSourceFilePath,
-    sourceLanguage,
-    config
+  return runSerializedByPath(filePath, () =>
+    _updateTranslationFile(
+      filePath,
+      translations,
+      actualLanguageCode,
+      actualSourceFilePath,
+      sourceLanguage,
+      config
+    )
   );
 }
 

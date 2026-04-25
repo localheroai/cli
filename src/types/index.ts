@@ -12,6 +12,8 @@ export interface TranslationFileConfig {
   localeRegex?: string;
   workflow?: 'default' | 'django';
   baseBranch?: string;
+  multiLanguageFiles?: boolean;
+  ignoreKeys?: string[];
 }
 
 // Translation file interface
@@ -23,6 +25,7 @@ export interface TranslationFile {
   namespace?: string;
   content?: string;
   hasLanguageWrapper?: boolean;
+  multiLanguage?: boolean;
   translations?: Record<string, string>;
   keys?: string[];
 }
@@ -152,6 +155,7 @@ export interface ImportFile {
   language: string;
   format: string;
   namespace: string;
+  multi_language?: boolean;
 }
 
 // Translation Command Dependencies

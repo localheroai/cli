@@ -235,6 +235,43 @@ describe('config module', () => {
             await expect(configService.validateProjectConfig(invalidConfig))
                 .rejects.toThrow('translationFiles.paths must be an array of paths');
         });
+
+        it('rejects invalid ignoreKeys entries', async () => {
+            const invalidConfig = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'], ignoreKeys: [42] }
+            };
+
+            await expect(configService.validateProjectConfig(invalidConfig))
+                .rejects.toThrow(/all entries must be strings/);
+        });
+
+        it('accepts valid ignoreKeys', async () => {
+            const validConfig = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'], ignoreKeys: ['activerecord.errors.*'] }
+            };
+
+            await expect(configService.validateProjectConfig(validConfig)).resolves.toBe(true);
+        });
+
+        it('accepts missing ignoreKeys', async () => {
+            const validConfig = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'] }
+            };
+
+            await expect(configService.validateProjectConfig(validConfig)).resolves.toBe(true);
+        });
     });
 
     describe('getValidProjectConfig', () => {
@@ -302,6 +339,56 @@ describe('config module', () => {
 
             const savedConfig = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
             expect(savedConfig.lastSyncedAt).toBe('2023-01-01T00:00:00.000Z');
+        });
+    });
+
+    describe('saveProjectConfig with ignoreKeys', () => {
+        it('omits ignoreKeys on save when the user did not set it', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'] }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect('ignoreKeys' in parsed.translationFiles).toBe(false);
+        });
+
+        it('omits ignoreKeys on save when set to []', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'], ignoreKeys: [] }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect('ignoreKeys' in parsed.translationFiles).toBe(false);
+        });
+
+        it('preserves ignoreKeys on save when non-empty', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'], ignoreKeys: ['foo.*'] }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect(parsed.translationFiles.ignoreKeys).toEqual(['foo.*']);
         });
     });
 });

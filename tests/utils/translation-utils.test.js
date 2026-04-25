@@ -1,6 +1,7 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations } from '../../src/utils/translation-utils.js';
 import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
+import { createIgnoreMatcher } from '../../src/utils/ignore-keys.js';
 
 const createBase64Content = (data) => Buffer.from(JSON.stringify(data)).toString('base64');
 
@@ -99,6 +100,73 @@ describe('translation-utils', () => {
         }
       });
     });
+
+    describe('blank source placeholders', () => {
+      it('string branch: empty string source is skipped with reason blank_source', () => {
+        const sourceKeys = {
+          real_key: 'Hello',
+          placeholder: ''
+        };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({
+          real_key: { value: 'Hello', sourceKey: 'real_key' }
+        });
+        expect(result.skippedKeys).toEqual({
+          placeholder: { value: '', reason: 'blank_source' }
+        });
+      });
+
+      it('string branch: whitespace-only source is skipped with reason blank_source', () => {
+        const sourceKeys = { placeholder: '   ' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({});
+        expect(result.skippedKeys).toEqual({
+          placeholder: { value: '   ', reason: 'blank_source' }
+        });
+      });
+
+      it('string branch: non-blank source still triggers missing-key detection', () => {
+        const sourceKeys = { greeting: 'Hello' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({ greeting: { value: 'Hello', sourceKey: 'greeting' } });
+        expect(result.skippedKeys).toEqual({});
+      });
+
+      it('string branch: WIP markers still produce reason wip (not blank_source)', () => {
+        const sourceKeys = { wip_draft: 'wip_some draft' };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.skippedKeys).toEqual({ wip_draft: { value: 'wip_some draft', reason: 'wip' } });
+        expect(result.missingKeys).toEqual({});
+      });
+
+      it('object-with-value branch: empty value string is skipped with reason blank_source', () => {
+        const sourceKeys = { placeholder: { value: '' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({});
+        expect(result.skippedKeys.placeholder).toMatchObject({ value: '', reason: 'blank_source' });
+      });
+
+      it('object-with-value branch: non-blank value flows through to missing-key detection', () => {
+        const sourceKeys = { greeting: { value: 'Hello' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.missingKeys).toEqual({ greeting: { value: 'Hello', sourceKey: 'greeting' } });
+        expect(result.skippedKeys).toEqual({});
+      });
+
+      it('object-with-value branch: WIP marker in value still produces reason wip', () => {
+        const sourceKeys = { draft: { value: 'wip_some draft' } };
+        const result = findMissingTranslations(sourceKeys, {});
+
+        expect(result.skippedKeys).toEqual({ draft: { value: 'wip_some draft', reason: 'wip' } });
+        expect(result.missingKeys).toEqual({});
+      });
+    });
   });
 
   describe('findMissingTranslationsByLocale', () => {
@@ -145,7 +213,7 @@ describe('translation-utils', () => {
 
       const mockLogger = createMockLogger();
 
-      const result = findMissingTranslationsByLocale(
+      const { missing } = findMissingTranslationsByLocale(
         sourceFiles,
         targetFilesByLocale,
         config,
@@ -154,22 +222,22 @@ describe('translation-utils', () => {
       );
 
       // Check French missing translations
-      expect(result['fr:locales/en.json']).toBeDefined();
-      expect(result['fr:locales/en.json'].locale).toBe('fr');
-      expect(result['fr:locales/en.json'].path).toBe('locales/en.json');
-      expect(result['fr:locales/en.json'].targetPath).toBe('locales/fr.json');
-      expect(Object.keys(result['fr:locales/en.json'].keys)).toContain('goodbye');
-      expect(Object.keys(result['fr:locales/en.json'].keys)).toContain('hello');
-      expect(Object.keys(result['fr:locales/en.json'].keys)).not.toContain('welcome');
+      expect(missing['fr:locales/en.json']).toBeDefined();
+      expect(missing['fr:locales/en.json'].locale).toBe('fr');
+      expect(missing['fr:locales/en.json'].path).toBe('locales/en.json');
+      expect(missing['fr:locales/en.json'].targetPath).toBe('locales/fr.json');
+      expect(Object.keys(missing['fr:locales/en.json'].keys)).toContain('goodbye');
+      expect(Object.keys(missing['fr:locales/en.json'].keys)).toContain('hello');
+      expect(Object.keys(missing['fr:locales/en.json'].keys)).not.toContain('welcome');
 
       // Check Spanish missing translations
-      expect(result['es:locales/en.json']).toBeDefined();
-      expect(result['es:locales/en.json'].locale).toBe('es');
-      expect(result['es:locales/en.json'].path).toBe('locales/en.json');
-      expect(result['es:locales/en.json'].targetPath).toBe('locales/es.json');
-      expect(Object.keys(result['es:locales/en.json'].keys)).toContain('goodbye');
-      expect(Object.keys(result['es:locales/en.json'].keys)).not.toContain('hello');
-      expect(Object.keys(result['es:locales/en.json'].keys)).not.toContain('welcome');
+      expect(missing['es:locales/en.json']).toBeDefined();
+      expect(missing['es:locales/en.json'].locale).toBe('es');
+      expect(missing['es:locales/en.json'].path).toBe('locales/en.json');
+      expect(missing['es:locales/en.json'].targetPath).toBe('locales/es.json');
+      expect(Object.keys(missing['es:locales/en.json'].keys)).toContain('goodbye');
+      expect(Object.keys(missing['es:locales/en.json'].keys)).not.toContain('hello');
+      expect(Object.keys(missing['es:locales/en.json'].keys)).not.toContain('welcome');
     });
 
     it('should handle source files with nested locale structure', () => {
@@ -204,17 +272,17 @@ describe('translation-utils', () => {
 
       const config = createConfig('en', ['fr']);
 
-      const result = findMissingTranslationsByLocale(
+      const { missing } = findMissingTranslationsByLocale(
         sourceFiles,
         targetFilesByLocale,
         config,
         false
       );
 
-      expect(result['fr:locales/en.json']).toBeDefined();
-      expect(result['fr:locales/en.json'].locale).toBe('fr');
-      expect(Object.keys(result['fr:locales/en.json'].keys)).toContain('goodbye');
-      expect(Object.keys(result['fr:locales/en.json'].keys)).not.toContain('welcome');
+      expect(missing['fr:locales/en.json']).toBeDefined();
+      expect(missing['fr:locales/en.json'].locale).toBe('fr');
+      expect(Object.keys(missing['fr:locales/en.json'].keys)).toContain('goodbye');
+      expect(Object.keys(missing['fr:locales/en.json'].keys)).not.toContain('welcome');
     });
 
     it('should handle source files with invalid or missing content', () => {
@@ -246,7 +314,7 @@ describe('translation-utils', () => {
 
       const config = createConfig('en', ['fr']);
 
-      const result = findMissingTranslationsByLocale(
+      const { missing } = findMissingTranslationsByLocale(
         sourceFiles,
         targetFilesByLocale,
         config,
@@ -254,9 +322,51 @@ describe('translation-utils', () => {
       );
 
       // Should skip file with missing content, still process valid file
-      expect(result['fr:locales/en.json']).toBeUndefined();
-      expect(result['fr:locales/en2.json']).toBeDefined();
-      expect(result['fr:locales/en2.json'].keys.welcome).toBeDefined();
+      expect(missing['fr:locales/en.json']).toBeUndefined();
+      expect(missing['fr:locales/en2.json']).toBeDefined();
+      expect(missing['fr:locales/en2.json'].keys.welcome).toBeDefined();
+    });
+
+    it('skips keys matched by ignoreMatcher and returns removed list', () => {
+      const sourceFiles = [
+        {
+          path: 'locales/en.json',
+          format: 'json',
+          content: createBase64Content({
+            navigation: { home: 'Home' },
+            activerecord: { errors: { foo: 'oops' } }
+          })
+        }
+      ];
+
+      const targetFilesByLocale = {
+        sv: []
+      };
+
+      const config = createConfig('en', ['sv']);
+      const ignoreMatcher = createIgnoreMatcher(['activerecord.errors.*']);
+
+      const result = findMissingTranslationsByLocale(
+        sourceFiles,
+        targetFilesByLocale,
+        config,
+        false,
+        createMockLogger(),
+        { ignoreMatcher }
+      );
+
+      expect(result.missing['sv:locales/en.json']).toBeDefined();
+      const missingKeys = Object.keys(result.missing['sv:locales/en.json'].keys);
+      expect(missingKeys).toContain('navigation.home');
+      expect(missingKeys).not.toContain('activerecord.errors.foo');
+
+      expect(result.removed).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'activerecord.errors.foo' })
+        ])
+      );
+      const removedForSource = result.removed.find((r) => r.name === 'activerecord.errors.foo');
+      expect(removedForSource.locale).toBeUndefined();
     });
   });
 

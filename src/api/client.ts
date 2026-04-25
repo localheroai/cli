@@ -2,6 +2,23 @@ import { ApiResponseError } from '../types/index.js';
 
 const DEFAULT_API_HOST = 'https://api.localhero.ai';
 
+function friendlyServerError(status: number): string {
+  if (status >= 500 && status < 600) {
+    if (status === 502 || status === 503 || status === 504) {
+      return 'Our server is temporarily unavailable. Please try again in a minute. ' +
+             'If this keeps happening, email us at hi@localhero.ai.';
+    }
+    return 'Something went wrong on our end (HTTP ' + status + '). ' +
+           'Please try again shortly. If this keeps happening, email us at hi@localhero.ai.';
+  }
+  if (status >= 400 && status < 500) {
+    return 'The request was rejected (HTTP ' + status + '). ' +
+           'If this was unexpected, please email us at hi@localhero.ai.';
+  }
+  return 'Received an unexpected response from the server (HTTP ' + status + '). ' +
+         'If this keeps happening, please email us at hi@localhero.ai.';
+}
+
 // Retry configuration for network errors
 const RETRY_CONFIG = {
   maxRetries: 5,
@@ -106,15 +123,16 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
 
   const response = await fetchWithRetry(url, fetchOptions);
 
-  let data: any;
-  try {
-    data = await response.json();
-  } catch (error) {
-    const parseError = error as Error;
-    const message = 'Failed to parse API response. Error: ' + error;
-    parseError.message = message;
-    (parseError as any).cliErrorMessage = message;
-    throw parseError;
+  const rawBody = await response.text();
+
+  let data: any = null;
+  let parseError: Error | null = null;
+  if (rawBody.length > 0) {
+    try {
+      data = JSON.parse(rawBody);
+    } catch (err) {
+      parseError = err as Error;
+    }
   }
 
   if (!response.ok) {
@@ -157,12 +175,30 @@ export async function apiRequest<T = any>(endpoint: string, options: ApiRequestO
       cliErrorMessage = `Server error: ${message}`;
     }
 
+    if (!data) {
+      const friendlyMessage = friendlyServerError(response.status);
+      const error = new ApiResponseError(friendlyMessage, {
+        code: 'server_error',
+        details: { status: response.status }
+      });
+      throw error;
+    }
+
     const error = new ApiResponseError(message, {
       code: data?.error?.code || 'API_ERROR',
       details: data?.error?.details || null,
       data,
       cliErrorMessage
     });
+    throw error;
+  }
+
+  if (parseError) {
+    const error = new ApiResponseError(
+      'We received an unexpected response from the server. ' +
+      'If this keeps happening, please email us at hi@localhero.ai.',
+      { code: 'invalid_response', details: { parseError: parseError.message } }
+    );
     throw error;
   }
 

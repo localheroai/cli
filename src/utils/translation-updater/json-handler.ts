@@ -14,6 +14,8 @@ interface FileStructure {
   jsonFormat: JsonFormat;
 }
 
+const LOCALE_KEY_REGEX = /^[a-zA-Z]{2}(-[a-zA-Z]{2})?$/;
+
 function detectStructureFromContent(
   content: Record<string, unknown>,
   languageCode: string
@@ -31,6 +33,16 @@ function detectStructureFromContent(
     return { hasLanguageWrapper: true, jsonFormat: detectJsonFormat(innerContent) };
   }
 
+  const localeEntries = Object.entries(content).filter(
+    ([key, value]) => LOCALE_KEY_REGEX.test(key) && typeof value === 'object' && value !== null
+  );
+  if (localeEntries.length >= 2) {
+    return {
+      hasLanguageWrapper: true,
+      jsonFormat: detectJsonFormat(localeEntries[0][1] as Record<string, unknown>)
+    };
+  }
+
   if (Object.keys(content).length === 0) {
     return null;
   }
@@ -42,7 +54,7 @@ async function readSourceFileStructure(sourceFilePath: string): Promise<FileStru
   const sourceContent = JSON.parse(content);
 
   for (const [key, value] of Object.entries(sourceContent)) {
-    if (typeof value === 'object' && value !== null && /^[a-zA-Z]{2}(-[a-zA-Z]{2})?$/.test(key)) {
+    if (typeof value === 'object' && value !== null && LOCALE_KEY_REGEX.test(key)) {
       return {
         hasLanguageWrapper: true,
         jsonFormat: detectJsonFormat(value as Record<string, unknown>)

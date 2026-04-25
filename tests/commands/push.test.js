@@ -321,4 +321,109 @@ describe('push command', () => {
       }))).rejects.toThrow('API error');
     });
   });
+
+  describe('ignoreKeys', () => {
+    const emptySummary = {
+      totalKeysIgnored: 0,
+      totalTargetTranslationsIgnored: 0,
+      targetTranslationsPerLocale: {},
+      perPattern: [],
+      zeroMatchPatterns: []
+    };
+
+    it('passes an ignoreMatcher that matches configured patterns', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: emptySummary
+      });
+
+      const configWithIgnore = { ...mockConfig, translationFiles: { ...(mockConfig.translationFiles ?? {}), ignoreKeys: ['admin.*'] } };
+      await push(configWithIgnore, { yes: true }, createPushDeps());
+
+      const call = mockImportService.pushTranslations.mock.calls[0];
+      const options = call[2];
+      expect(options.ignoreMatcher).toEqual(expect.any(Function));
+      expect(options.ignoreMatcher('admin.internal')).toBe(true);
+      expect(options.ignoreMatcher('navigation.home')).toBe(false);
+    });
+
+    it('passes an always-false matcher when ignoreKeys is absent', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: emptySummary
+      });
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      const call = mockImportService.pushTranslations.mock.calls[0];
+      const options = call[2];
+      expect(options.ignoreMatcher).toEqual(expect.any(Function));
+      expect(options.ignoreMatcher('anything.at.all')).toBe(false);
+      expect(options.ignoreMatcher('admin.internal')).toBe(false);
+    });
+
+    it('does not log an ignore summary in non-verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 3,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'admin.*', count: 3, example: 'admin.a' }],
+          zeroMatchPatterns: []
+        }
+      });
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored'))).toBe(false);
+    });
+
+    it('logs an ignore summary in verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 3,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'admin.*', count: 3, example: 'admin.a' }],
+          zeroMatchPatterns: []
+        }
+      });
+
+      await push(mockConfig, { yes: true, verbose: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('Ignored 3 keys'))).toBe(true);
+    });
+
+    it('logs a stale-pattern warning in verbose mode', async () => {
+      mockPrompt.confirm.mockResolvedValue(true);
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 0, created_translations: 0 },
+        ignoreSummary: {
+          totalKeysIgnored: 0,
+          totalTargetTranslationsIgnored: 0,
+          targetTranslationsPerLocale: {},
+          perPattern: [{ pattern: 'obsolete.*', count: 0 }],
+          zeroMatchPatterns: ['obsolete.*']
+        }
+      });
+
+      await push(mockConfig, { yes: true, verbose: true }, createPushDeps());
+
+      const logged = mockConsole.log.mock.calls.map(call => String(call[0]));
+      expect(logged.some(line => line.includes('obsolete.*') && line.includes('stale'))).toBe(true);
+    });
+  });
 });

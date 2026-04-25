@@ -12,6 +12,7 @@ import type {
 } from '../types/index.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from './file-size.js';
+import { detectMultiLanguage } from './multi-language-detection.js';
 
 
 /**
@@ -45,10 +46,13 @@ export function parseFile(
   }
 }
 
+const DEFAULT_LOCALE_REGEX = '(?:^|[._-])([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$';
+
 /**
  * Extract locale from file path
  */
-function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
+export function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
+  const effectiveLocaleRegex = localeRegex ?? DEFAULT_LOCALE_REGEX;
   if (knownLocales && knownLocales.length > 0) {
     const basenameOriginal = path.basename(filePath, path.extname(filePath));
     const isBasenameAKnownLocale = knownLocales.some(
@@ -84,16 +88,20 @@ function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLoca
     return dirNameOriginal;
   }
 
-  if (localeRegex) {
-    const filenameOriginal = path.basename(filePath);
-    const regexPattern = new RegExp(localeRegex);
-    const regexMatch = filenameOriginal.match(regexPattern);
-    if (regexMatch && regexMatch[1]) {
-      const capturedLocale = regexMatch[1];
-      if (isValidLocale(capturedLocale)) {
-        return capturedLocale;
-      }
+  const filenameOriginal = path.basename(filePath);
+  const regexPattern = new RegExp(effectiveLocaleRegex);
+  const regexMatch = filenameOriginal.match(regexPattern);
+  if (regexMatch && regexMatch[1] && isValidLocale(regexMatch[1])) {
+    const capturedLocale = regexMatch[1];
+    const usingDefaultRegex = localeRegex === undefined;
+    const validKnownLocales = knownLocales.filter(Boolean);
+    if (!usingDefaultRegex || validKnownLocales.length === 0) {
+      return capturedLocale;
     }
+    const match = validKnownLocales.find(
+      (kl) => kl.toLowerCase() === capturedLocale.toLowerCase()
+    );
+    if (match) return match;
   }
 
   throw new Error(`Could not extract locale from path: ${filePath}`);
@@ -323,10 +331,11 @@ export async function findTranslationFiles(
     paths = [],
     pattern = '**/*.{json,yml,yaml,po,pot}',
     ignore = [],
-    localeRegex = '.*?([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
+    localeRegex = DEFAULT_LOCALE_REGEX
   } = translationFiles || {};
 
   const processedFiles: TranslationFile[] = [];
+  let betaNoticeEmitted = false;
 
   // Adjustment to handle single-item braces, common mistake to use {json} instead of *.json, its not supported by glob
   const adjustPattern = (originalPattern: string): string => {
@@ -374,6 +383,65 @@ export async function findTranslationFiles(
       try {
         const filePath = file;
         const format = path.extname(file).slice(1);
+
+        if (
+          translationFiles?.multiLanguageFiles &&
+          (format === 'yml' || format === 'yaml' || format === 'json')
+        ) {
+          const fileSize = await getFileSize(filePath);
+          if (isFileTooLarge(fileSize)) {
+            console.error(chalk.red(
+              `✖ File too large: ${filePath} (${formatFileSize(fileSize)}) exceeds maximum size limit of ${formatFileSize(FILE_SIZE_LIMITS.MAX_SIZE)}. Skipping.`
+            ));
+            continue;
+          }
+
+          const rawContent = await readFile(filePath, 'utf8');
+          const parsedContent = parseFile(rawContent, format, filePath, {
+            sourceLanguage: sourceLocale
+          });
+
+          if (detectMultiLanguage(parsedContent, knownLocales)) {
+            if (!betaNoticeEmitted) {
+              console.log(chalk.blue('ℹ Multi-language files: beta feature — please report issues'));
+              betaNoticeEmitted = true;
+            }
+            const parsedObj = parsedContent as Record<string, unknown>;
+            const base64 = Buffer.from(rawContent).toString('base64');
+
+            for (const fileLocale of Object.keys(parsedObj)) {
+              const entry: TranslationFile = {
+                path: filePath,
+                format,
+                locale: fileLocale,
+                hasLanguageWrapper: true,
+                multiLanguage: true
+              };
+              if (includeContent) {
+                entry.content = base64;
+              }
+
+              if (extractKeys) {
+                const subtree = parsedObj[fileLocale];
+                const translationData =
+                  subtree && typeof subtree === 'object' && !Array.isArray(subtree)
+                    ? (subtree as Record<string, string>)
+                    : {};
+                entry.translations = translationData;
+                const flattened = flattenTranslations(translationData, '', format);
+                // @ts-expect-error - Keep original behavior for test compatibility
+                entry.keys = flattened;
+              }
+
+              if (includeNamespace) {
+                entry.namespace = extractNamespace(filePath);
+              }
+
+              processedFiles.push(entry);
+            }
+            continue;
+          }
+        }
 
         let locale: string;
         if (format === 'pot') {

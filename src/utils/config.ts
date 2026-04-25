@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { ProjectConfig, AuthConfig } from '../types/index.js';
+import { validateIgnoreKeys } from './ignore-keys.js';
 
 /**
  * Dependencies for the config service
@@ -141,7 +142,20 @@ export const configService: ConfigService = {
       ...DEFAULT_PROJECT_CONFIG,
       ...configCopy,
       schemaVersion: DEFAULT_PROJECT_CONFIG.schemaVersion
-    };
+    } as Record<string, unknown>;
+
+    const translationFiles = configWithSchema['translationFiles'] as Record<string, unknown> | undefined;
+    if (translationFiles) {
+      const ignoreKeysValue = translationFiles['ignoreKeys'];
+      if (
+        ignoreKeysValue === undefined ||
+        ignoreKeysValue === null ||
+        (Array.isArray(ignoreKeysValue) && ignoreKeysValue.length === 0)
+      ) {
+        delete translationFiles['ignoreKeys'];
+      }
+    }
+
     await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2));
   },
 
@@ -163,6 +177,8 @@ export const configService: ConfigService = {
     if (!config.translationFiles.paths || !Array.isArray(config.translationFiles.paths)) {
       throw new Error('translationFiles.paths must be an array of paths');
     }
+
+    validateIgnoreKeys(config.translationFiles?.ignoreKeys);
 
     return true;
   },
