@@ -29,7 +29,9 @@ function setupGitMock({
   inRepo = true,
   branchExists = true,
   oldContent = '',
-  throwOnShow = false
+  throwOnShow = false,
+  mergeBase = '',
+  throwOnMergeBase = false
 } = {}) {
   mockExecSync.mockImplementation((cmd) => {
     if (!available) {
@@ -44,6 +46,11 @@ function setupGitMock({
     if (cmd.includes('git rev-parse --verify')) {
       if (!branchExists) throw new Error('branch not found');
       return '';
+    }
+
+    if (cmd.startsWith('git merge-base')) {
+      if (throwOnMergeBase) throw new Error('not a valid object name');
+      return mergeBase;
     }
 
     if (cmd.includes('git show')) {
@@ -139,6 +146,72 @@ describe('git-changes module (object-based diff)', () => {
       const result = filterByGitChanges(mockSourceFiles, mockMissingByLocale, mockConfig, false);
 
       expect(result).toEqual({});
+    });
+  });
+
+  // Regression: comparing against the base branch tip instead of the merge-base
+  // attributed develop's progress to the user's branch and triggered spurious
+  // translations on long-lived branches (Qasa 2026-04-27).
+  describe('merge-base comparison', () => {
+    it('compares against merge-base SHA instead of base ref tip', () => {
+      const oldContent = JSON.stringify({ user: { other: 'Other' } });
+      const newContent = JSON.stringify({ user: { other: 'Other', name: 'Name' } });
+      const mergeBaseSha = 'abc1234567890abcdef1234567890abcdef12345';
+
+      setupGitMock({ oldContent, mergeBase: mergeBaseSha });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      filterByGitChanges(mockSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      const showCalls = mockExecSync.mock.calls
+        .map(([cmd]) => cmd)
+        .filter(cmd => typeof cmd === 'string' && cmd.startsWith('git show'));
+
+      expect(showCalls.length).toBeGreaterThan(0);
+      // Every git show must use the merge-base SHA, never the raw base ref.
+      showCalls.forEach(cmd => {
+        expect(cmd).toContain(mergeBaseSha);
+        expect(cmd).not.toMatch(/git show (origin\/)?main:/);
+      });
+    });
+
+    it('falls back to base ref tip when merge-base cannot be computed (shallow clone)', () => {
+      const oldContent = JSON.stringify({ user: { other: 'Other' } });
+      const newContent = JSON.stringify({ user: { other: 'Other', name: 'Name' } });
+
+      // Simulate shallow clone: merge-base throws (or returns empty).
+      setupGitMock({ oldContent, throwOnMergeBase: true });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      const result = filterByGitChanges(mockSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      // Still produces a result rather than aborting — falls back to comparing
+      // against the resolved base ref. Pre-fix behavior preserved.
+      expect(result).toBeDefined();
+      const showCalls = mockExecSync.mock.calls
+        .map(([cmd]) => cmd)
+        .filter(cmd => typeof cmd === 'string' && cmd.startsWith('git show'));
+      showCalls.forEach(cmd => {
+        expect(cmd).toMatch(/git show (origin\/)?main:/);
+      });
+    });
+
+    it('falls back to base ref tip when merge-base returns empty (unrelated histories)', () => {
+      const oldContent = JSON.stringify({ user: { other: 'Other' } });
+      const newContent = JSON.stringify({ user: { other: 'Other', name: 'Name' } });
+
+      setupGitMock({ oldContent, mergeBase: '' });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      const result = filterByGitChanges(mockSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      expect(result).toBeDefined();
+      const showCalls = mockExecSync.mock.calls
+        .map(([cmd]) => cmd)
+        .filter(cmd => typeof cmd === 'string' && cmd.startsWith('git show'));
+      showCalls.forEach(cmd => {
+        expect(cmd).toMatch(/git show (origin\/)?main:/);
+      });
     });
   });
 

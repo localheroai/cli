@@ -31,7 +31,7 @@ export function extractLocaleContent(
 
 export function hasFileChanged(file: FileWithPath, baseBranch: string): boolean {
   try {
-    const resolvedRef = resolveBranchRef(baseBranch);
+    const resolvedRef = resolveCompareRef(baseBranch);
     if (!resolvedRef) {
       return true;
     }
@@ -252,6 +252,47 @@ function resolveBranchRef(branch: string): string | null {
   return null;
 }
 
+/**
+ * Resolve the ref to compare against for "what did this branch introduce?".
+ *
+ * Returns the merge-base of the base branch and HEAD (the commit where the
+ * branch diverged) so we attribute changes to the right side of the split.
+ * Comparing against the base branch tip directly would treat commits made on
+ * the base after the branch point as if they were on the branch.
+ *
+ * This matches the semantics of `git diff <base>...HEAD` (three-dot), which
+ * is defined as "diff from merge-base to HEAD" in gitrevisions(7).
+ *
+ * Falls back to the base ref tip when merge-base cannot be computed — for
+ * example on shallow clones where the real ancestor was pruned — so behavior
+ * degrades to the pre-fix state rather than aborting `--changed-only`.
+ */
+function resolveCompareRef(branch: string, verbose = false): string | null {
+  const resolvedBase = resolveBranchRef(branch);
+  if (!resolvedBase) return null;
+
+  try {
+    const mergeBase = execSync(`git merge-base ${resolvedBase} HEAD`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'ignore']
+    }).trim();
+
+    if (mergeBase) {
+      return mergeBase;
+    }
+
+    if (verbose) {
+      console.log(chalk.yellow(`Could not find merge-base of ${resolvedBase} and HEAD — comparing against ${resolvedBase} tip. If your branch has been long-lived this can produce false-positive changes; consider deepening the fetch.`));
+    }
+    return resolvedBase;
+  } catch {
+    if (verbose) {
+      console.log(chalk.yellow(`git merge-base failed for ${resolvedBase} — comparing against ${resolvedBase} tip. Check that the fetch depth covers the branch point.`));
+    }
+    return resolvedBase;
+  }
+}
+
 interface FileDiff {
   oldFlat: Record<string, any>;
   newFlat: Record<string, any>;
@@ -306,7 +347,7 @@ function getChangedKeys(
   baseBranch: string,
   verbose: boolean
 ): Set<string> | null {
-  const resolvedRef = resolveBranchRef(baseBranch);
+  const resolvedRef = resolveCompareRef(baseBranch, verbose);
   if (!resolvedRef) {
     return null;
   }
@@ -379,7 +420,7 @@ export function getChangedKeysPerFile(
   }
 
   const baseBranch = getBaseBranch(config);
-  const resolvedRef = resolveBranchRef(baseBranch);
+  const resolvedRef = resolveCompareRef(baseBranch, verbose);
   if (!resolvedRef) {
     return null;
   }
