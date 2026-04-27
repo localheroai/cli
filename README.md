@@ -268,6 +268,10 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
 
 🚧 **Skip translations on a PR**: Add the `skip-translation` label to any PR to skip the translation workflow. Useful when you're still working on copy changes.
 
+### Signed commits
+
+For repos that require verified signed commits, set `"github": { "signedCommits": true }` in `localhero.json`. The CLI then commits via the GitHub App's GraphQL API, which auto-signs the commit.
+
 
 ## Support
 

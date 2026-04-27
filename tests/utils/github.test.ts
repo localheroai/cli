@@ -614,4 +614,226 @@ describe('githubService', () => {
       expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
     });
   });
+
+  describe('signed-commits mode', () => {
+    let mockCreateSignedCommit: jest.Mock;
+    let mockFetchBranchHead: jest.Mock;
+    let mockReadFile: jest.Mock;
+    let mockExistsSync: jest.Mock;
+
+    beforeEach(() => {
+      mockCreateSignedCommit = jest.fn();
+      mockFetchBranchHead = jest.fn();
+      mockReadFile = jest.fn();
+      mockExistsSync = jest.fn().mockReturnValue(true);
+
+      const mockConfigSvc = {
+        getProjectConfig: jest.fn().mockResolvedValue({
+          projectId: 'proj_test',
+          github: { signedCommits: true }
+        })
+      };
+
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_REPOSITORY = 'localheroai/test-repo';
+      mockEnv.GITHUB_TOKEN = 'token-fallback';
+
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: { ...mockFs, readFile: mockReadFile, existsSync: mockExistsSync } as any,
+        path: mockPath as any,
+        env: mockEnv,
+        console: mockConsole,
+        configService: mockConfigSvc as any,
+        fetchGitHubInstallationToken: jest.fn().mockResolvedValue('ghs_app_token') as any,
+        createSignedCommit: mockCreateSignedCommit as any,
+        fetchBranchHead: mockFetchBranchHead as any
+      });
+    });
+
+    it('uses GraphQL path when github.signedCommits is true', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('sv:\n  hello: hej'));
+      mockFetchBranchHead.mockResolvedValue({
+        sha: 'a'.repeat(40),
+        parentSha: 'b'.repeat(40),
+        authorEmail: 'developer@example.com'
+      });
+      mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+      await githubService.autoCommitSyncChanges(
+        ['locales/sv.yml'],
+        { keysTranslated: 5, languages: ['sv'] }
+      );
+
+      expect(mockCreateSignedCommit).toHaveBeenCalledTimes(1);
+      const call = mockCreateSignedCommit.mock.calls[0][0] as any;
+      expect(call.repositoryNameWithOwner).toBe('localheroai/test-repo');
+      expect(call.branchName).toBe('feature-branch');
+      expect(call.expectedHeadOid).toBe('a'.repeat(40));
+      expect(call.fileChanges.additions).toHaveLength(2); // sv.yml + localhero.json
+      expect(call.fileChanges.additions[0].path).toBe('locales/sv.yml');
+      expect(call.fileChanges.additions[0].contents).toBe(Buffer.from('sv:\n  hello: hej').toString('base64'));
+      expect(call.message.headline).toBe('Sync translations');
+      expect(call.token).toBe('ghs_app_token');
+      expect(mockConsole.log).toHaveBeenCalledWith('✓ Signed commit created and pushed to GitHub\n');
+    });
+
+    it('uses parent SHA as expectedHeadOid when amending LocalHero bot commit', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('content'));
+      mockFetchBranchHead.mockResolvedValue({
+        sha: 'a'.repeat(40),
+        parentSha: 'b'.repeat(40),
+        authorEmail: '233842311+localhero-ai[bot]@users.noreply.github.com'
+      });
+      mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      const call = mockCreateSignedCommit.mock.calls[0][0] as any;
+      expect(call.expectedHeadOid).toBe('b'.repeat(40));
+      expect(mockConsole.log).toHaveBeenCalledWith('✓ Commit amended and pushed to GitHub (signed)\n');
+    });
+
+    it('does not amend when the last commit is not by LocalHero bot', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('content'));
+      mockFetchBranchHead.mockResolvedValue({
+        sha: 'a'.repeat(40),
+        parentSha: 'b'.repeat(40),
+        authorEmail: 'human@example.com'
+      });
+      mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      const call = mockCreateSignedCommit.mock.calls[0][0] as any;
+      expect(call.expectedHeadOid).toBe('a'.repeat(40));
+    });
+
+    it('skips commit when no files exist on disk', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockExistsSync.mockReturnValue(false);
+
+      await githubService.autoCommitSyncChanges(['nonexistent.yml']);
+
+      expect(mockCreateSignedCommit).not.toHaveBeenCalled();
+      expect(mockFetchBranchHead).not.toHaveBeenCalled();
+      expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
+    });
+
+    it('retries on stale head error', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('content'));
+      mockFetchBranchHead
+        .mockResolvedValueOnce({ sha: 'a'.repeat(40), parentSha: 'b'.repeat(40), authorEmail: null })
+        .mockResolvedValueOnce({ sha: 'd'.repeat(40), parentSha: 'b'.repeat(40), authorEmail: null });
+
+      // Import the error class lazily to avoid top-level imports in test file
+      const { StaleHeadError } = await import('../../src/utils/github-graphql.js');
+      mockCreateSignedCommit
+        .mockRejectedValueOnce(new StaleHeadError('Branch advanced'))
+        .mockResolvedValueOnce({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      expect(mockCreateSignedCommit).toHaveBeenCalledTimes(2);
+      expect(mockFetchBranchHead).toHaveBeenCalledTimes(2);
+    });
+
+    it('falls through to shell path when signedCommits flag is false', async () => {
+      const mockConfigSvcOff = {
+        getProjectConfig: jest.fn().mockResolvedValue({
+          projectId: 'proj_test',
+          github: { signedCommits: false }
+        })
+      };
+      githubService.setDependencies({
+        exec: mockExec,
+        fs: mockFs as any,
+        path: mockPath as any,
+        env: mockEnv,
+        console: mockConsole,
+        configService: mockConfigSvcOff as any,
+        fetchGitHubInstallationToken: jest.fn().mockResolvedValue('ghs_app_token') as any,
+        createSignedCommit: mockCreateSignedCommit as any,
+        fetchBranchHead: mockFetchBranchHead as any
+      });
+
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from(' M locales/sv.yml\n');
+        if (cmd === 'git log -1 --format=%ae') return Buffer.from('developer@example.com\n');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      expect(mockCreateSignedCommit).not.toHaveBeenCalled();
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('git config --global user.name'), expect.anything());
+      expect(mockExec).toHaveBeenCalledWith(expect.stringContaining('git commit'), expect.anything());
+    });
+
+    describe('autoCommitChanges (translate flow)', () => {
+      it('uses GraphQL path with files scoped by the caller-provided pattern', async () => {
+        mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+        mockExec.mockImplementation((cmd: string) => {
+          if (cmd.startsWith('git ls-files')) {
+            // ls-files -z output is NUL-delimited, no trailing newline
+            return Buffer.from('locales/sv.yml\0locales/nb.yml\0');
+          }
+          return Buffer.from('');
+        });
+        mockReadFile.mockResolvedValue(Buffer.from('content'));
+        mockFetchBranchHead.mockResolvedValue({
+          sha: 'a'.repeat(40),
+          parentSha: 'b'.repeat(40),
+          authorEmail: null
+        });
+        mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+        await githubService.autoCommitChanges('locales/', {
+          keysTranslated: 3,
+          languages: ['sv', 'nb']
+        });
+
+        const call = mockCreateSignedCommit.mock.calls[0][0] as any;
+        expect(call.fileChanges.additions).toHaveLength(2);
+        expect(call.fileChanges.additions.map((a: any) => a.path).sort()).toEqual(['locales/nb.yml', 'locales/sv.yml']);
+        expect(call.message.headline).toBe('Update translations');
+        expect(call.message.body).toContain('3 keys in sv, nb');
+
+        // Confirm the ls-files command included the caller-provided pattern so
+        // we don't pick up unrelated working-tree files (regression: previous
+        // implementation used `git status --porcelain` with no scope).
+        const lsFilesCall = mockExec.mock.calls.find(([cmd]: any) => typeof cmd === 'string' && cmd.startsWith('git ls-files'));
+        expect(lsFilesCall?.[0]).toContain('-- locales/');
+      });
+
+      it('handles paths with spaces correctly (NUL-delimited ls-files output)', async () => {
+        mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+        mockExec.mockImplementation((cmd: string) => {
+          if (cmd.startsWith('git ls-files')) {
+            return Buffer.from('locales/sv nb.yml\0');
+          }
+          return Buffer.from('');
+        });
+        mockReadFile.mockResolvedValue(Buffer.from('content'));
+        mockFetchBranchHead.mockResolvedValue({
+          sha: 'a'.repeat(40),
+          parentSha: 'b'.repeat(40),
+          authorEmail: null
+        });
+        mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+
+        await githubService.autoCommitChanges('locales/');
+
+        const call = mockCreateSignedCommit.mock.calls[0][0] as any;
+        expect(call.fileChanges.additions).toEqual([
+          { path: 'locales/sv nb.yml', contents: Buffer.from('content').toString('base64') }
+        ]);
+      });
+    });
+  });
 });

@@ -391,4 +391,56 @@ describe('config module', () => {
             expect(parsed.translationFiles.ignoreKeys).toEqual(['foo.*']);
         });
     });
+
+    describe('saveProjectConfig with github settings', () => {
+        it('does not add a github field when the user did not set one', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'] }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect('github' in parsed).toBe(false);
+        });
+
+        it('preserves github.signedCommits on save when set to true', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'] },
+                github: { signedCommits: true }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect(parsed.github).toEqual({ signedCommits: true });
+        });
+
+        it('preserves github.signedCommits on save when set to false', async () => {
+            const initial = {
+                schemaVersion: '1.0',
+                projectId: 'x',
+                sourceLocale: 'en',
+                outputLocales: ['sv'],
+                translationFiles: { paths: ['config/locales/'] },
+                github: { signedCommits: false }
+            };
+            mockFs.readFile.mockResolvedValue(JSON.stringify(initial));
+
+            await configService.updateLastSyncedAt();
+
+            const parsed = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect(parsed.github).toEqual({ signedCommits: false });
+        });
+    });
 });

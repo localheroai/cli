@@ -76,6 +76,16 @@ export interface ProjectConfig {
     sourcesPattern?: string;
     preserveTranslations?: boolean;
   };
+
+  /** GitHub-specific configuration */
+  github?: {
+    /**
+     * When true, the CLI commits translations via the GitHub GraphQL API
+     * (`createCommitOnBranch`) instead of `git commit + git push`.
+     * Mainly allow us to make signed commits.
+     */
+    signedCommits?: boolean;
+  };
 }
 
 // Simplified translation config
