@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.46] - 2026-04-27
+
+### Added
+- `github.signedCommits` config flag. When set to `true`, the CLI commits translations via GitHub's GraphQL `createCommitOnBranch` mutation. GitHub auto-signs the resulting commits, so they pass repos protected by the `required_signatures` ruleset rule. 
+
 ## [0.0.45] - 2026-04-26
 
 ### Added
