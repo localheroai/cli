@@ -3,7 +3,15 @@ import { promises as fs, existsSync } from 'fs';
 import path from 'path';
 import { fetchGitHubInstallationToken } from '../api/github.js';
 import { configService, PROJECT_CONFIG_FILE } from './config.js';
-import { CommitSummary } from '../types/index.js';
+import { CommitSummary, ProjectConfig } from '../types/index.js';
+import {
+  createSignedCommit,
+  fetchBranchHead,
+  StaleHeadError,
+  CreateCommitInput,
+  CreateCommitResult,
+  BranchHead
+} from './github-graphql.js';
 
 /**
  * Dependencies for the GitHub service
@@ -16,8 +24,10 @@ interface GitHubDependencies {
   console: Pick<Console, 'log' | 'warn' | 'error'>;
   fetchGitHubInstallationToken?: (projectId: string) => Promise<string>;
   configService?: {
-    getProjectConfig: (basePath?: string) => Promise<any>;
+    getProjectConfig: (basePath?: string) => Promise<ProjectConfig | null>;
   };
+  createSignedCommit?: (input: CreateCommitInput) => Promise<CreateCommitResult>;
+  fetchBranchHead?: (repo: string, branch: string, token: string) => Promise<BranchHead>;
   [key: string]: unknown;
 }
 
@@ -28,7 +38,9 @@ const defaultDependencies: GitHubDependencies = {
   env: process.env,
   console,
   fetchGitHubInstallationToken,
-  configService
+  configService,
+  createSignedCommit,
+  fetchBranchHead
 };
 
 const workflowFileName = 'localhero-translate.yml';
@@ -139,6 +151,9 @@ jobs:
   async fetchActionToken(): Promise<{ token: string | null; errorCode?: string }> {
     try {
       const config = await this.deps.configService!.getProjectConfig();
+      if (!config) {
+        return { token: null, errorCode: 'config_missing' };
+      }
       const token = await this.deps.fetchGitHubInstallationToken!(config.projectId);
       return { token };
 
@@ -315,6 +330,19 @@ jobs:
   },
 
   /**
+   * Resolve the project's config and return whether signed-commits mode is on.
+   * Falls back to false on any error so the existing flow stays the default.
+   */
+  async useSignedCommitsMode(): Promise<boolean> {
+    try {
+      const cfg = await this.deps.configService!.getProjectConfig();
+      return Boolean(cfg?.github?.signedCommits);
+    } catch {
+      return false;
+    }
+  },
+
+  /**
    * Automatically commit and push sync changes when running in GitHub Actions
    * @param modifiedFiles List of file paths that were modified
    * @param syncSummary Optional summary of sync results
@@ -330,10 +358,28 @@ jobs:
 
     log.log('\nCommitting sync changes...');
     try {
-      this.configureGitUser();
       const branchName = options?.branchName || this.getBranchName();
-
       const commitMessage = this.buildSyncCommitMessage(syncSummary);
+
+      if (await this.useSignedCommitsMode()) {
+        const filesToCommit = [...modifiedFiles, PROJECT_CONFIG_FILE];
+        const result = await this.apiCommitAndPush({
+          branchName,
+          filePaths: filesToCommit,
+          message: commitMessage,
+          isSyncMode: true
+        });
+        if (result === 'no-changes') {
+          log.log('No changes to commit - translations already up to date.');
+        } else if (result === 'amended') {
+          log.log('✓ Commit amended and pushed to GitHub (signed)\n');
+        } else {
+          log.log('✓ Signed commit created and pushed to GitHub\n');
+        }
+        return;
+      }
+
+      this.configureGitUser();
 
       for (const filePath of modifiedFiles) {
         exec(`git add "${filePath}"`, { stdio: 'inherit' });
@@ -364,6 +410,50 @@ jobs:
   },
 
   /**
+   * Build the commit message used by autoCommitChanges, including optional
+   * Co-authored-by trailer derived from GITHUB_ACTOR.
+   */
+  buildTranslateCommitMessage(translationSummary?: CommitSummary): string {
+    let commitMessage = 'Update translations';
+
+    if (translationSummary && translationSummary.keysTranslated > 0) {
+      const { keysTranslated, languages, viewUrl } = translationSummary;
+      const languageList = languages.join(', ');
+
+      commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
+
+      if (viewUrl) {
+        commitMessage += `\n\n${viewUrl}`;
+      }
+    }
+
+    const actor = this.deps.env.GITHUB_ACTOR;
+    if (actor && !actor.includes('[bot]')) {
+      commitMessage += `\n\nCo-authored-by: ${actor} <${actor}@users.noreply.github.com>`;
+    }
+
+    return commitMessage;
+  },
+
+  /**
+   * Enumerate files in the working tree that differ from HEAD. Used by the
+   * signed-commits path to know which files to send to the GraphQL API.
+   * Returns repo-relative paths.
+   */
+  listChangedFiles(filesPath?: string): string[] {
+    const { exec } = this.deps;
+    // `ls-files --modified --others --exclude-standard` mirrors what `git add .`
+    // would stage: tracked-and-modified plus untracked-but-not-ignored. -z gives
+    // NUL-delimited output so paths with spaces or special characters round-trip
+    // intact (no quoting, no rename arrows, no escaping).
+    const command = filesPath
+      ? `git ls-files --modified --others --exclude-standard -z -- ${filesPath}`
+      : 'git ls-files --modified --others --exclude-standard -z';
+    const output = exec(command, { stdio: 'pipe' }).toString();
+    return output.split('\0').filter(line => line.length > 0);
+  },
+
+  /**
    * Automatically commit and push changes when running in GitHub Actions
    * @param filesPath Path pattern for files to commit
    * @param translationSummary Optional summary of translation results
@@ -375,32 +465,32 @@ jobs:
 
     log.log('Running in GitHub Actions. Committing changes...');
     try {
-      this.configureGitUser();
       const branchName = this.getBranchName();
+      const commitMessage = this.buildTranslateCommitMessage(translationSummary);
+
+      if (await this.useSignedCommitsMode()) {
+        const filePaths = this.listChangedFiles(filesPath);
+        const result = await this.apiCommitAndPush({
+          branchName,
+          filePaths,
+          message: commitMessage,
+          isSyncMode: false
+        });
+        if (result === 'no-changes') {
+          log.log('No changes to commit.');
+        } else {
+          log.log('Signed commit pushed to GitHub.');
+        }
+        return;
+      }
+
+      this.configureGitUser();
 
       exec(`git add ${filesPath}`, { stdio: 'inherit' });
 
       if (!this.hasStagedChanges()) {
         log.log('No changes to commit.');
         return;
-      }
-
-      let commitMessage = 'Update translations';
-
-      if (translationSummary && translationSummary.keysTranslated > 0) {
-        const { keysTranslated, languages, viewUrl } = translationSummary;
-        const languageList = languages.join(', ');
-
-        commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
-
-        if (viewUrl) {
-          commitMessage += `\n\n${viewUrl}`;
-        }
-      }
-
-      const actor = this.deps.env.GITHUB_ACTOR;
-      if (actor && !actor.includes('[bot]')) {
-        commitMessage += `\n\nCo-authored-by: ${actor} <${actor}@users.noreply.github.com>`;
       }
 
       this.commit(commitMessage);
@@ -414,6 +504,110 @@ jobs:
       log.error('Auto-commit failed:', errorMessage);
       throw error;
     }
+  },
+
+  /**
+   * Commit and push files using the GitHub GraphQL `createCommitOnBranch`
+   * mutation. Produces signed commits attributed to the LocalHero App. Works
+   * with repos that enforce `required_signatures` rulesets.
+   *
+   * Returns 'no-changes' if all files match what's already on the branch,
+   * 'amended' if the previous LocalHero sync commit was replaced, otherwise
+   * 'new'.
+   */
+  async apiCommitAndPush(params: {
+    branchName: string;
+    filePaths: string[];
+    message: string;
+    isSyncMode: boolean;
+  }): Promise<'no-changes' | 'new' | 'amended'> {
+    const { console: log, env } = this.deps;
+
+    const repository = env.GITHUB_REPOSITORY;
+    if (!repository) {
+      throw new Error('GITHUB_REPOSITORY is not set');
+    }
+
+    const additions = await this.readFilesAsAdditions(params.filePaths);
+    if (additions.length === 0) {
+      return 'no-changes';
+    }
+
+    const token = await this.getTokenForPush();
+
+    const maxRetries = 3;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        const head = await this.deps.fetchBranchHead!(repository, params.branchName, token);
+
+        // Amend semantics: if the last commit on the branch is by the
+        // LocalHero bot in sync mode, replace it instead of stacking.
+        let expectedHeadOid = head.sha;
+        let amended = false;
+        if (params.isSyncMode && this.lastCommitIsLocalHeroBot(head) && head.parentSha) {
+          expectedHeadOid = head.parentSha;
+          amended = true;
+        }
+
+        const headlineAndBody = this.splitCommitMessage(params.message);
+
+        await this.deps.createSignedCommit!({
+          repositoryNameWithOwner: repository,
+          branchName: params.branchName,
+          expectedHeadOid,
+          message: headlineAndBody,
+          fileChanges: { additions },
+          token
+        });
+
+        return amended ? 'amended' : 'new';
+      } catch (error) {
+        lastError = error;
+        if (error instanceof StaleHeadError && attempt < maxRetries) {
+          log.log(`Branch advanced under us, retrying (${attempt}/${maxRetries})...`);
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    throw lastError;
+  },
+
+  async readFilesAsAdditions(filePaths: string[]): Promise<{ path: string; contents: string }[]> {
+    const { fs } = this.deps;
+    const seen = new Set<string>();
+    const additions: { path: string; contents: string }[] = [];
+
+    for (const filePath of filePaths) {
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+
+      if (!fs.existsSync(filePath)) continue;
+
+      const buffer = await fs.readFile(filePath);
+      additions.push({
+        path: filePath,
+        contents: Buffer.from(buffer).toString('base64')
+      });
+    }
+
+    return additions;
+  },
+
+  lastCommitIsLocalHeroBot(head: BranchHead): boolean {
+    if (!head.authorEmail) return false;
+    const email = head.authorEmail.toLowerCase();
+    return email.includes('localhero');
+  },
+
+  splitCommitMessage(message: string): { headline: string; body?: string } {
+    const newlineIdx = message.indexOf('\n');
+    if (newlineIdx === -1) return { headline: message };
+    const headline = message.slice(0, newlineIdx);
+    const body = message.slice(newlineIdx + 1).replace(/^\n+/, '');
+    return body.length > 0 ? { headline, body } : { headline };
   }
 };
 
