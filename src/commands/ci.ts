@@ -6,6 +6,7 @@ import { checkAuth } from '../utils/auth.js';
 import { githubService } from '../utils/github.js';
 import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
+import { ProjectConfig } from '../types/index.js';
 
 export type CiOptions = TranslationOptions;
 
@@ -40,18 +41,34 @@ const defaultDeps: CiDependencies = {
 };
 
 /**
- * Gets the current branch and determines translation mode
+ * Gets the current branch and determines translation mode.
+ *
  * @param env Environment variables
+ * @param config Project config (for translationFiles.baseBranch)
  * @returns branch name and whether to use --changed-only mode
  */
-function getBranchContext(env: NodeJS.ProcessEnv): { branch: string; useChangedOnly: boolean } {
+function getBranchContext(env: NodeJS.ProcessEnv, config?: ProjectConfig | null): { branch: string; useChangedOnly: boolean } {
   // GITHUB_HEAD_REF: source branch of a PR (empty for push/workflow_dispatch)
-  // GITHUB_REF_NAME: branch/tag that triggered the workflow
+  // GITHUB_REF_NAME: short ref of the branch/tag that triggered the workflow
   // See: https://docs.github.com/en/actions/reference/workflows-and-actions/variables
-  const branch = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME || 'unknown';
-  const useChangedOnly = branch !== 'main' && branch !== 'master';
+  const branch = env.GITHUB_HEAD_REF || env.GITHUB_REF_NAME;
+  if (!branch) {
+    // GITHUB_REF_NAME is always set inside Actions. Reaching here means we're
+    // running outside CI (or in a misconfigured runner). Without a branch we
+    // can't reliably detect changed keys, so fall back to full translation
+    // and warn so the misuse is visible.
+    console.warn(chalk.yellow(
+      'Could not determine branch from GITHUB_HEAD_REF or GITHUB_REF_NAME. Running full translation.'
+    ));
+    return { branch: 'unknown', useChangedOnly: false };
+  }
 
-  return { branch, useChangedOnly };
+  const configuredBase = config?.translationFiles?.baseBranch;
+  const isOnDefaultBranch = configuredBase
+    ? branch === configuredBase
+    : branch === 'main' || branch === 'master';
+
+  return { branch, useChangedOnly: !isOnDefaultBranch };
 }
 
 /**
@@ -59,11 +76,12 @@ function getBranchContext(env: NodeJS.ProcessEnv): { branch: string; useChangedO
  */
 async function runTranslateMode(
   options: CiOptions,
-  deps: CiDependencies
+  deps: CiDependencies,
+  config?: ProjectConfig | null
 ): Promise<void> {
   const { verbose } = options;
   const { console, env, translateCommand } = deps;
-  const { branch, useChangedOnly } = getBranchContext(env);
+  const { branch, useChangedOnly } = getBranchContext(env, config);
 
   if (verbose) {
     if (useChangedOnly) {
@@ -243,6 +261,6 @@ export async function ci(
     if (options.verbose) {
       console.log(chalk.blue('🔄 Translate mode detected\n'));
     }
-    await runTranslateMode(options, deps);
+    await runTranslateMode(options, deps, config);
   }
 }

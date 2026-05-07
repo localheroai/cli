@@ -138,6 +138,85 @@ describe('ci command', () => {
         })
       );
     });
+
+    it('should use full translation when on the project-configured baseBranch (e.g. develop)', async () => {
+      mockConfigUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr', 'de'],
+        translationFiles: {
+          paths: ['locales/'],
+          baseBranch: 'develop'
+        }
+      });
+      mockEnv.GITHUB_REF_NAME = 'develop';
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: false
+        })
+      );
+    });
+
+    it('should use --changed-only on a feature branch even when baseBranch is configured', async () => {
+      mockConfigUtils.getProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr', 'de'],
+        translationFiles: {
+          paths: ['locales/'],
+          baseBranch: 'develop'
+        }
+      });
+      mockEnv.GITHUB_HEAD_REF = 'feature/x';
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: true
+        })
+      );
+    });
+
+    it('should warn and run full translation when no branch env vars are set', async () => {
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      // Neither GITHUB_HEAD_REF nor GITHUB_REF_NAME is set.
+
+      await ci({ verbose: false }, {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: mockGithubUtils,
+        env: mockEnv,
+        translateCommand: mockTranslateCommand
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Could not determine branch'));
+      expect(mockTranslateCommand).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changedOnly: false
+        })
+      );
+
+      warnSpy.mockRestore();
+    });
   });
 
 
