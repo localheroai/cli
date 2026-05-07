@@ -220,6 +220,57 @@ describe('translations API', () => {
         prKeyManifest: {}
       })).rejects.toThrow('Finalize failed with status 500');
     });
+
+    it('omits removed_key_manifest when not provided', async () => {
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {}
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty('removed_key_manifest');
+    });
+
+    it('omits removed_key_manifest when explicitly null', async () => {
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {},
+        removedKeyManifest: null
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body).not.toHaveProperty('removed_key_manifest');
+    });
+
+    it('sends empty removed_key_manifest as {} on the wire', async () => {
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {},
+        removedKeyManifest: {}
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.removed_key_manifest).toEqual({});
+    });
+
+    it('sends populated removed_key_manifest', async () => {
+      const removed = {
+        'locales/en.yml': [{ name: 'old.key' }]
+      };
+
+      await finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: {},
+        removedKeyManifest: removed
+      });
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.removed_key_manifest).toEqual(removed);
+    });
   });
 
   describe('getUpdates', () => {

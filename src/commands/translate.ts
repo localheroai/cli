@@ -6,7 +6,12 @@ import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus, finalizeTranslationJobs } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
-import { filterByGitChanges, isGitAvailable, getManifestForFinalize } from '../utils/git-changes.js';
+import {
+  filterByGitChanges,
+  isGitAvailable,
+  getManifestForFinalize,
+  getRemovedKeysManifestForFinalize
+} from '../utils/git-changes.js';
 import { getCurrentBranch } from '../utils/git.js';
 import {
   findMissingTranslations,
@@ -184,13 +189,18 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
   const projectId = config.projectId;
 
-  async function sendFinalize(manifest: Record<string, any>, jobGroupId: string): Promise<void> {
+  async function sendFinalize(
+    manifest: Record<string, any>,
+    jobGroupId: string,
+    removedManifest: Record<string, any> | null
+  ): Promise<void> {
     try {
       const branch = await getCurrentBranch();
       await finalizeTranslationJobs({
         projectId,
         jobGroupId,
         prKeyManifest: manifest,
+        removedKeyManifest: removedManifest,
         commitSha: process.env.GITHUB_SHA,
         branch: branch || undefined
       });
@@ -231,8 +241,10 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   // Capture the full manifest BEFORE filtering down to missing-only keys.
   // This is the complete snapshot of "what differs from main" for this push.
   let manifest: Record<string, any> | null = null;
+  let removedManifest: Record<string, any> | null = null;
   if (options.changedOnly) {
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose);
+    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
 
     const filtered = filterByGitChanges(
       sourceFiles,
@@ -244,7 +256,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     if (filtered !== null) {
       if (Object.keys(filtered).length === 0) {
         if (manifest !== null) {
-          await sendFinalize(manifest, nanoid());
+          await sendFinalize(manifest, nanoid(), removedManifest);
         }
         console.log(chalk.green('✓ All changed keys are already translated'));
         return;
@@ -309,7 +321,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     );
 
     if (manifest !== null) {
-      await sendFinalize(manifest, jobGroupId);
+      await sendFinalize(manifest, jobGroupId, removedManifest);
     }
 
     await configUtils.updateLastSyncedAt();

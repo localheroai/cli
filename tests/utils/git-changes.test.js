@@ -31,7 +31,9 @@ function setupGitMock({
   oldContent = '',
   throwOnShow = false,
   mergeBase = '',
-  throwOnMergeBase = false
+  throwOnMergeBase = false,
+  deletedPaths = '',
+  showByPath = null
 } = {}) {
   mockExecSync.mockImplementation((cmd) => {
     if (!available) {
@@ -53,8 +55,20 @@ function setupGitMock({
       return mergeBase;
     }
 
+    if (cmd.startsWith('git diff --diff-filter=D')) {
+      return deletedPaths;
+    }
+
     if (cmd.includes('git show')) {
       if (throwOnShow) throw new Error('File does not exist in base branch');
+      if (showByPath) {
+        const match = cmd.match(/git show [^:]+:"([^"]+)"/);
+        if (match && Object.prototype.hasOwnProperty.call(showByPath, match[1])) {
+          const value = showByPath[match[1]];
+          if (value === null) throw new Error('File does not exist in base branch');
+          return value;
+        }
+      }
       return oldContent;
     }
 
@@ -792,8 +806,7 @@ describe('getChangedKeysPerFile', () => {
     const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
 
     expect(result).toBeInstanceOf(Map);
-    expect(result.size).toBe(1);
-    expect(result.get('locales/en.json')).toEqual([]);
+    expect(result.size).toBe(0);
   });
 
   it('returns null on ref resolution failure', () => {
@@ -808,7 +821,7 @@ describe('getChangedKeysPerFile', () => {
     expect(result).toBeNull();
   });
 
-  it('includes all source files in manifest with empty arrays for unchanged', () => {
+  it('omits unchanged source files from the manifest', () => {
     const sourceFiles = [
       { path: 'locales/en.json', format: 'json', locale: 'en' },
       { path: 'locales/common.json', format: 'json', locale: 'en' }
@@ -820,9 +833,7 @@ describe('getChangedKeysPerFile', () => {
 
     const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
 
-    expect(result.size).toBe(2);
-    expect(result.get('locales/en.json')).toEqual([]);
-    expect(result.get('locales/common.json')).toEqual([]);
+    expect(result.size).toBe(0);
   });
 });
 
@@ -891,7 +902,243 @@ describe('getManifestForFinalize', () => {
       false
     );
 
-    expect(result).toEqual({ 'locales/en.json': [] });
+    expect(result).toEqual({});
+  });
+});
+
+describe('getRemovedKeysPerFile', () => {
+  let mockConfig;
+  let originalProcessEnv;
+
+  beforeEach(() => {
+    originalProcessEnv = { ...process.env };
+    delete process.env.CI;
+    delete process.env.GITHUB_BASE_REF;
+    jest.clearAllMocks();
+
+    mockConfig = {
+      schemaVersion: '1.0',
+      projectId: 'test',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['locales/'] },
+      lastSyncedAt: null
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalProcessEnv;
+  });
+
+  it('emits keys present in old but absent in new', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+    const oldContent = JSON.stringify({ greeting: 'Hi', goodbye: 'Bye' });
+    const newContent = JSON.stringify({ greeting: 'Hi' });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getRemovedKeysPerFile(sourceFiles, mockConfig, false);
+
+    expect(result).toBeInstanceOf(Map);
+    expect(result.get('locales/en.json')).toEqual([{ name: 'goodbye' }]);
+  });
+
+  it('omits files with no removals from the map', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+    const content = JSON.stringify({ greeting: 'Hi' });
+
+    setupGitMock({ oldContent: content });
+    mockReadFileSync.mockReturnValue(content);
+
+    const result = gitDiffModule.getRemovedKeysPerFile(sourceFiles, mockConfig, false);
+
+    expect(result.size).toBe(0);
+  });
+
+  it('parses PO context|msgid removals', () => {
+    const sourceFiles = [{ path: 'msgs.po', format: 'po', locale: 'en' }];
+    const oldContent = `
+msgctxt "menu"
+msgid "Open"
+msgstr "Open"
+
+msgid "Close"
+msgstr "Close"
+`;
+    const newContent = `
+msgid "Close"
+msgstr "Close"
+`;
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getRemovedKeysPerFile(sourceFiles, mockConfig, false);
+
+    const removed = result.get('msgs.po');
+    expect(removed).toEqual([{ name: 'Open', context: 'menu' }]);
+  });
+
+  it('caps combined add+remove count at MAX_CHANGED_KEYS', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+
+    // 6000 added + 5000 removed = 11000, exceeds 10000 cap.
+    const oldEntries = {};
+    for (let i = 0; i < 5000; i++) oldEntries[`removed_${i}`] = `r${i}`;
+    const newEntries = {};
+    for (let i = 0; i < 6000; i++) newEntries[`added_${i}`] = `a${i}`;
+
+    setupGitMock({ oldContent: JSON.stringify(oldEntries) });
+    mockReadFileSync.mockReturnValue(JSON.stringify(newEntries));
+
+    const result = gitDiffModule.getRemovedKeysPerFile(sourceFiles, mockConfig, false);
+    expect(result).toBeNull();
+  });
+});
+
+describe('getRemovedKeysManifestForFinalize', () => {
+  let mockConfig;
+  let originalProcessEnv;
+
+  beforeEach(() => {
+    originalProcessEnv = { ...process.env };
+    delete process.env.CI;
+    delete process.env.GITHUB_BASE_REF;
+    jest.clearAllMocks();
+
+    mockConfig = {
+      schemaVersion: '1.0',
+      projectId: 'test',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['locales/'] },
+      lastSyncedAt: null
+    };
+  });
+
+  afterEach(() => {
+    process.env = originalProcessEnv;
+  });
+
+  it('returns plain object', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+    const oldContent = JSON.stringify({ greeting: 'Hi', goodbye: 'Bye' });
+    const newContent = JSON.stringify({ greeting: 'Hi' });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getRemovedKeysManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({ 'locales/en.json': [{ name: 'goodbye' }] });
+  });
+
+  it('returns empty object when diff succeeded with no removals', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+    const content = JSON.stringify({ greeting: 'Hi' });
+    setupGitMock({ oldContent: content });
+    mockReadFileSync.mockReturnValue(content);
+
+    const result = gitDiffModule.getRemovedKeysManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({});
+  });
+});
+
+describe('deleted source file enumeration', () => {
+  let mockConfig;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockConfig = {
+      schemaVersion: '1.0',
+      projectId: 'test',
+      sourceLocale: 'en',
+      outputLocales: ['fr', 'sv'],
+      translationFiles: { paths: ['locales/'] },
+      lastSyncedAt: null
+    };
+  });
+
+  it('emits removals for a fully-deleted source-locale file', () => {
+    setupGitMock({
+      deletedPaths: 'locales/en.json\n',
+      showByPath: {
+        'locales/en.json': JSON.stringify({ a: '1', b: '2' })
+      }
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify({}));
+
+    // No source files passed in (file is deleted on disk).
+    const result = gitDiffModule.getRemovedKeysPerFile([], mockConfig, false);
+    const removed = result.get('locales/en.json');
+    expect(removed.length).toBe(2);
+    expect(removed.map((r) => r.name).sort()).toEqual(['a', 'b']);
+  });
+
+  it('ignores deleted files outside configured paths', () => {
+    setupGitMock({
+      deletedPaths: 'README.md\nnotes/old.json\n',
+      showByPath: {
+        'notes/old.json': JSON.stringify({ a: '1' })
+      }
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify({}));
+
+    const result = gitDiffModule.getRemovedKeysPerFile([], mockConfig, false);
+    expect(result.has('README.md')).toBe(false);
+    expect(result.has('notes/old.json')).toBe(false);
+  });
+
+  it('ignores deleted target-locale-only files', () => {
+    setupGitMock({
+      deletedPaths: 'locales/fr.json\n',
+      showByPath: {
+        'locales/fr.json': JSON.stringify({ x: 'fr' })
+      }
+    });
+    mockReadFileSync.mockReturnValue(JSON.stringify({}));
+
+    const result = gitDiffModule.getRemovedKeysPerFile([], mockConfig, false);
+    expect(result.has('locales/fr.json')).toBe(false);
+  });
+
+  it('ignores rename records (filter is D-only)', () => {
+    // diff --diff-filter=D will not include renames; simulate empty output.
+    setupGitMock({ deletedPaths: '' });
+    mockReadFileSync.mockReturnValue(JSON.stringify({}));
+
+    const result = gitDiffModule.getRemovedKeysPerFile([], mockConfig, false);
+    expect(result.size).toBe(0);
+  });
+
+  it('detects deleted multi-language YAML when source locale is a top-level key', () => {
+    const multiConfig = {
+      ...mockConfig,
+      translationFiles: { paths: ['locales/'], multiLanguageFiles: true }
+    };
+
+    const yamlContent = `en:
+  a: A
+  b: B
+sv:
+  a: A
+  b: B`;
+
+    setupGitMock({
+      deletedPaths: 'locales/messages.yml\n',
+      showByPath: {
+        'locales/messages.yml': yamlContent
+      }
+    });
+    mockReadFileSync.mockReturnValue('');
+
+    const result = gitDiffModule.getRemovedKeysPerFile([], multiConfig, false);
+    const removed = result.get('locales/messages.yml');
+    expect(removed).toBeDefined();
+    expect(removed.length).toBe(2);
+    expect(removed.map((r) => r.name).sort()).toEqual(['a', 'b']);
   });
 });
 
