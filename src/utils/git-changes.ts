@@ -3,10 +3,12 @@ import { readFileSync } from 'fs';
 import chalk from 'chalk';
 import type { TranslationFile, ProjectConfig, KeyIdentifier } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
-import { parseFile, flattenTranslations } from './files.js';
+import { parseFile, flattenTranslations, extractLocaleFromPath } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
 
 type FileWithPath = { path: string };
+
+const SUPPORTED_EXTENSIONS = ['.json', '.yml', '.yaml', '.po', '.pot'];
 
 /**
  * Extract the content under the locale wrapper if present.
@@ -403,18 +405,24 @@ function getChangedKeys(
   return allChangedKeys;
 }
 
+export interface PerFileDiff {
+  added: KeyIdentifier[];
+  removed: KeyIdentifier[];
+}
+
+const MAX_CHANGED_KEYS_TOTAL = 10000;
+
 /**
- * Get changed keys per file, returning a Map of file path to key identifiers.
- * Used to build the manifest for the finalize endpoint.
- *
- * Returns null on failure (git unavailable, ref resolution error, safety limit exceeded).
- * Returns an empty Map if no changes detected (all files checked, zero diffs).
+ * Build added + removed identifier lists per source file in a single git pass.
+ * Also enumerates source-language files entirely deleted in the PR via
+ * `git diff --diff-filter=D --name-only` (renames excluded). Returns null on
+ * failure (git unavailable, ref unresolved, combined cap exceeded).
  */
-export function getChangedKeysPerFile(
+export function diffSourceFilesPerFile(
   sourceFiles: TranslationFile[],
   config: ProjectConfig,
   verbose: boolean
-): Map<string, KeyIdentifier[]> | null {
+): Map<string, PerFileDiff> | null {
   if (!isGitAvailable()) {
     return null;
   }
@@ -425,9 +433,18 @@ export function getChangedKeysPerFile(
     return null;
   }
 
-  const result = new Map<string, KeyIdentifier[]>();
-  const MAX_CHANGED_KEYS = 10000;
+  const result = new Map<string, PerFileDiff>();
   let totalKeys = 0;
+
+  const cap = (newTotal: number): boolean => {
+    if (newTotal > MAX_CHANGED_KEYS_TOTAL) {
+      if (verbose) {
+        console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS_TOTAL} changed keys limit`));
+      }
+      return true;
+    }
+    return false;
+  };
 
   for (const file of sourceFiles) {
     try {
@@ -436,31 +453,28 @@ export function getChangedKeysPerFile(
 
       const { oldFlat, newFlat } = diff;
       const isPo = file.format === 'po' || file.format === 'pot';
-      const fileKeys: KeyIdentifier[] = [];
+      const added: KeyIdentifier[] = [];
+      const removed: KeyIdentifier[] = [];
 
       for (const [key, value] of Object.entries(newFlat)) {
         if (!(key in oldFlat) || oldFlat[key] !== value) {
           totalKeys++;
-          if (totalKeys > MAX_CHANGED_KEYS) {
-            if (verbose) {
-              console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
-            }
-            return null;
-          }
-
-          const identifier: KeyIdentifier = { name: key };
-          if (isPo) {
-            const pipeIndex = key.indexOf('|');
-            if (pipeIndex > 0) {
-              identifier.context = key.substring(0, pipeIndex);
-              identifier.name = key.substring(pipeIndex + 1);
-            }
-          }
-          fileKeys.push(identifier);
+          if (cap(totalKeys)) return null;
+          added.push(toIdentifier(key, isPo));
         }
       }
 
-      result.set(file.path, fileKeys);
+      for (const key of Object.keys(oldFlat)) {
+        if (!(key in newFlat)) {
+          totalKeys++;
+          if (cap(totalKeys)) return null;
+          removed.push(toIdentifier(key, isPo));
+        }
+      }
+
+      if (added.length > 0 || removed.length > 0) {
+        result.set(file.path, { added, removed });
+      }
     } catch (error) {
       if (verbose) {
         const err = error as Error;
@@ -469,7 +483,205 @@ export function getChangedKeysPerFile(
     }
   }
 
+  const deletedSyntheticFiles = enumerateDeletedSourceFiles(config, resolvedRef, verbose);
+  for (const file of deletedSyntheticFiles) {
+    if (result.has(file.path)) continue; // already handled by main loop
+    try {
+      const isPo = file.format === 'po' || file.format === 'pot';
+      const oldFlat = readOldFlat(file, resolvedRef, verbose);
+      if (!oldFlat) continue;
+
+      const removed: KeyIdentifier[] = [];
+      for (const key of Object.keys(oldFlat)) {
+        totalKeys++;
+        if (cap(totalKeys)) return null;
+        removed.push(toIdentifier(key, isPo));
+      }
+
+      result.set(file.path, { added: [], removed });
+    } catch (error) {
+      if (verbose) {
+        const err = error as Error;
+        console.log(chalk.dim(`  Skipping deleted ${file.path}: ${err.message}`));
+      }
+    }
+  }
+
   return result;
+}
+
+function readOldFlat(file: TranslationFile, resolvedRef: string, verbose: boolean): Record<string, any> | null {
+  const sanitizedPath = sanitizeGitPath(file.path);
+  const isPo = file.format === 'po' || file.format === 'pot';
+
+  try {
+    const oldContent = execSync(
+      `git show ${resolvedRef}:"${sanitizedPath}"`,
+      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
+    );
+    const oldObj = parseFile(oldContent, file.format, file.path);
+    if (!oldObj) return {};
+    const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
+    return isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
+  } catch (error) {
+    if (verbose) {
+      console.log(chalk.dim(`  Could not read old content for ${file.path}: ${(error as Error).message}`));
+    }
+    return null;
+  }
+}
+
+/**
+ * Enumerate source-language translation files entirely deleted in the PR.
+ * Returns synthetic TranslationFile entries; multi-language YAML/JSON is
+ * detected by parsing the base-ref content and checking for a top-level
+ * source-locale key. Renames (R*) are excluded.
+ */
+export function enumerateDeletedSourceFiles(
+  config: ProjectConfig,
+  resolvedRef: string,
+  verbose: boolean
+): TranslationFile[] {
+  const sourceLocale = config.sourceLocale;
+  if (!sourceLocale) return [];
+
+  const configuredPaths = config.translationFiles?.paths || [];
+  if (configuredPaths.length === 0) return [];
+
+  const knownLocales = [sourceLocale, ...(config.outputLocales || [])];
+  const localeRegex = config.translationFiles?.localeRegex;
+  const multiLanguageEnabled = !!config.translationFiles?.multiLanguageFiles;
+
+  let deletedPaths: string[] = [];
+  try {
+    const out = execSync(`git diff --diff-filter=D --name-only ${resolvedRef}..HEAD`, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'ignore']
+    });
+    deletedPaths = out.split('\n').map((p) => p.trim()).filter(Boolean);
+  } catch (error) {
+    if (verbose) {
+      console.log(chalk.dim(`Could not enumerate deleted files: ${(error as Error).message}`));
+    }
+    return [];
+  }
+  if (deletedPaths.length === 0) return [];
+
+  const synthetic: TranslationFile[] = [];
+
+  for (const deletedPath of deletedPaths) {
+    if (!isWithinConfiguredPaths(deletedPath, configuredPaths)) continue;
+
+    const ext = pathExt(deletedPath);
+    if (!SUPPORTED_EXTENSIONS.includes(ext)) continue;
+
+    const format = ext.slice(1).toLowerCase();
+    const isPo = format === 'po' || format === 'pot';
+
+    if (isPo) {
+      synthetic.push({ path: deletedPath, format, locale: sourceLocale });
+      continue;
+    }
+
+    let pathLocale: string | null = null;
+    try {
+      pathLocale = extractLocaleFromPath(deletedPath, localeRegex, knownLocales);
+    } catch {
+      pathLocale = null;
+    }
+    if (pathLocale && pathLocale.toLowerCase() === sourceLocale.toLowerCase()) {
+      synthetic.push({ path: deletedPath, format, locale: sourceLocale });
+      continue;
+    }
+    if (pathLocale && pathLocale.toLowerCase() !== sourceLocale.toLowerCase()) {
+      continue;
+    }
+
+    if (multiLanguageEnabled) {
+      try {
+        const oldContent = execSync(
+          `git show ${resolvedRef}:"${sanitizeGitPath(deletedPath)}"`,
+          { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
+        );
+        const parsed = parseFile(oldContent, format, deletedPath);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as any)[sourceLocale]) {
+          synthetic.push({
+            path: deletedPath,
+            format,
+            locale: sourceLocale,
+            hasLanguageWrapper: true,
+            multiLanguage: true
+          });
+        }
+      } catch (error) {
+        if (verbose) {
+          console.log(chalk.dim(`  Skipping deleted ${deletedPath} (parse): ${(error as Error).message}`));
+        }
+      }
+    }
+  }
+
+  return synthetic;
+}
+
+function pathExt(p: string): string {
+  const dot = p.lastIndexOf('.');
+  return dot < 0 ? '' : p.slice(dot).toLowerCase();
+}
+
+function isWithinConfiguredPaths(filePath: string, configuredPaths: string[]): boolean {
+  return configuredPaths.some((cp) => {
+    if (!cp) return false;
+    const normalized = cp.endsWith('/') ? cp : `${cp}/`;
+    return filePath === cp || filePath.startsWith(normalized);
+  });
+}
+
+function toIdentifier(key: string, isPo: boolean): KeyIdentifier {
+  const identifier: KeyIdentifier = { name: key };
+  if (isPo) {
+    const pipeIndex = key.indexOf('|');
+    if (pipeIndex > 0) {
+      identifier.context = key.substring(0, pipeIndex);
+      identifier.name = key.substring(pipeIndex + 1);
+    }
+  }
+  return identifier;
+}
+
+export function getChangedKeysPerFile(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Map<string, KeyIdentifier[]> | null {
+  const perFile = diffSourceFilesPerFile(sourceFiles, config, verbose);
+  if (perFile === null) return null;
+
+  const out = new Map<string, KeyIdentifier[]>();
+  for (const [path, { added }] of perFile.entries()) {
+    if (added.length > 0) {
+      out.set(path, added);
+    }
+  }
+  return out;
+}
+
+export function getRemovedKeysPerFile(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Map<string, KeyIdentifier[]> | null {
+  const perFile = diffSourceFilesPerFile(sourceFiles, config, verbose);
+  if (perFile === null) return null;
+
+  const out = new Map<string, KeyIdentifier[]>();
+  for (const [path, { removed }] of perFile.entries()) {
+    if (removed.length > 0) {
+      out.set(path, removed);
+    }
+  }
+  return out;
 }
 
 /**
@@ -489,6 +701,20 @@ export function getManifestForFinalize(
     return null;
   }
 
+  return Object.fromEntries(perFile);
+}
+
+/**
+ * Returns null when the diff failed (caller should omit the wire field).
+ * Returns {} when diff succeeded with no removals.
+ */
+export function getRemovedKeysManifestForFinalize(
+  sourceFiles: TranslationFile[],
+  config: ProjectConfig,
+  verbose: boolean
+): Record<string, KeyIdentifier[]> | null {
+  const perFile = getRemovedKeysPerFile(sourceFiles, config, verbose);
+  if (perFile === null) return null;
   return Object.fromEntries(perFile);
 }
 

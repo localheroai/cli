@@ -175,6 +175,10 @@ export interface FinalizeParams {
   projectId: string;
   jobGroupId: string;
   prKeyManifest: Record<string, KeyIdentifier[]>;
+  // null/undefined => omitted from the wire (diff failed).
+  // {} => no removals this push.
+  // populated => removals to reconcile.
+  removedKeyManifest?: Record<string, KeyIdentifier[]> | null;
   commitSha?: string;
   branch?: string;
 }
@@ -183,18 +187,24 @@ export async function finalizeTranslationJobs(params: FinalizeParams): Promise<v
   const apiKey = await getApiKey();
   const apiHost = getApiHost();
 
+  const body: Record<string, unknown> = {
+    job_group_id: params.jobGroupId,
+    pr_key_manifest: params.prKeyManifest,
+    commit_sha: params.commitSha || null,
+    ...(params.branch && { branch: params.branch })
+  };
+
+  if (params.removedKeyManifest !== undefined && params.removedKeyManifest !== null) {
+    body.removed_key_manifest = params.removedKeyManifest;
+  }
+
   const response = await fetch(`${apiHost}/api/v1/projects/${params.projectId}/translation_jobs/finalize`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`
     },
-    body: JSON.stringify({
-      job_group_id: params.jobGroupId,
-      pr_key_manifest: params.prKeyManifest,
-      commit_sha: params.commitSha || null,
-      ...(params.branch && { branch: params.branch })
-    })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
