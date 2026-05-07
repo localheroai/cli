@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.49] - 2026-05-07
+
+### Added
+- `translate --changed-only` now sends a manifest of source-language keys removed in the PR diff. The Localhero server soft-deletes those keys on PR merge (preserving an audit trail) and restores them automatically when the PR closes without merging. 
+- `translationFiles.baseBranch` config option. Tells `ci` which branch counts as the project's default for `--changed-only` detection. Lets repos using `develop`, `production`, or any other non-`main`/`master` default behave correctly.
+
+### Changed
+- `ci` now warns when `GITHUB_REF_NAME` is unset (running outside CI or in a misconfigured runner) and falls back to a full translation rather than acting on an empty branch name.
+
+## [0.0.47] - 2026-04-28
+
+### Fixed
+- `--changed-only` now compares against the merge-base of the base branch and `HEAD` (i.e. `git diff base...HEAD`), not the base branch tip. Fixes a long-running-branch case where commits made on `main` after the branch point were attributed to the feature branch.
+
 ## [0.0.46] - 2026-04-27
 
 ### Added
