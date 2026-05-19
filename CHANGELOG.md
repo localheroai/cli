@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.50] - 2026-05-20
+
+### Fixed
+- YAML files keep their original formatting when the CLI edits them. Only the keys we actually change get rewritten; everything else, including multi-line plain scalars and the layout of untouched keys, stays byte-identical.
+- `--changed-only` no longer over-translates. A new key with a name that happens to also exist in another file (e.g. `subject`) only triggers translation in the file where it actually changed, not in every sibling file that has the same bare key.
+- Multi-language files now translate correctly on first use. The CLI tells the server when a file is multi-language so the server creates the right kind of `TranslationFile` record up front.
+
+### Changed
+- Signed-commit sync runs stack a follow-up commit instead of amending the bot's previous commit, so the audit trail and signature chain stay intact.
+
 ## [0.0.49] - 2026-05-07
 
 ### Added
