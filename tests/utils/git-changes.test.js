@@ -692,6 +692,292 @@ msgstr[1] "Delete items"
 
       expect(result).toEqual({});
     });
+
+    // Regression: previously, getChangedKeys collected bare key names into a
+    // global Set<string>. filterMissing then checked that set without file
+    // scope, so a key like `subject` introduced in file A would falsely match
+    // a pre-existing missing `subject` translation in unrelated file B.
+    // This is common in repos where each file uses its own top-level keys
+    // (e.g. each email template has its own `subject` / `headline` / `body`),
+    // causing a single new file to drag many unrelated files into the
+    // translation pass.
+    it('does NOT match missing keys in a file whose source did not change, even when another file has the same bare key', () => {
+      const multiSourceFiles = [
+        { path: 'emails/welcome.yml', format: 'yml', locale: 'en' },
+        { path: 'emails/reminder.yml', format: 'yml', locale: 'en' }
+      ];
+
+      const welcomeOld = `en:
+  subject: Welcome
+  body: Hi
+`;
+      const welcomeNew = welcomeOld;
+
+      const reminderNew = `en:
+  subject: Reminder
+  body: Hey
+`;
+
+      setupGitMock({
+        showByPath: {
+          'emails/welcome.yml': welcomeOld,
+          'emails/reminder.yml': null
+        }
+      });
+
+      mockReadFileSync.mockImplementation((p) => {
+        if (p.endsWith('emails/welcome.yml')) return welcomeNew;
+        if (p.endsWith('emails/reminder.yml')) return reminderNew;
+        throw new Error(`Unexpected readFileSync path: ${p}`);
+      });
+
+      const missing = {
+        'fr:emails/welcome.yml': {
+          locale: 'fr',
+          path: 'emails/welcome.yml',
+          targetPath: 'emails/welcome.yml',
+          keys: {
+            subject: { value: 'Welcome', sourceKey: 'subject' },
+            body: { value: 'Hi', sourceKey: 'body' }
+          },
+          keyCount: 2
+        },
+        'fr:emails/reminder.yml': {
+          locale: 'fr',
+          path: 'emails/reminder.yml',
+          targetPath: 'emails/reminder.yml',
+          keys: {
+            subject: { value: 'Reminder', sourceKey: 'subject' },
+            body: { value: 'Hey', sourceKey: 'body' }
+          },
+          keyCount: 2
+        }
+      };
+
+      const result = filterByGitChanges(multiSourceFiles, missing, mockConfig, false);
+
+      expect(result['fr:emails/welcome.yml']).toBeUndefined();
+      expect(result['fr:emails/reminder.yml']).toBeDefined();
+      expect(result['fr:emails/reminder.yml'].keyCount).toBe(2);
+    });
+
+    it('scopes per-file: each file passes only its own changed keys', () => {
+      const multiSourceFiles = [
+        { path: 'locales/a.json', format: 'json', locale: 'en' },
+        { path: 'locales/b.json', format: 'json', locale: 'en' }
+      ];
+
+      const aOld = JSON.stringify({ shared: 'a-old' });
+      const aNew = JSON.stringify({ shared: 'a-new', foo: 'A foo' });
+
+      const bOld = JSON.stringify({ shared: 'b' });
+      const bNew = JSON.stringify({ shared: 'b', bar: 'B bar' });
+
+      setupGitMock({
+        showByPath: {
+          'locales/a.json': aOld,
+          'locales/b.json': bOld
+        }
+      });
+
+      mockReadFileSync.mockImplementation((p) => {
+        if (p.endsWith('locales/a.json')) return aNew;
+        if (p.endsWith('locales/b.json')) return bNew;
+        throw new Error(`Unexpected path: ${p}`);
+      });
+
+      // Both files have BOTH `foo` and `bar` "missing" in fr — the filter must
+      // give each file only the key actually added in THAT file.
+      const missing = {
+        'fr:locales/a.json': {
+          locale: 'fr',
+          path: 'locales/a.json',
+          targetPath: 'locales/a.fr.json',
+          keys: {
+            foo: { value: 'A foo', sourceKey: 'foo' },
+            bar: { value: 'B bar', sourceKey: 'bar' }
+          },
+          keyCount: 2
+        },
+        'fr:locales/b.json': {
+          locale: 'fr',
+          path: 'locales/b.json',
+          targetPath: 'locales/b.fr.json',
+          keys: {
+            foo: { value: 'A foo', sourceKey: 'foo' },
+            bar: { value: 'B bar', sourceKey: 'bar' }
+          },
+          keyCount: 2
+        }
+      };
+
+      const result = filterByGitChanges(multiSourceFiles, missing, mockConfig, false);
+
+      // a.json's filter set contains `shared` (value changed) and `foo` (new),
+      // but `shared` isn't in a.json's missing entries, so it's a no-op.
+      // `bar` is in a.json's missing entries but didn't change in a.json,
+      // so it must NOT pass.
+      expect(Object.keys(result['fr:locales/a.json'].keys).sort()).toEqual(['foo']);
+      expect(Object.keys(result['fr:locales/b.json'].keys).sort()).toEqual(['bar']);
+    });
+
+    it('plural variants pass when their base key changed in the SAME file', () => {
+      const sourceFiles = [
+        { path: 'locales/en.json', format: 'json', locale: 'en' }
+      ];
+
+      const oldContent = JSON.stringify({});
+      const newContent = JSON.stringify({ count: 'You have one' });
+
+      setupGitMock({
+        showByPath: { 'locales/en.json': oldContent }
+      });
+      mockReadFileSync.mockReturnValue(newContent);
+
+      const missing = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: {
+            count: { value: 'You have one', sourceKey: 'count' },
+            count__plural_1: { value: 'You have many', sourceKey: 'count' }
+          },
+          keyCount: 2
+        }
+      };
+
+      const result = filterByGitChanges(sourceFiles, missing, mockConfig, false);
+
+      expect(result['fr:locales/en.json'].keys.count).toBeDefined();
+      expect(result['fr:locales/en.json'].keys.count__plural_1).toBeDefined();
+      expect(result['fr:locales/en.json'].keyCount).toBe(2);
+    });
+
+    it('plural variants do NOT pass when the base key did not change in THAT file', () => {
+      const multiSourceFiles = [
+        { path: 'locales/a.json', format: 'json', locale: 'en' },
+        { path: 'locales/b.json', format: 'json', locale: 'en' }
+      ];
+
+      const aOld = JSON.stringify({});
+      const aNew = JSON.stringify({ count: 'A one' });
+
+      const bOld = JSON.stringify({ count: 'B one' });
+      const bNew = bOld;
+
+      setupGitMock({
+        showByPath: {
+          'locales/a.json': aOld,
+          'locales/b.json': bOld
+        }
+      });
+      mockReadFileSync.mockImplementation((p) => {
+        if (p.endsWith('locales/a.json')) return aNew;
+        if (p.endsWith('locales/b.json')) return bNew;
+        throw new Error(`Unexpected path: ${p}`);
+      });
+
+      // b has a missing plural for `count__plural_1` BUT the base `count` in
+      // b did not change. Only a's count plural should pass.
+      const missing = {
+        'fr:locales/a.json': {
+          locale: 'fr',
+          path: 'locales/a.json',
+          targetPath: 'locales/a.fr.json',
+          keys: {
+            count: { value: 'A one', sourceKey: 'count' },
+            count__plural_1: { value: 'A many', sourceKey: 'count' }
+          },
+          keyCount: 2
+        },
+        'fr:locales/b.json': {
+          locale: 'fr',
+          path: 'locales/b.json',
+          targetPath: 'locales/b.fr.json',
+          keys: {
+            count__plural_1: { value: 'B many', sourceKey: 'count' }
+          },
+          keyCount: 1
+        }
+      };
+
+      const result = filterByGitChanges(multiSourceFiles, missing, mockConfig, false);
+
+      expect(result['fr:locales/a.json']).toBeDefined();
+      expect(result['fr:locales/a.json'].keys.count).toBeDefined();
+      expect(result['fr:locales/a.json'].keys.count__plural_1).toBeDefined();
+      expect(result['fr:locales/b.json']).toBeUndefined();
+    });
+
+    it('multi-language source files with overlapping bare keys only translate files where the EN source actually changed', () => {
+      // Multi-language YAML where each email-template file holds en+sv
+      // blocks with its own top-level `subject` / `body` keys. Adding a
+      // brand-new file with the same key names must NOT cause sibling
+      // files to be flagged for translation.
+      const multiSourceFiles = [
+        { path: 'apps/email/welcome.yml', format: 'yml', locale: 'en' },
+        { path: 'apps/email/booking_reminder.yml', format: 'yml', locale: 'en' }
+      ];
+
+      const welcomeOld = `en:
+  subject: Welcome
+  body: Hi there
+sv:
+  subject: Välkommen
+  body: Hej
+`;
+      const welcomeNew = welcomeOld;
+
+      const reminderNew = `en:
+  subject: Booking reminder
+  body: Your viewing is tomorrow
+sv:
+  subject: ''
+  body: ''
+`;
+
+      setupGitMock({
+        showByPath: {
+          'apps/email/welcome.yml': welcomeOld,
+          'apps/email/booking_reminder.yml': null
+        }
+      });
+      mockReadFileSync.mockImplementation((p) => {
+        if (p.endsWith('welcome.yml')) return welcomeNew;
+        if (p.endsWith('booking_reminder.yml')) return reminderNew;
+        throw new Error(`Unexpected path: ${p}`);
+      });
+
+      const missing = {
+        'sv:apps/email/welcome.yml': {
+          locale: 'sv',
+          path: 'apps/email/welcome.yml',
+          targetPath: 'apps/email/welcome.yml',
+          keys: {
+            subject: { value: 'Welcome', sourceKey: 'subject' },
+            body: { value: 'Hi there', sourceKey: 'body' }
+          },
+          keyCount: 2
+        },
+        'sv:apps/email/booking_reminder.yml': {
+          locale: 'sv',
+          path: 'apps/email/booking_reminder.yml',
+          targetPath: 'apps/email/booking_reminder.yml',
+          keys: {
+            subject: { value: 'Booking reminder', sourceKey: 'subject' },
+            body: { value: 'Your viewing is tomorrow', sourceKey: 'body' }
+          },
+          keyCount: 2
+        }
+      };
+
+      const result = filterByGitChanges(multiSourceFiles, missing, mockConfig, false);
+
+      expect(result['sv:apps/email/welcome.yml']).toBeUndefined();
+      expect(result['sv:apps/email/booking_reminder.yml']).toBeDefined();
+      expect(result['sv:apps/email/booking_reminder.yml'].keyCount).toBe(2);
+    });
   });
 
   describe('file filtering', () => {

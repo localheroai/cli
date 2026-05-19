@@ -112,17 +112,22 @@ export function filterByGitChanges(
       return null;
     }
 
-    // Get changed keys from source files
-    const changedKeys = getChangedKeys(sourceFiles, baseBranch, verbose);
+    // Get changed keys from source files (per-file scoped)
+    const changedKeysByFile = getChangedKeys(sourceFiles, baseBranch, verbose);
 
-    if (changedKeys === null) {
+    if (changedKeysByFile === null) {
       if (verbose) {
         console.log(chalk.yellow('Could not determine changed keys (limit exceeded or error)'));
       }
       return null;
     }
 
-    if (changedKeys.size === 0) {
+    let totalChangedKeys = 0;
+    for (const keys of changedKeysByFile.values()) {
+      totalChangedKeys += keys.size;
+    }
+
+    if (totalChangedKeys === 0) {
       if (verbose) {
         console.log(chalk.dim('No changes detected in source files'));
       }
@@ -130,20 +135,25 @@ export function filterByGitChanges(
     }
 
     if (verbose) {
-      console.log(chalk.blue(`Found ${changedKeys.size} changed key${changedKeys.size === 1 ? '' : 's'}:`));
+      console.log(chalk.blue(`Found ${totalChangedKeys} changed key${totalChangedKeys === 1 ? '' : 's'}:`));
 
-      const keysArray = Array.from(changedKeys);
-      const displayKeys = keysArray.slice(0, 10);
+      const flatKeys: string[] = [];
+      for (const [filePath, keys] of changedKeysByFile.entries()) {
+        for (const key of keys) {
+          flatKeys.push(`${filePath}:${key}`);
+        }
+      }
+      const displayKeys = flatKeys.slice(0, 10);
 
       displayKeys.forEach(key => {
         console.log(chalk.dim(`  - ${key}`));
       });
-      if (keysArray.length > 10) {
-        console.log(chalk.dim(`  ... and ${keysArray.length - 10} more`));
+      if (flatKeys.length > 10) {
+        console.log(chalk.dim(`  ... and ${flatKeys.length - 10} more`));
       }
     }
 
-    return filterMissing(missingByLocale, changedKeys);
+    return filterMissing(missingByLocale, changedKeysByFile);
   } catch (error) {
     if (verbose) {
       const err = error as Error;
@@ -203,7 +213,21 @@ export function getChangedKeysForProject(
     return null;
   }
 
-  return getChangedKeys(sourceFiles, baseBranch, verbose);
+  const perFile = getChangedKeys(sourceFiles, baseBranch, verbose);
+  if (perFile === null) return null;
+
+  // `pull --changed-only` filters target-file updates by bare key name,
+  // so we flatten the per-file map. The cross-file false-positive bug
+  // this avoids in `translate` doesn't apply here: `pull` is filtering
+  // already-translated payloads coming back from the server, not
+  // deciding which source files to send for translation.
+  const flat = new Set<string>();
+  for (const keys of perFile.values()) {
+    for (const key of keys) {
+      flat.add(key);
+    }
+  }
+  return flat;
 }
 
 /**
@@ -344,17 +368,26 @@ function diffFileKeys(
  * Get all changed keys from source files using object-based diff.
  * Compares parsed and flattened objects from base branch vs current working directory.
  */
+/**
+ * Returns a Map of source file path -> Set of keys changed in THAT file.
+ *
+ * Per-file scoping is critical: many repos have files that share top-level
+ * key names (e.g. each email template has its own `subject`, `body`). A
+ * flat global Set would cause a new key in one file to falsely match
+ * missing translations of the same bare name in unrelated files.
+ */
 function getChangedKeys(
   sourceFiles: TranslationFile[],
   baseBranch: string,
   verbose: boolean
-): Set<string> | null {
+): Map<string, Set<string>> | null {
   const resolvedRef = resolveCompareRef(baseBranch, verbose);
   if (!resolvedRef) {
     return null;
   }
 
-  const allChangedKeys = new Set<string>();
+  const changedKeysByFile = new Map<string, Set<string>>();
+  let totalChangedKeys = 0;
   const MAX_CHANGED_KEYS = 10000;
 
   for (const file of sourceFiles) {
@@ -365,23 +398,29 @@ function getChangedKeys(
       const { oldFlat, newFlat } = diff;
       const fileChangedKeys: string[] = [];
       let totalChangedInFile = 0;
+      const perFileSet = new Set<string>();
 
       for (const [key, value] of Object.entries(newFlat)) {
         if (!(key in oldFlat) || oldFlat[key] !== value) {
-          if (allChangedKeys.size >= MAX_CHANGED_KEYS) {
+          if (totalChangedKeys >= MAX_CHANGED_KEYS) {
             if (verbose) {
               console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
             }
             return null;
           }
 
-          allChangedKeys.add(key);
+          perFileSet.add(key);
+          totalChangedKeys++;
           totalChangedInFile++;
 
           if (verbose && fileChangedKeys.length < 5) {
             fileChangedKeys.push(key);
           }
         }
+      }
+
+      if (perFileSet.size > 0) {
+        changedKeysByFile.set(file.path, perFileSet);
       }
 
       if (verbose && totalChangedInFile > 0) {
@@ -402,7 +441,7 @@ function getChangedKeys(
     }
   }
 
-  return allChangedKeys;
+  return changedKeysByFile;
 }
 
 export interface PerFileDiff {
@@ -719,35 +758,49 @@ export function getRemovedKeysManifestForFinalize(
 }
 
 /**
- * Filter missing translations by changed keys
+ * Filter missing translations by changed keys, scoped per source file.
  *
- * For plural forms, if ANY variant changed, include ALL variants for the target language.
- * This handles cases where source and target languages have different plural form counts.
+ * The scoping is critical: a flat (file-agnostic) match would let a key
+ * introduced in file A falsely pull missing translations of the same bare
+ * name from unrelated file B. Many repos legitimately use the same
+ * top-level key names across files (e.g. each email template has its own
+ * `subject` / `body`), so cross-file matching is incorrect.
+ *
+ * For plural forms, if ANY variant of a base key changed IN THE SAME
+ * SOURCE FILE, include ALL variants for the target language. This handles
+ * cases where source and target languages have different plural form
+ * counts, without leaking across files.
  */
 function filterMissing(
   missingByLocale: Record<string, MissingLocaleEntry>,
-  changedKeys: Set<string>
+  changedKeysByFile: Map<string, Set<string>>
 ): Record<string, MissingLocaleEntry> {
   const filtered: Record<string, MissingLocaleEntry> = {};
 
-  // Extract base keys from plural forms in changedKeys
-  // E.g., "key__plural_1" -> "key"
-  const baseChangedKeys = extractBaseKeys(changedKeys);
+  // Pre-compute the base-key set (plural-stripped) per file. Cheap, and
+  // keeps the inner loop free of repeated regex work.
+  const baseChangedKeysByFile = new Map<string, Set<string>>();
+  for (const [filePath, keys] of changedKeysByFile.entries()) {
+    baseChangedKeysByFile.set(filePath, extractBaseKeys(keys));
+  }
 
   for (const [localeKey, entry] of Object.entries(missingByLocale)) {
+    const changedKeysForThisFile = changedKeysByFile.get(entry.path);
+    if (!changedKeysForThisFile) continue;
+
+    const baseChangedKeysForThisFile = baseChangedKeysByFile.get(entry.path) ?? new Set<string>();
+
     const filteredKeys: Record<string, any> = {};
     let count = 0;
 
     for (const [key, details] of Object.entries(entry.keys)) {
-      if (changedKeys.has(key)) {
+      if (changedKeysForThisFile.has(key)) {
         filteredKeys[key] = details;
         count++;
       } else {
-        // For plural forms, check if base key changed
+        // Plural variant: include only if base key changed IN THIS FILE.
         const baseKey = key.replace(PLURAL_SUFFIX_REGEX, '');
-        if (baseKey !== key && baseChangedKeys.has(baseKey)) {
-          // This is a plural variant of a changed key - include it
-          // even if the source language doesn't have this many plural forms
+        if (baseKey !== key && baseChangedKeysForThisFile.has(baseKey)) {
           filteredKeys[key] = details;
           count++;
         }
