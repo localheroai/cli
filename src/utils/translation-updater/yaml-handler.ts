@@ -1,6 +1,11 @@
 import { promises as fs } from 'fs';
 import yaml from 'yaml';
 import { SPECIAL_CHARS_REGEX, INTERPOLATION, fileExists, tryParseJsonArray } from './common.js';
+import {
+  spliceYamlUpdate,
+  spliceYamlDelete,
+  hasUnsupportedValueShape
+} from './yaml-splicer.js';
 
 interface YamlOptions {
   indent: number;
@@ -8,7 +13,6 @@ interface YamlOptions {
   lineWidth?: number;
 }
 
-// Define more specific types for YAML nodes
 type YamlMap = yaml.YAMLMap;
 type YamlNode = yaml.Node | yaml.YAMLMap | yaml.YAMLSeq | yaml.Scalar;
 type YamlScalar = yaml.Scalar;
@@ -26,7 +30,7 @@ interface UpdateResult {
 }
 
 const NEEDS_QUOTES_REGEX = /[:,%{}[\]|><!&*?-]/;
-const LINE_WIDTH = 0; // Disable line wrapping to preserve original formatting
+const LINE_WIDTH = 0;
 
 function detectYamlOptions(content: string): YamlOptions {
   const lines = content
@@ -73,8 +77,6 @@ function needsQuotes(str: unknown): boolean {
 function shouldForceQuotes(str: unknown): boolean {
   if (typeof str !== 'string') return false;
 
-  // Special case: strings containing quotes but no interpolation
-  // don't need outer quotes
   if (str.includes('"') && !str.includes(INTERPOLATION)) {
     return false;
   }
@@ -154,7 +156,6 @@ async function updateYamlTranslations(
       }
       const nextNode = current.get(key);
       if (!yaml.isMap(nextNode)) {
-        // If the existing node is not a mapping, replace it with an empty mapping
         const newNode = yamlDoc.createNode({}) as YamlMap;
         current.set(key, newNode);
         current = newNode;
@@ -203,18 +204,53 @@ export async function updateYamlFile(
   translations: Record<string, unknown>,
   languageCode: string
 ): Promise<UpdateResult> {
-  const { doc: yamlDoc, created, options } = await createYamlDocument(filePath);
+  const exists = await fileExists(filePath);
 
-  await updateYamlTranslations(yamlDoc, translations, languageCode);
+  if (!exists) {
+    const { doc: yamlDoc, created, options } = await createYamlDocument(filePath);
+    await updateYamlTranslations(yamlDoc, translations, languageCode);
+    await fs.writeFile(filePath, yamlDoc.toString({
+      indent: options.indent,
+      indentSeq: options.indentSeq,
+      lineWidth: LINE_WIDTH
+    }));
+    return {
+      updatedKeys: Object.keys(translations),
+      created
+    };
+  }
 
-  await fs.writeFile(filePath, yamlDoc.toString({
+  const source = await fs.readFile(filePath, 'utf8');
+  const options = detectYamlOptions(source);
+  const doc = yaml.parseDocument(source);
+  clearDuplicateKeyErrors(doc, filePath);
+
+  if (Object.keys(translations).length === 0) {
+    return { updatedKeys: [], created: false };
+  }
+
+  const canSplice = !hasUnsupportedValueShape(translations) && doc.contents && yaml.isMap(doc.contents);
+
+  if (canSplice) {
+    const { output, applied } = spliceYamlUpdate(source, doc, translations, languageCode, options.indent);
+    if (applied) {
+      await fs.writeFile(filePath, output);
+      return {
+        updatedKeys: Object.keys(translations),
+        created: false
+      };
+    }
+  }
+
+  await updateYamlTranslations(doc, translations, languageCode);
+  await fs.writeFile(filePath, doc.toString({
     indent: options.indent,
     indentSeq: options.indentSeq,
     lineWidth: LINE_WIDTH
   }));
   return {
     updatedKeys: Object.keys(translations),
-    created
+    created: false
   };
 }
 
@@ -224,55 +260,14 @@ export async function deleteKeysFromYamlFile(
   languageCode: string
 ): Promise<string[]> {
   try {
-    const content = await fs.readFile(filePath, 'utf8');
-    const yamlDoc = yaml.parseDocument(content);
-    clearDuplicateKeyErrors(yamlDoc, filePath);
-    const contents = yamlDoc.contents as YamlMap | null;
+    const source = await fs.readFile(filePath, 'utf8');
+    const doc = yaml.parseDocument(source);
+    clearDuplicateKeyErrors(doc, filePath);
 
-    if (!contents || !contents.has(languageCode)) {
-      return [];
+    const { output, deletedKeys } = spliceYamlDelete(source, doc, keysToDelete, languageCode);
+    if (deletedKeys.length > 0) {
+      await fs.writeFile(filePath, output);
     }
-
-    const langNode = contents.get(languageCode) as YamlMap;
-    const deletedKeys: string[] = [];
-
-    for (const keyPath of keysToDelete) {
-      const keys = keyPath.split('.');
-      const lastIndex = keys.length - 1;
-      let current = langNode as YamlMap;
-      let parent: YamlMap | null = null;
-      let keyInParent = '';
-      let found = true;
-
-      for (let i = 0; i < lastIndex; i++) {
-        const key = keys[i];
-        if (!current.has(key)) {
-          found = false;
-          break;
-        }
-        parent = current;
-        keyInParent = key;
-        current = current.get(key) as YamlMap;
-      }
-
-      if (found) {
-        const lastKey = keys[lastIndex];
-        if (current.has(lastKey)) {
-          current.delete(lastKey);
-          deletedKeys.push(keyPath);
-          if (parent && current.items.length === 0) {
-            parent.delete(keyInParent);
-          }
-        }
-      }
-    }
-
-    const options = detectYamlOptions(content);
-    await fs.writeFile(filePath, yamlDoc.toString({
-      indent: options.indent,
-      indentSeq: options.indentSeq,
-      lineWidth: LINE_WIDTH
-    }));
     return deletedKeys;
   } catch (error) {
     throw new Error(`Failed to delete keys from YAML file ${filePath}: ${error instanceof Error ? error.message : String(error)}`);

@@ -2,6 +2,7 @@ import { jest } from '@jest/globals';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import yaml from 'yaml';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from '../../src/utils/translation-updater/index.js';
 
 describe('translation-updater', () => {
@@ -505,6 +506,412 @@ en:
         expect(content).toContain('First line');
         expect(content).toContain('Second line');
         expect(content).toContain('content: Regular content');
+      });
+    });
+
+    describe('multi-line plain scalar preservation', () => {
+      it('does not reformat multi-line plain scalars in untouched locales when adding a key to one locale', async () => {
+        const filePath = path.join(tempDir, 'booking_reminder.yml');
+        const initialContent = `---
+en:
+  subject: Before your viewing with %{tenant_name}
+  headline: Before your viewing
+  description:
+    A quick note ahead of the viewing at %{address} with %{tenant_name}.
+    Here are the details you'll need.
+  note:
+    Please arrive a few minutes early. If anything changes, let us know
+    via the conversation thread linked below.
+  button: Open conversation
+sv:
+  subject: Inför visningen med %{tenant_name}
+  headline: Inför visningen
+  description:
+    En liten påminnelse inför visningen på %{address} med %{tenant_name}.
+    Här är detaljerna du behöver.
+  note:
+    Var där några minuter i förväg. Om något ändras, hör av dig
+    via konversationen länkad nedan.
+  button: Öppna konversation
+nb:
+  subject: Før visningen med %{tenant_name}
+  headline: Før visningen
+  description:
+    En liten påminnelse før visningen på %{address} med %{tenant_name}.
+    Her er detaljene du trenger.
+  note:
+    Vær der noen minutter i forveien. Hvis noe endrer seg, gi oss beskjed
+    via samtalen lenket nedenfor.
+  button: Åpne samtale
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'subject': 'Ennen näyttöä vuokralaisen %{tenant_name} kanssa'
+        }, 'fi');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        const enBlock = updated.split(/^sv:/m)[0];
+
+        expect(enBlock).toContain('  description:\n');
+        expect(enBlock).toContain('    A quick note ahead of the viewing');
+        expect(enBlock).toContain('    Here are the details');
+
+        expect(enBlock).toContain('  note:\n');
+        expect(enBlock).toContain('    Please arrive a few minutes early');
+        expect(enBlock).toContain('    via the conversation thread linked below');
+
+        const enDescriptionAsOneLine = /  description: A quick note ahead of the viewing at %\{address\} with %\{tenant_name\}\. Here are the details/;
+        expect(updated).not.toMatch(enDescriptionAsOneLine);
+
+        expect(updated).toContain('fi:');
+        expect(updated).toMatch(/subject:\s+"?Ennen näyttöä vuokralaisen %\{tenant_name\} kanssa"?/);
+      });
+
+      it('does not collapse a multi-line plain scalar that lives in the SAME locale as the key being added', async () => {
+        const filePath = path.join(tempDir, 'tenant_ended.yml');
+        const initialContent = `---
+en:
+  subject: End of lease
+  description:
+    Your rental period for %{home_address} has now ended. If you have paid
+    us a security deposit, we will repay you the money as soon as we have received
+    approval from your landlord.
+  button: Add bank account details
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'headline': 'End of lease'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        expect(updated).toContain('  description:\n');
+        expect(updated).toContain('    Your rental period for %{home_address} has now ended');
+        expect(updated).toContain('    us a security deposit');
+        expect(updated).toContain('    approval from your landlord');
+
+        const descriptionAsOneLine = /  description: Your rental period for %\{home_address\} has now ended\. If you have paid us a security deposit/;
+        expect(updated).not.toMatch(descriptionAsOneLine);
+
+        expect(updated).toContain('headline: End of lease');
+      });
+
+      it('does not reformat ANY untouched multi-line plain scalars when adding one new key', async () => {
+        const filePath = path.join(tempDir, 'multi.yml');
+        const initialContent = `---
+en:
+  one:
+    Multi-line plain one continues
+    onto a second line here.
+  two:
+    Multi-line plain two also continues
+    onto a second line here.
+  three:
+    Multi-line plain three continues
+    onto a second line here too.
+  short: short value
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'four': 'a brand new key value'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        const originalLines = initialContent.split('\n').filter(l => l.trim());
+        const updatedLines = updated.split('\n').filter(l => l.trim());
+
+        for (const original of originalLines) {
+          expect(updatedLines).toContain(original);
+        }
+
+        expect(updated).toContain('four: a brand new key value');
+      });
+
+      it('produces byte-identical output when no changes are requested', async () => {
+        const filePath = path.join(tempDir, 'roundtrip.yml');
+        const initialContent = `---
+en:
+  subject: Before your viewing with %{tenant_name}
+  description:
+    A quick note ahead of the viewing at %{address}.
+    Here are the details you'll need.
+  body: |
+    Line one of literal block.
+    Line two of literal block.
+  folded: >
+    Folded scalar that spans
+    multiple lines.
+  quoted_double: "Hello, %{name}!"
+  quoted_single: 'It''s a test'
+  nested:
+    deeply:
+      value: leaf
+  array:
+    - one
+    - two
+sv:
+  subject: Inför visningen
+  body: |
+    Rad ett.
+    Rad två.
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {}, 'en');
+
+        const after = fs.readFileSync(filePath, 'utf8');
+        expect(after).toBe(initialContent);
+      });
+
+      it('handles deeply nested key insertion', async () => {
+        const filePath = path.join(tempDir, 'deep.yml');
+        const initialContent = `---
+en:
+  app: TaskFlow
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'section.subsection.deeply.nested.key': 'deep value'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        expect(updated).toContain('  app: TaskFlow');
+        expect(updated).toMatch(/  section:\n {4}subsection:\n {6}deeply:\n {8}nested:\n {10}key: deep value/);
+      });
+
+      it('preserves a file without a trailing newline', async () => {
+        const filePath = path.join(tempDir, 'no-trailing.yml');
+        const initialContent = `en:\n  subject: Hello`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'greeting': 'Welcome'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        expect(updated).toContain('  subject: Hello');
+        expect(updated).toContain('  greeting: Welcome');
+      });
+
+      it('overwriting a map-valued key with a scalar falls back without corrupting the file', async () => {
+        const filePath = path.join(tempDir, 'collision.yml');
+        const initialContent = `en:
+  buttons:
+    submit: Submit
+  other: stays
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, { buttons: 'Press me' }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        const buttonsOccurrences = (updated.match(/^ {2}buttons:/gm) || []).length;
+        expect(buttonsOccurrences).toBe(1);
+        expect(updated).toContain('other: stays');
+      });
+
+      it('replacing an existing block literal scalar produces valid YAML', async () => {
+        const filePath = path.join(tempDir, 'block-replace.yml');
+        const initialContent = `en:
+  description: |
+    Line one
+    Line two
+  other: stays
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          description: 'New line one\nNew line two'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        expect(updated).toMatch(/description:\s*\|/);
+        expect(updated).toContain('New line one');
+        expect(updated).toContain('New line two');
+        expect(updated).toContain('other: stays');
+
+        const parsed = yaml.parse(updated);
+        expect(parsed.en.description).toContain('New line one');
+        expect(parsed.en.description).toContain('New line two');
+        expect(parsed.en.other).toBe('stays');
+      });
+
+      it('inserting multiple keys under a missing locale produces a single merged block', async () => {
+        const filePath = path.join(tempDir, 'new-locale.yml');
+        const initialContent = `en:
+  subject: Hello
+  headline: Title
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          subject: 'Hej',
+          headline: 'Rubrik'
+        }, 'sv');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const svBlockCount = (updated.match(/^sv:/gm) || []).length;
+        expect(svBlockCount).toBe(1);
+
+        const parsed = yaml.parse(updated);
+        expect(parsed.sv.subject).toBe('Hej');
+        expect(parsed.sv.headline).toBe('Rubrik');
+      });
+
+      it('inserting multiple keys under a missing nested section produces a single merged block', async () => {
+        const filePath = path.join(tempDir, 'new-section.yml');
+        const initialContent = `en:
+  existing: ok
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'section.first': 'A',
+          'section.second': 'B'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const sectionBlockCount = (updated.match(/^ {2}section:/gm) || []).length;
+        expect(sectionBlockCount).toBe(1);
+
+        const parsed = yaml.parse(updated);
+        expect(parsed.en.section.first).toBe('A');
+        expect(parsed.en.section.second).toBe('B');
+      });
+
+      it('quotes string values that YAML would otherwise re-parse as non-strings', async () => {
+        const filePath = path.join(tempDir, 'type-safe.yml');
+        const initialContent = `en:
+  existing: ok
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          numeric: '123',
+          truthy: 'true',
+          nully: 'null',
+          empty: ''
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+        expect(parsed.en.numeric).toBe('123');
+        expect(parsed.en.truthy).toBe('true');
+        expect(parsed.en.nully).toBe('null');
+        expect(parsed.en.empty).toBe('');
+      });
+
+      it('updating an existing key with a string that looks numeric preserves string type', async () => {
+        const filePath = path.join(tempDir, 'numeric-update.yml');
+        const initialContent = `en:
+  zip_code: "12345"
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, { zip_code: '99999' }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+        expect(parsed.en.zip_code).toBe('99999');
+        expect(typeof parsed.en.zip_code).toBe('string');
+      });
+
+      it('replacing a single-line scalar with a multi-line value indents continuation lines correctly', async () => {
+        const filePath = path.join(tempDir, 'multiline-indent.yml');
+        const initialContent = `en:
+  desc: short
+  other: keep
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          desc: 'long\nmulti\nline'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+        expect(parsed.en.desc).toBe('long\nmulti\nline');
+        expect(parsed.en.other).toBe('keep');
+
+        const lines = updated.split('\n');
+        const continuationLines = lines.filter(l => /^ +(long|multi|line)$/.test(l));
+        expect(continuationLines.length).toBe(3);
+        for (const line of continuationLines) {
+          const leadingSpaces = line.match(/^ +/)[0].length;
+          expect(leadingSpaces).toBe(4);
+        }
+      });
+    });
+
+    describe('multi-key deletion safety', () => {
+      it('deleting all children of a nested map removes the parent without losing siblings', async () => {
+        const filePath = path.join(tempDir, 'multi-delete.yml');
+        const initialContent = `en:
+  section:
+    first: A
+    second: B
+  keep: ok
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await deleteKeysFromTranslationFile(filePath, ['section.first', 'section.second'], 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+
+        expect(parsed.en.section).toBeUndefined();
+        expect(parsed.en.keep).toBe('ok');
+      });
+
+      it('deleting two siblings of a nested map preserves remaining children', async () => {
+        const filePath = path.join(tempDir, 'partial-delete.yml');
+        const initialContent = `en:
+  section:
+    first: A
+    second: B
+    survivor: keep
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await deleteKeysFromTranslationFile(filePath, ['section.first', 'section.second'], 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+
+        expect(parsed.en.section.first).toBeUndefined();
+        expect(parsed.en.section.second).toBeUndefined();
+        expect(parsed.en.section.survivor).toBe('keep');
+      });
+
+      it('deleting non-adjacent sibling keys preserves keys between them', async () => {
+        const filePath = path.join(tempDir, 'non-adjacent-delete.yml');
+        const initialContent = `en:
+  a: 1
+  b: 2
+  c: 3
+  d: 4
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await deleteKeysFromTranslationFile(filePath, ['a', 'c'], 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(updated);
+
+        expect(parsed.en.a).toBeUndefined();
+        expect(parsed.en.b).toBe(2);
+        expect(parsed.en.c).toBeUndefined();
+        expect(parsed.en.d).toBe(4);
       });
     });
 

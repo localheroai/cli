@@ -165,7 +165,7 @@ describe('git-changes module (object-based diff)', () => {
 
   // Regression: comparing against the base branch tip instead of the merge-base
   // attributed develop's progress to the user's branch and triggered spurious
-  // translations on long-lived branches (Qasa 2026-04-27).
+  // translations on long-lived branches.
   describe('merge-base comparison', () => {
     it('compares against merge-base SHA instead of base ref tip', () => {
       const oldContent = JSON.stringify({ user: { other: 'Other' } });
