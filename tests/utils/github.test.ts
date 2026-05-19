@@ -654,11 +654,7 @@ describe('githubService', () => {
     it('uses GraphQL path when github.signedCommits is true', async () => {
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockReadFile.mockResolvedValue(Buffer.from('sv:\n  hello: hej'));
-      mockFetchBranchHead.mockResolvedValue({
-        sha: 'a'.repeat(40),
-        parentSha: 'b'.repeat(40),
-        authorEmail: 'developer@example.com'
-      });
+      mockFetchBranchHead.mockResolvedValue({ sha: 'a'.repeat(40) });
       mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
 
       await githubService.autoCommitSyncChanges(
@@ -679,39 +675,6 @@ describe('githubService', () => {
       expect(mockConsole.log).toHaveBeenCalledWith('✓ Signed commit created and pushed to GitHub\n');
     });
 
-    it('uses parent SHA as expectedHeadOid when amending LocalHero bot commit', async () => {
-      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-      mockReadFile.mockResolvedValue(Buffer.from('content'));
-      mockFetchBranchHead.mockResolvedValue({
-        sha: 'a'.repeat(40),
-        parentSha: 'b'.repeat(40),
-        authorEmail: '233842311+localhero-ai[bot]@users.noreply.github.com'
-      });
-      mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
-
-      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
-
-      const call = mockCreateSignedCommit.mock.calls[0][0] as any;
-      expect(call.expectedHeadOid).toBe('b'.repeat(40));
-      expect(mockConsole.log).toHaveBeenCalledWith('✓ Commit amended and pushed to GitHub (signed)\n');
-    });
-
-    it('does not amend when the last commit is not by LocalHero bot', async () => {
-      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-      mockReadFile.mockResolvedValue(Buffer.from('content'));
-      mockFetchBranchHead.mockResolvedValue({
-        sha: 'a'.repeat(40),
-        parentSha: 'b'.repeat(40),
-        authorEmail: 'human@example.com'
-      });
-      mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
-
-      await githubService.autoCommitSyncChanges(['locales/sv.yml']);
-
-      const call = mockCreateSignedCommit.mock.calls[0][0] as any;
-      expect(call.expectedHeadOid).toBe('a'.repeat(40));
-    });
-
     it('skips commit when no files exist on disk', async () => {
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockExistsSync.mockReturnValue(false);
@@ -727,8 +690,8 @@ describe('githubService', () => {
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockReadFile.mockResolvedValue(Buffer.from('content'));
       mockFetchBranchHead
-        .mockResolvedValueOnce({ sha: 'a'.repeat(40), parentSha: 'b'.repeat(40), authorEmail: null })
-        .mockResolvedValueOnce({ sha: 'd'.repeat(40), parentSha: 'b'.repeat(40), authorEmail: null });
+        .mockResolvedValueOnce({ sha: 'a'.repeat(40) })
+        .mockResolvedValueOnce({ sha: 'd'.repeat(40) });
 
       // Import the error class lazily to avoid top-level imports in test file
       const { StaleHeadError } = await import('../../src/utils/github-graphql.js');
@@ -786,11 +749,7 @@ describe('githubService', () => {
           return Buffer.from('');
         });
         mockReadFile.mockResolvedValue(Buffer.from('content'));
-        mockFetchBranchHead.mockResolvedValue({
-          sha: 'a'.repeat(40),
-          parentSha: 'b'.repeat(40),
-          authorEmail: null
-        });
+        mockFetchBranchHead.mockResolvedValue({ sha: 'a'.repeat(40) });
         mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
 
         await githubService.autoCommitChanges('locales/', {
@@ -820,11 +779,7 @@ describe('githubService', () => {
           return Buffer.from('');
         });
         mockReadFile.mockResolvedValue(Buffer.from('content'));
-        mockFetchBranchHead.mockResolvedValue({
-          sha: 'a'.repeat(40),
-          parentSha: 'b'.repeat(40),
-          authorEmail: null
-        });
+        mockFetchBranchHead.mockResolvedValue({ sha: 'a'.repeat(40) });
         mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
 
         await githubService.autoCommitChanges('locales/');

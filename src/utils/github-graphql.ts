@@ -131,14 +131,11 @@ export async function createSignedCommit(
 
 export interface BranchHead {
   sha: string;
-  parentSha: string | null;
-  authorEmail: string | null;
 }
 
 /**
- * Fetch the current HEAD of a branch via the REST API. Returns the SHA, the
- * parent SHA (for amend semantics), and the author email (to detect whether
- * the last commit was made by the LocalHero bot).
+ * Fetch the current HEAD SHA of a branch via the REST API. Used as the
+ * `expectedHeadOid` precondition for `createCommitOnBranch`.
  */
 export async function fetchBranchHead(
   repositoryNameWithOwner: string,
@@ -165,27 +162,5 @@ export async function fetchBranchHead(
     throw new GitHubGraphQLError(`Branch ${branchName} has no head SHA`);
   }
 
-  const commitUrl = `https://api.github.com/repos/${repositoryNameWithOwner}/commits/${sha}`;
-  const commitResponse = await deps.fetch(commitUrl, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'localhero-cli'
-    }
-  });
-
-  if (!commitResponse.ok) {
-    throw new GitHubGraphQLError(`Failed to fetch commit: ${commitResponse.status} ${commitResponse.statusText}`);
-  }
-
-  const commitBody = (await commitResponse.json()) as {
-    parents?: Array<{ sha: string }>;
-    commit?: { author?: { email?: string } };
-  };
-
-  return {
-    sha,
-    parentSha: commitBody.parents?.[0]?.sha ?? null,
-    authorEmail: commitBody.commit?.author?.email ?? null
-  };
+  return { sha };
 }
