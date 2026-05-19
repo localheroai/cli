@@ -49,6 +49,7 @@ export interface TranslationBatch {
     path: string;
     format: string;
     content: string;
+    multi_language?: boolean;
   };
   localeEntries: string[];
   locales: string[];

@@ -8,6 +8,7 @@ export interface SourceFile {
   path: string;
   content: string;
   format: string;
+  multi_language?: boolean;
 }
 
 // Parameters for creating a translation job
@@ -54,6 +55,7 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
         path: file.path,
         content: file.content,
         format: file.format,
+        ...(file.multi_language && { multi_language: true }),
         target_paths: params.targetPaths
       })),
       ...(branch && { branch }),

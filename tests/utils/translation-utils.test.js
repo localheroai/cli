@@ -722,6 +722,56 @@ describe('translation-utils', () => {
         expect(content.keys['items']).toEqual({ value: ['one', 'two'] });
       });
     });
+
+    it('passes multi_language: true through to batch sourceFile when source is multi-language', () => {
+      const sourceFiles = [
+        {
+          path: 'apps/messaging/views/email.i18n.yml',
+          format: 'yaml',
+          locale: 'en',
+          multiLanguage: true,
+          content: Buffer.from(JSON.stringify({ en: { subject: 'Hi' } })).toString('base64'),
+          keys: ['subject']
+        }
+      ];
+      const missingByLocale = {
+        'sv:apps/messaging/views/email.i18n.yml': {
+          locale: 'sv',
+          path: 'apps/messaging/views/email.i18n.yml',
+          targetPath: 'apps/messaging/views/email.i18n.yml',
+          keys: { subject: 'Hi' }
+        }
+      };
+
+      const { batches } = batchKeysWithMissing(sourceFiles, missingByLocale);
+
+      expect(batches).toHaveLength(1);
+      expect(batches[0].sourceFile.multi_language).toBe(true);
+    });
+
+    it('omits multi_language from batch sourceFile for single-language source files', () => {
+      const sourceFiles = [
+        {
+          path: 'config/locales/en.yml',
+          format: 'yaml',
+          locale: 'en',
+          content: Buffer.from(JSON.stringify({ subject: 'Hi' })).toString('base64'),
+          keys: ['subject']
+        }
+      ];
+      const missingByLocale = {
+        'sv:config/locales/en.yml': {
+          locale: 'sv',
+          path: 'config/locales/en.yml',
+          targetPath: 'config/locales/sv.yml',
+          keys: { subject: 'Hi' }
+        }
+      };
+
+      const { batches } = batchKeysWithMissing(sourceFiles, missingByLocale);
+
+      expect(batches[0].sourceFile.multi_language).toBeUndefined();
+    });
   });
 
   describe('generateTargetPath', () => {

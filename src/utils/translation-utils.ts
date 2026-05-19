@@ -379,7 +379,8 @@ export function batchKeysWithMissing(
         sourceFile: {
           path: sourceFile.path,
           format: sourceFile.format,
-          content: Buffer.from(JSON.stringify(contentObj)).toString('base64')
+          content: Buffer.from(JSON.stringify(contentObj)).toString('base64'),
+          ...(sourceFile.multiLanguage === true && { multi_language: true })
         },
         localeEntries: data.localeEntries,
         locales: Array.from(data.locales)
