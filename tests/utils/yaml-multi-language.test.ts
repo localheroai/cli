@@ -4,7 +4,7 @@ import path from 'path';
 import os from 'os';
 import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 
-const QASA_SHAPE = `---
+const MULTI_LANG_SHAPE = `---
 en:
   headline: ''
   subject: Invitation
@@ -35,14 +35,14 @@ function extractBlock(raw: string, locale: string): string[] {
   return block;
 }
 
-describe('YAML multi-language sequential writes preserve Qasa-shape formatting', () => {
+describe('YAML multi-language sequential writes preserve multi-language email-template-shape formatting', () => {
   let tempDir: string;
   let multiLangPath: string;
 
   beforeEach(async () => {
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'localhero-yaml-multi-'));
     multiLangPath = path.join(tempDir, 'invite.i18n.yml');
-    await fs.writeFile(multiLangPath, QASA_SHAPE, 'utf8');
+    await fs.writeFile(multiLangPath, MULTI_LANG_SHAPE, 'utf8');
   });
 
   afterEach(async () => {
@@ -66,12 +66,12 @@ describe('YAML multi-language sequential writes preserve Qasa-shape formatting',
       .map(l => l.replace(':', ''));
     expect(topLevelLocales).toEqual(['en', 'sv', 'nb', 'fi']);
 
-    const originalLines = QASA_SHAPE.split('\n');
+    const originalLines = MULTI_LANG_SHAPE.split('\n');
     const originalLineCount = originalLines.filter(l => l.length > 0).length;
     const actualLineCount = lines.filter(l => l.length > 0).length;
     expect(actualLineCount).toBe(originalLineCount + 3);
 
-    const enBlockBefore = extractBlock(QASA_SHAPE, 'en');
+    const enBlockBefore = extractBlock(MULTI_LANG_SHAPE, 'en');
     const enBlockAfter = extractBlock(raw, 'en');
     expect(enBlockAfter).toEqual(enBlockBefore);
 
