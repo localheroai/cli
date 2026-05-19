@@ -252,20 +252,6 @@ jobs:
     return status.length > 0;
   },
 
-  /**
-   * Check if the last commit was made by LocalHero bot
-   * Used to determine if we can safely amend the commit
-   */
-  isLastCommitByLocalHero(): boolean {
-    const { exec } = this.deps;
-    try {
-      const authorEmail = exec('git log -1 --format=%ae').toString().trim();
-      return authorEmail.includes('localhero');
-    } catch {
-      return false;
-    }
-  },
-
   canAmendLastCommit(isSyncMode: boolean): boolean {
     if (!isSyncMode) return false;
     const { exec } = this.deps;
@@ -366,13 +352,10 @@ jobs:
         const result = await this.apiCommitAndPush({
           branchName,
           filePaths: filesToCommit,
-          message: commitMessage,
-          isSyncMode: true
+          message: commitMessage
         });
         if (result === 'no-changes') {
           log.log('No changes to commit - translations already up to date.');
-        } else if (result === 'amended') {
-          log.log('✓ Commit amended and pushed to GitHub (signed)\n');
         } else {
           log.log('✓ Signed commit created and pushed to GitHub\n');
         }
@@ -473,8 +456,7 @@ jobs:
         const result = await this.apiCommitAndPush({
           branchName,
           filePaths,
-          message: commitMessage,
-          isSyncMode: false
+          message: commitMessage
         });
         if (result === 'no-changes') {
           log.log('No changes to commit.');
@@ -511,16 +493,19 @@ jobs:
    * mutation. Produces signed commits attributed to the LocalHero App. Works
    * with repos that enforce `required_signatures` rulesets.
    *
+   * The new commit is stacked on top of the current branch HEAD. The mutation
+   * has no amend primitive — `expectedHeadOid` is a strict precondition, so
+   * sync PRs end up with two commits (the bot's initial sync trigger commit
+   * plus the CLI's translation commit), squashed at merge.
+   *
    * Returns 'no-changes' if all files match what's already on the branch,
-   * 'amended' if the previous LocalHero sync commit was replaced, otherwise
-   * 'new'.
+   * otherwise 'new'.
    */
   async apiCommitAndPush(params: {
     branchName: string;
     filePaths: string[];
     message: string;
-    isSyncMode: boolean;
-  }): Promise<'no-changes' | 'new' | 'amended'> {
+  }): Promise<'no-changes' | 'new'> {
     const { console: log, env } = this.deps;
 
     const repository = env.GITHUB_REPOSITORY;
@@ -540,28 +525,18 @@ jobs:
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const head = await this.deps.fetchBranchHead!(repository, params.branchName, token);
-
-        // Amend semantics: if the last commit on the branch is by the
-        // LocalHero bot in sync mode, replace it instead of stacking.
-        let expectedHeadOid = head.sha;
-        let amended = false;
-        if (params.isSyncMode && this.lastCommitIsLocalHeroBot(head) && head.parentSha) {
-          expectedHeadOid = head.parentSha;
-          amended = true;
-        }
-
         const headlineAndBody = this.splitCommitMessage(params.message);
 
         await this.deps.createSignedCommit!({
           repositoryNameWithOwner: repository,
           branchName: params.branchName,
-          expectedHeadOid,
+          expectedHeadOid: head.sha,
           message: headlineAndBody,
           fileChanges: { additions },
           token
         });
 
-        return amended ? 'amended' : 'new';
+        return 'new';
       } catch (error) {
         lastError = error;
         if (error instanceof StaleHeadError && attempt < maxRetries) {
@@ -594,12 +569,6 @@ jobs:
     }
 
     return additions;
-  },
-
-  lastCommitIsLocalHeroBot(head: BranchHead): boolean {
-    if (!head.authorEmail) return false;
-    const email = head.authorEmail.toLowerCase();
-    return email.includes('localhero');
   },
 
   splitCommitMessage(message: string): { headline: string; body?: string } {

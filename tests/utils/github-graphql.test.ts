@@ -148,13 +148,9 @@ describe('createSignedCommit', () => {
 });
 
 describe('fetchBranchHead', () => {
-  it('returns sha, parent sha, and author email', async () => {
+  it('returns the head sha', async () => {
     const mockFetch = jest.fn()
-      .mockImplementationOnce(async () => jsonResponse({ object: { sha: 'a'.repeat(40) } }))
-      .mockImplementationOnce(async () => jsonResponse({
-        parents: [{ sha: 'b'.repeat(40) }],
-        commit: { author: { email: 'developer@example.com' } }
-      }));
+      .mockImplementationOnce(async () => jsonResponse({ object: { sha: 'a'.repeat(40) } }));
 
     const head = await fetchBranchHead(
       'localheroai/test',
@@ -164,8 +160,7 @@ describe('fetchBranchHead', () => {
     );
 
     expect(head.sha).toBe('a'.repeat(40));
-    expect(head.parentSha).toBe('b'.repeat(40));
-    expect(head.authorEmail).toBe('developer@example.com');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
 
     const [refUrl] = mockFetch.mock.calls[0] as [string];
     expect(refUrl).toBe('https://api.github.com/repos/localheroai/test/git/ref/heads/feature');
@@ -179,21 +174,11 @@ describe('fetchBranchHead', () => {
     ).rejects.toBeInstanceOf(GitHubGraphQLError);
   });
 
-  it('handles a commit with no parents (initial commit)', async () => {
-    const mockFetch = jest.fn()
-      .mockImplementationOnce(async () => jsonResponse({ object: { sha: 'a'.repeat(40) } }))
-      .mockImplementationOnce(async () => jsonResponse({
-        parents: [],
-        commit: { author: { email: null } }
-      }));
+  it('throws when the ref response has no sha', async () => {
+    const mockFetch = jest.fn(async () => jsonResponse({ object: {} }));
 
-    const head = await fetchBranchHead(
-      'localheroai/test',
-      'feature',
-      'ghs_token',
-      { fetch: mockFetch as any }
-    );
-
-    expect(head.parentSha).toBeNull();
+    await expect(
+      fetchBranchHead('localheroai/test', 'feature', 'ghs_token', { fetch: mockFetch as any })
+    ).rejects.toThrow(/has no head SHA/);
   });
 });
