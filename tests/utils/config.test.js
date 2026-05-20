@@ -164,13 +164,48 @@ describe('config module', () => {
                 translationFiles: {
                     paths: [],
                     ignore: []
-                },
-                lastSyncedAt: null
+                }
             });
+            expect(savedConfig).not.toHaveProperty('lastSyncedAt');
             expect(mockFs.writeFile).toHaveBeenCalledWith(
                 '/test/project/localhero.json',
                 expect.any(String)
             );
+        });
+
+        it('omits lastSyncedAt entirely when it is null or unset', async () => {
+            await configService.saveProjectConfig({
+                projectId: 'test-project',
+                outputLocales: ['fr'],
+                lastSyncedAt: null
+            });
+
+            const written = mockFs.writeFile.mock.calls[0][1];
+            const savedConfig = JSON.parse(written);
+            expect(savedConfig).not.toHaveProperty('lastSyncedAt');
+            expect(written).not.toContain('lastSyncedAt');
+        });
+
+        it('persists lastSyncedAt when it is a real timestamp', async () => {
+            await configService.saveProjectConfig({
+                projectId: 'test-project',
+                outputLocales: ['fr'],
+                lastSyncedAt: '2026-05-20T20:00:00.000Z'
+            });
+
+            const savedConfig = JSON.parse(mockFs.writeFile.mock.calls[0][1]);
+            expect(savedConfig.lastSyncedAt).toBe('2026-05-20T20:00:00.000Z');
+        });
+
+        it('writes config with a trailing newline', async () => {
+            await configService.saveProjectConfig({
+                projectId: 'test-project',
+                outputLocales: ['fr']
+            });
+
+            const written = mockFs.writeFile.mock.calls[0][1];
+            expect(written.endsWith('\n')).toBe(true);
+            expect(written.endsWith('\n\n')).toBe(false);
         });
 
         it('uses provided basePath', async () => {

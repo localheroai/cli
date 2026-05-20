@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.51] - 2026-05-20
+
+### Fixed
+- `localhero.json` no longer ends up with `"lastSyncedAt": null` after sync runs. The field is omitted entirely when there's no real timestamp to record, which avoids a spurious diff line on every customer PR.
+- `localhero.json` now ends with a trailing newline like every other file the CLI writes, instead of `\ No newline at end of file`.
+
 ## [0.0.50] - 2026-05-20
 
 ### Fixed

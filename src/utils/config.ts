@@ -156,7 +156,11 @@ export const configService: ConfigService = {
       }
     }
 
-    await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2));
+    if (configWithSchema['lastSyncedAt'] === null || configWithSchema['lastSyncedAt'] === undefined) {
+      delete configWithSchema['lastSyncedAt'];
+    }
+
+    await fs.writeFile(configPath, JSON.stringify(configWithSchema, null, 2) + '\n');
   },
 
   /**
