@@ -1,5 +1,6 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest } from './client.js';
+import { CustomLocale } from '../types/index.js';
 
 /**
  * Project details returned from the API
@@ -31,6 +32,8 @@ export interface CreateProjectParams {
   name: string;
   sourceLocale: string;
   targetLocales: string[];
+  /** Declarations for non-standard locale codes, validated by the backend */
+  customLocales?: CustomLocale[];
 }
 
 /**
@@ -46,7 +49,14 @@ export async function createProject(data: CreateProjectParams): Promise<ProjectD
       project: {
         name: data.name,
         source_language: data.sourceLocale,
-        target_languages: data.targetLocales
+        target_languages: data.targetLocales,
+        ...(data.customLocales?.length && {
+          custom_languages: data.customLocales.map((locale) => ({
+            code: locale.code,
+            name: locale.name,
+            base_language: locale.baseLanguage
+          }))
+        })
       }
     },
     apiKey

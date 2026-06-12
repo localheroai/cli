@@ -307,6 +307,31 @@ describe('config module', () => {
 
             await expect(configService.validateProjectConfig(validConfig)).resolves.toBe(true);
         });
+
+        it('throws when a customLocales code is not listed in outputLocales', async () => {
+            const invalidConfig = {
+                projectId: 'test-project',
+                sourceLocale: 'en',
+                outputLocales: ['fr'],
+                translationFiles: { paths: ['locales/'] },
+                customLocales: [{ code: 'ja_easy', name: 'x', baseLanguage: 'ja' }]
+            };
+
+            await expect(configService.validateProjectConfig(invalidConfig))
+                .rejects.toThrow(/customLocales codes must also be listed in outputLocales: ja_easy/);
+        });
+
+        it('passes when all customLocales codes are present in outputLocales', async () => {
+            const validConfig = {
+                projectId: 'test-project',
+                sourceLocale: 'en',
+                outputLocales: ['fr', 'ja_easy'],
+                translationFiles: { paths: ['locales/'] },
+                customLocales: [{ code: 'ja_easy', name: 'Easy Japanese', baseLanguage: 'ja' }]
+            };
+
+            await expect(configService.validateProjectConfig(validConfig)).resolves.toBe(true);
+        });
     });
 
     describe('getValidProjectConfig', () => {

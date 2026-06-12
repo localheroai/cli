@@ -3,6 +3,7 @@ import { configService } from './config.js';
 import { getUpdates, GetUpdatesParams } from '../api/translations.js';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater/index.js';
 import { findTranslationFiles } from './files.js';
+import { localeCodesMatch } from './translation-processor.js';
 import { getCurrentBranch } from './git.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult, TranslationWithMetadata } from '../types/index.js';
@@ -170,6 +171,11 @@ export const syncService: SyncService = {
       sourceFilesByPath[dirName] = sourceFile.path;
     }
 
+    // The backend reports canonical codes (zh-CN); files use the config spelling (zh_cn)
+    const configLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];
+    const toConfigLocale = (code: string): string =>
+      configLocales.find((locale) => localeCodesMatch(locale, code)) ?? code;
+
     for (const file of updates.updates.files || []) {
       // Find the corresponding source file
       const dirName = path.dirname(file.path);
@@ -205,7 +211,7 @@ export const syncService: SyncService = {
         }
 
         try {
-          const updateResult = await updateTranslationFile(file.path, translations, lang.code, sourceFilePath, config.sourceLocale, config);
+          const updateResult = await updateTranslationFile(file.path, translations, toConfigLocale(lang.code), sourceFilePath, config.sourceLocale, config);
           totalUpdates += updateResult.updatedKeys.length;
         } catch (error: any) {
           console.error(chalk.yellow(`⚠️  Failed to update ${file.path}: ${error.message}`));

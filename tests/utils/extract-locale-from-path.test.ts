@@ -80,6 +80,98 @@ describe('extractLocaleFromPath — knownLocales empty', () => {
   });
 });
 
+describe('custom and underscore locales via knownLocales', () => {
+  const knownLocales = ['en', 'ja', 'ja_easy', 'zh_cn'];
+
+  it('extracts a custom locale from the basename when declared in knownLocales', () => {
+    expect(extractLocaleFromPath('config/locales/ja_easy.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('extracts an underscore locale from the basename when in knownLocales', () => {
+    expect(extractLocaleFromPath('config/locales/zh_cn.yml', undefined, knownLocales)).toBe('zh_cn');
+  });
+
+  it('returns the knownLocales spelling when the filename casing differs', () => {
+    expect(extractLocaleFromPath('config/locales/JA_EASY.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('extracts a custom locale from a path segment', () => {
+    expect(extractLocaleFromPath('locales/ja_easy/messages.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('still throws for non-standard codes NOT in knownLocales', () => {
+    expect(() => extractLocaleFromPath('config/locales/xx_unknown.yml', undefined, knownLocales))
+      .toThrow(/Could not extract locale from path/);
+  });
+
+  it('extracts a standard locale from the basename when in knownLocales', () => {
+    expect(extractLocaleFromPath('config/locales/en.yml', undefined, knownLocales)).toBe('en');
+  });
+
+  it('extracts a standard regional locale when knownLocales is empty', () => {
+    expect(extractLocaleFromPath('config/locales/fr-CA.yml', undefined, [])).toBe('fr-CA');
+  });
+});
+
+describe('dotted basename last-segment matching via knownLocales', () => {
+  const knownLocales = ['en', 'ja', 'ja_easy', 'zh_cn'];
+
+  it('extracts ja_easy from devise.ja_easy.yml', () => {
+    expect(extractLocaleFromPath('config/locales/devise.ja_easy.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('extracts zh_cn from messages.zh_cn.yaml', () => {
+    expect(extractLocaleFromPath('config/locales/messages.zh_cn.yaml', undefined, knownLocales)).toBe('zh_cn');
+  });
+
+  it('extracts ja_easy from devise.JA_EASY.yml (case-insensitive)', () => {
+    expect(extractLocaleFromPath('config/locales/devise.JA_EASY.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('throws when last segment is not a known locale', () => {
+    expect(() => extractLocaleFromPath('config/locales/devise.xx_nope.yml', undefined, knownLocales))
+      .toThrow(/Could not extract locale from path/);
+  });
+
+  it('extracts en from devise.en.yml (standard code via regex, unaffected by change)', () => {
+    expect(extractLocaleFromPath('config/locales/devise.en.yml', undefined, knownLocales)).toBe('en');
+  });
+});
+
+describe('separator-suffix matching via knownLocales', () => {
+  const knownLocales = ['en', 'fr', 'ja', 'ja_easy', 'zh_cn'];
+
+  it('extracts zh_cn from messages_zh_cn.yml', () => {
+    expect(extractLocaleFromPath('config/locales/messages_zh_cn.yml', undefined, knownLocales)).toBe('zh_cn');
+  });
+
+  it('extracts ja_easy from messages-ja_easy.yml', () => {
+    expect(extractLocaleFromPath('config/locales/messages-ja_easy.yml', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('extracts ja_easy from django_ja_easy.po', () => {
+    expect(extractLocaleFromPath('locale/django_ja_easy.po', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('returns the knownLocales spelling when the suffix casing differs', () => {
+    expect(extractLocaleFromPath('config/locales/messages_ZH_CN.yml', undefined, knownLocales)).toBe('zh_cn');
+  });
+
+  it('prefers a locale path segment over a basename suffix', () => {
+    expect(extractLocaleFromPath('locales/fr/messages_zh_cn.yml', undefined, knownLocales)).toBe('fr');
+  });
+
+  it('throws when the suffix is not a known locale', () => {
+    expect(() => extractLocaleFromPath('config/locales/messages_xx_nope.yml', undefined, knownLocales))
+      .toThrow(/Could not extract locale from path/);
+  });
+
+  it('does not treat a word ending in a locale as a suffix without a separator', () => {
+    expect(() => extractLocaleFromPath('config/locales/kitchen.yml', undefined, knownLocales))
+      .toThrow(/Could not extract locale from path/);
+  });
+});
+
 describe('extractLocaleFromPath — custom regex', () => {
   it('returns captured locale when user-supplied custom regex matches, even if not in knownLocales', () => {
     // When the caller provides their own regex, we trust it — useful for

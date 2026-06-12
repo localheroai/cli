@@ -184,6 +184,13 @@ export const configService: ConfigService = {
 
     validateIgnoreKeys(config.translationFiles?.ignoreKeys);
 
+    const missingFromOutput = (config.customLocales ?? [])
+      .map((locale) => locale.code)
+      .filter((code) => !config.outputLocales.includes(code));
+    if (missingFromOutput.length > 0) {
+      throw new Error(`customLocales codes must also be listed in outputLocales: ${missingFromOutput.join(', ')}`);
+    }
+
     return true;
   },
 

@@ -212,6 +212,14 @@ describe('syncService', () => {
   });
 
   describe('applyUpdates', () => {
+    beforeEach(() => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr']
+      });
+    });
+
     const testUpdates = {
       updates: {
         files: [
@@ -277,6 +285,87 @@ describe('syncService', () => {
         }
       );
       expect(mockConfigService.updateLastSyncedAt).toHaveBeenCalled();
+    });
+
+    it('writes updates under the config locale spelling when the backend reports canonical codes', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['zh_cn', 'ja_easy']
+      });
+
+      mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+        sourceFiles: [{ path: 'config/locales/en.yml', locale: 'en' }],
+        allFiles: [],
+        targetFilesByLocale: {}
+      });
+
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['greeting'],
+        created: false
+      });
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      const canonicalUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'config/locales/zh_cn.yml',
+              languages: [
+                { code: 'zh-CN', translations: [{ key: 'greeting', value: '你好' }] }
+              ]
+            },
+            {
+              path: 'config/locales/ja_easy.yml',
+              languages: [
+                { code: 'ja_easy', translations: [{ key: 'greeting', value: 'こんにちは' }] }
+              ]
+            }
+          ]
+        }
+      };
+
+      await syncService.applyUpdates(canonicalUpdates);
+
+      const languageCodes = mockTranslationUpdater.updateTranslationFile.mock.calls.map(call => call[2]);
+      expect(languageCodes).toEqual(['zh_cn', 'ja_easy']);
+    });
+
+    it('passes the backend code through when it matches no config locale', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['fr']
+      });
+
+      mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+        sourceFiles: [],
+        allFiles: [],
+        targetFilesByLocale: {}
+      });
+
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({
+        updatedKeys: ['greeting'],
+        created: false
+      });
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      const unconfiguredUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'locales/de.json',
+              languages: [
+                { code: 'de', translations: [{ key: 'greeting', value: 'Hallo' }] }
+              ]
+            }
+          ]
+        }
+      };
+
+      await syncService.applyUpdates(unconfiguredUpdates);
+
+      expect(mockTranslationUpdater.updateTranslationFile.mock.calls[0][2]).toBe('de');
     });
 
     it('handles file update errors', async () => {

@@ -159,7 +159,7 @@ describe('init command', () => {
       .mockResolvedValueOnce('');
     projectApi.createProject.mockRejectedValue(new Error('API failure'));
 
-    await init(createInitDeps());
+    await expect(init(createInitDeps())).rejects.toThrow(/project creation failed/i);
 
     const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
     expect(allConsoleOutput).toContain('✗ Failed to create project: API failure');
@@ -302,6 +302,249 @@ describe('init command', () => {
     expect(allConsoleOutput).toContain('⚠️  Source language \'en\' removed from target languages');
   });
 
+  it('collects custom-locale details for non-standard target locales', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja,ja_easy')
+      .mockResolvedValueOnce('Easy Japanese')
+      .mockResolvedValueOnce('ja')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const inputCalls = promptService.input.mock.calls.map(call => call[0]);
+    const nameCall = inputCalls.find(opts => /Display name for 'ja_easy'/.test(opts.message));
+    expect(nameCall).toBeDefined();
+    const baseCall = inputCalls.find(opts => /Base language for 'ja_easy'/.test(opts.message));
+    expect(baseCall).toBeDefined();
+    expect(baseCall.default).toBe('ja');
+  });
+
+  it('re-asks for the base language until a 2-letter code is given', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja_easy')
+      .mockResolvedValueOnce('Easy Japanese')
+      .mockResolvedValueOnce('Japanese')
+      .mockResolvedValueOnce('JA ')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const baseCalls = promptService.input.mock.calls
+      .map(call => call[0])
+      .filter(opts => /Base language for 'ja_easy'/.test(opts.message));
+    expect(baseCalls.length).toBe(2);
+    expect(projectApi.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customLocales: [{ code: 'ja_easy', name: 'Easy Japanese', baseLanguage: 'ja' }]
+      })
+    );
+  });
+
+  it('does not prompt for custom-locale details when all targets are standard', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('fr,de')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const inputCalls = promptService.input.mock.calls.map(call => call[0]);
+    expect(inputCalls.some(opts => /Display name for/.test(opts.message))).toBe(false);
+    expect(configUtils.saveProjectConfig).toHaveBeenCalled();
+  });
+
+  it('passes customLocales to createProject when custom locales are declared', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja,ja_easy')
+      .mockResolvedValueOnce('Easy Japanese')
+      .mockResolvedValueOnce('ja')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    expect(projectApi.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customLocales: [{ code: 'ja_easy', name: 'Easy Japanese', baseLanguage: 'ja' }]
+      })
+    );
+  });
+
+  it('saves customLocales in localhero.json when custom locales are declared', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja,ja_easy')
+      .mockResolvedValueOnce('Easy Japanese')
+      .mockResolvedValueOnce('ja')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    expect(configUtils.saveProjectConfig).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customLocales: [{ code: 'ja_easy', name: 'Easy Japanese', baseLanguage: 'ja' }]
+      }),
+      expect.any(String)
+    );
+  });
+
+  it('omits customLocales from saved config when all targets are standard', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('fr,de')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const savedConfig = configUtils.saveProjectConfig.mock.calls[0][0];
+    expect(savedConfig).not.toHaveProperty('customLocales');
+  });
+
+  it('does not prompt for region-shaped locale codes and passes them through raw', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja,zh_cn')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const inputCalls = promptService.input.mock.calls.map(call => call[0]);
+    expect(inputCalls.some(opts => /Display name for/.test(opts.message))).toBe(false);
+    expect(projectApi.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({ targetLocales: ['ja', 'zh_cn'] })
+    );
+    expect(projectApi.createProject.mock.calls[0][0]).not.toHaveProperty('customLocales');
+  });
+
+  it('prompts only for truly custom codes when mixed with region-shaped codes', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('ja_easy,zh_cn')
+      .mockResolvedValueOnce('Easy Japanese')
+      .mockResolvedValueOnce('ja')
+      .mockResolvedValueOnce('test-project')
+      .mockResolvedValueOnce('locales/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_123',
+      name: 'test-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    await init(createInitDeps());
+
+    const displayNameCalls = promptService.input.mock.calls
+      .map(call => call[0])
+      .filter(opts => /Display name for/.test(opts.message));
+    expect(displayNameCalls.length).toBe(1);
+    expect(displayNameCalls[0].message).toMatch(/'ja_easy'/);
+    expect(projectApi.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetLocales: ['ja_easy', 'zh_cn'],
+        customLocales: [{ code: 'ja_easy', name: 'Easy Japanese', baseLanguage: 'ja' }]
+      })
+    );
+  });
+
   describe('non-interactive mode', () => {
     const baseFlags = {
       yes: true,
@@ -369,6 +612,40 @@ describe('init command', () => {
         }),
         expect.any(String)
       );
+    });
+
+    it('accepts region-shaped locale codes without rejection', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      projectApi.createProject.mockResolvedValue({
+        id: 'proj_new',
+        name: 'noodling',
+        url: 'https://localhero.ai/projects/proj_new'
+      });
+
+      await init(createInitDeps({
+        options: { ...baseFlags, projectName: 'noodling', targetLocales: 'sv,zh_cn' }
+      }));
+
+      expect(projectApi.createProject).toHaveBeenCalledWith({
+        name: 'noodling',
+        sourceLocale: 'en',
+        targetLocales: ['sv', 'zh_cn']
+      });
+      expect(configUtils.saveProjectConfig).toHaveBeenCalled();
+    });
+
+    it('throws when target locales include a non-standard code', async () => {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+
+      await expect(init(createInitDeps({
+        options: { ...baseFlags, targetLocales: 'fr,ja_easy' }
+      }))).rejects.toThrow(/ja_easy.*interactively/s);
+
+      expect(configUtils.saveProjectConfig).not.toHaveBeenCalled();
+      expect(projectApi.createProject).not.toHaveBeenCalled();
     });
 
     it('throws a clear error when required flags are missing', async () => {

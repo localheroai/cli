@@ -496,6 +496,173 @@ describe('translation-processor', () => {
       expect(result.uniqueKeysTranslated.size).toBe(2); // welcome and title
     });
 
+    it('applies translations when backend reports canonical locale code for underscore config locale', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'config/locales/en.yml',
+          sourceFile: {
+            path: 'config/locales/en.yml',
+            format: 'yaml',
+            content: Buffer.from('en:\n  welcome: Welcome\n').toString('base64')
+          },
+          localeEntries: ['zh_cn:config/locales/en.yml'],
+          locales: ['zh_cn']
+        }
+      ];
+
+      const missingByLocale = {
+        'zh_cn:config/locales/en.yml': {
+          locale: 'zh_cn',
+          path: 'config/locales/en.yml',
+          targetPath: 'config/locales/zh_cn.yml',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      const config = { projectId: 'test-project' };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-zh', language: { code: 'zh-CN' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { welcome: '欢迎' }
+        },
+        language: { code: 'zh-CN' }
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/zh_cn.yml',
+        { welcome: '欢迎' },
+        'zh_cn',
+        'config/locales/en.yml',
+        undefined,
+        { projectId: 'test-project' }
+      );
+      expect(result.totalLanguages).toBe(1);
+      expect(result.languages).toEqual(['zh-CN']);
+      expect(result.uniqueKeysTranslated.has('welcome')).toBe(true);
+    });
+
+    it('applies translations for custom locale codes returned literally', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'config/locales/en.yml',
+          sourceFile: {
+            path: 'config/locales/en.yml',
+            format: 'yaml',
+            content: Buffer.from('en:\n  welcome: Welcome\n').toString('base64')
+          },
+          localeEntries: ['ja_easy:config/locales/en.yml'],
+          locales: ['ja_easy']
+        }
+      ];
+
+      const missingByLocale = {
+        'ja_easy:config/locales/en.yml': {
+          locale: 'ja_easy',
+          path: 'config/locales/en.yml',
+          targetPath: 'config/locales/ja_easy.yml',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      const config = { projectId: 'test-project' };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-ja-easy', language: { code: 'ja_easy' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { welcome: 'ようこそ' }
+        },
+        language: { code: 'ja_easy' }
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/ja_easy.yml',
+        { welcome: 'ようこそ' },
+        'ja_easy',
+        'config/locales/en.yml',
+        undefined,
+        { projectId: 'test-project' }
+      );
+      expect(result.totalLanguages).toBe(1);
+      expect(result.languages).toEqual(['ja_easy']);
+    });
+
+    it('does not apply translations when locale codes differ beyond casing and separators', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'config/locales/en.yml',
+          sourceFile: {
+            path: 'config/locales/en.yml',
+            format: 'yaml',
+            content: Buffer.from('en:\n  welcome: Welcome\n').toString('base64')
+          },
+          localeEntries: ['zh_cn:config/locales/en.yml'],
+          locales: ['zh_cn']
+        }
+      ];
+
+      const missingByLocale = {
+        'zh_cn:config/locales/en.yml': {
+          locale: 'zh_cn',
+          path: 'config/locales/en.yml',
+          targetPath: 'config/locales/zh_cn.yml',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      const config = { projectId: 'test-project' };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-zh-tw', language: { code: 'zh-TW' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { welcome: '歡迎' }
+        },
+        language: { code: 'zh-TW' }
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
+      expect(result.totalLanguages).toBe(0);
+    });
+
     it('handles a job that repeatedly stays pending and hits max tries', async () => {
       const testJobId = 'job-always-pending';
 
