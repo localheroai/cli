@@ -5,8 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [0.0.52] - 2026-06-12
 
 ### Added
-- Custom locale support. Locales that aren't on the standard list, like `ja_easy` (Easy Japanese), can be declared during `localhero init`: the CLI asks for a display name and a base language, saves them as `customLocales` in `localhero.json`, and sends the declarations when the project is created.
-- File scanning now finds custom and Rails-style underscore locale files when the locale is configured. `ja_easy.yml`, `zh_cn.yml`, namespaced files like `devise.ja_easy.yml`, and suffixed names like `messages_zh_cn.yml` are translated instead of silently skipped.
+- Custom locale support. Locales that aren't on the standard list, can be declared during `localhero init`: the CLI asks for a display name and a base language, saves them as `customLocales` in `localhero.json`.
+- File scanning now finds custom and Rails-style underscore locale files when the locale is configured. `zh_cn.yml`, `devise.ja_easy.yml`, and suffixed names like `messages_zh_cn.yml` are translated.
 
 ### Fixed
 - `translate` and `pull` write YAML under the locale spelling from `localhero.json`. Job results and sync updates that report canonical codes (`zh-CN`) no longer add a duplicate top-level key next to `zh_cn:` or cause the same keys to re-translate on every run.
