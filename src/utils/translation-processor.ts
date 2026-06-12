@@ -148,6 +148,28 @@ function createJobSourceMapping(
   return jobSourceMapping;
 }
 
+export function localeCodesMatch(a: string, b: string): boolean {
+  return a.toLowerCase().replace(/_/g, '-') === b.toLowerCase().replace(/_/g, '-');
+}
+
+function findMissingEntryKey(
+  missingByLocale: MissingByLocale,
+  languageCode: string,
+  sourceFilePath: string
+): string | undefined {
+  const exactKey = `${languageCode}:${sourceFilePath}`;
+  if (missingByLocale[exactKey]) {
+    return exactKey;
+  }
+
+  return Object.keys(missingByLocale).find(key => {
+    const separatorIndex = key.indexOf(':');
+    const keyLocale = key.slice(0, separatorIndex);
+    const keySourcePath = key.slice(separatorIndex + 1);
+    return keySourcePath === sourceFilePath && localeCodesMatch(keyLocale, languageCode);
+  });
+}
+
 const WAITING_STATUSES = ['pending', 'processing', 'validating'] as const;
 
 function isWaitingStatus(status: string): boolean {
@@ -268,14 +290,15 @@ async function applyTranslations(
     return false;
   }
 
-  const localeSourceKey = `${languageCode}:${sourceInfo.sourceFilePath}`;
-  const entry = missingByLocale[localeSourceKey];
+  const localeSourceKey = findMissingEntryKey(missingByLocale, languageCode, sourceInfo.sourceFilePath);
 
-  if (!entry || processedEntries.has(localeSourceKey)) {
+  if (!localeSourceKey || processedEntries.has(localeSourceKey)) {
     return false;
   }
 
+  const entry = missingByLocale[localeSourceKey];
   const targetPath = entry.targetPath;
+  const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
   if (verbose) {
     console.log(chalk.blue(`  Updating translations for ${languageCode} in ${targetPath}`));
   }
@@ -283,7 +306,7 @@ async function applyTranslations(
   const result = await translationUtils.updateTranslationFile(
     targetPath,
     data.translations.data,
-    languageCode,
+    fileLocale,
     entry.path,
     undefined,
     config

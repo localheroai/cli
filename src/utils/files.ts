@@ -54,32 +54,37 @@ const DEFAULT_LOCALE_REGEX = '(?:^|[._-])([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|
 export function extractLocaleFromPath(filePath: string, localeRegex?: string, knownLocales: string[] = []): string {
   const effectiveLocaleRegex = localeRegex ?? DEFAULT_LOCALE_REGEX;
   if (knownLocales && knownLocales.length > 0) {
+    const matchKnownLocale = (candidate: string): string | undefined =>
+      knownLocales.find((kl) => kl === candidate) ??
+      knownLocales.find((kl) => kl && candidate.toLowerCase() === kl.toLowerCase());
+
     const basenameOriginal = path.basename(filePath, path.extname(filePath));
-    const isBasenameAKnownLocale = knownLocales.some(
-      (kl) => kl && basenameOriginal.toLowerCase() === kl.toLowerCase()
-    );
-    if (isBasenameAKnownLocale) {
-      if (isValidLocale(basenameOriginal)) {
-        if (basenameOriginal.length === 2) {
-          return basenameOriginal.toLowerCase();
-        }
-        return basenameOriginal;
+    const basenameMatch = matchKnownLocale(basenameOriginal);
+    if (basenameMatch) {
+      return basenameMatch;
+    }
+
+    for (const part of filePath.split(path.sep)) {
+      const partMatch = matchKnownLocale(part);
+      if (partMatch) {
+        return partMatch;
       }
     }
 
-    const originalPathParts = filePath.split(path.sep);
-    for (const part of originalPathParts) {
-      const isPartAKnownLocale = knownLocales.some(
-        (kl) => kl && part.toLowerCase() === kl.toLowerCase()
-      );
-      if (isPartAKnownLocale) {
-        if (isValidLocale(part)) {
-          if (part.length === 2) {
-            return part.toLowerCase();
-          }
-          return part;
-        }
+    const lastSegment = basenameOriginal.split('.').pop();
+    if (lastSegment && lastSegment !== basenameOriginal) {
+      const segmentMatch = matchKnownLocale(lastSegment);
+      if (segmentMatch) {
+        return segmentMatch;
       }
+    }
+
+    const basenameLower = basenameOriginal.toLowerCase();
+    const suffixMatch = knownLocales.find(
+      (kl) => kl && (basenameLower.endsWith(`_${kl.toLowerCase()}`) || basenameLower.endsWith(`-${kl.toLowerCase()}`))
+    );
+    if (suffixMatch) {
+      return suffixMatch;
     }
   }
 

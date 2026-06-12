@@ -8,8 +8,8 @@ import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
 import { createGitHubActionFile, workflowExists } from '../utils/github.js';
-import { directoryExists, findFirstExistingPath, getDirectoryContents, DirectoryContents } from '../utils/files.js';
-import { ProjectConfig as BaseProjectConfig } from '../types/index.js';
+import { directoryExists, findFirstExistingPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
+import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
 
@@ -144,12 +144,15 @@ export class MissingFlagsError extends Error {
   }
 }
 
+const REGION_SHAPED_LOCALE = /^[a-zA-Z]{2,3}[_-][a-zA-Z]{2}$/;
+
 interface RawInitInputs {
   mode: 'new' | 'existing';
   existingProject?: ProjectDetails;
   projectName?: string;
   sourceLocale: string;
   outputLocales: string[];
+  customLocales?: CustomLocale[];
   translationPath: string;
   filePattern: string;
   ignorePaths: string[];
@@ -726,7 +729,7 @@ async function handleNewProjectSetup(
 
   const finalized = await finalizeProjectAndBuildConfig(inputs, projectDefaults, projectApi, console);
   if (!finalized) {
-    return;
+    throw new Error('Project creation failed');
   }
   const { config, newProject, url } = finalized;
 
@@ -808,6 +811,7 @@ async function collectInputsInteractive(
   let projectName: string | undefined;
   let sourceLocale: string;
   let outputLocales: string[];
+  const customLocales: CustomLocale[] = [];
 
   if (!existingProject) {
     sourceLocale = await promptService.input({
@@ -822,6 +826,25 @@ async function collectInputsInteractive(
     }));
 
     outputLocales = filterSourceFromTargets(sourceLocale, rawOutputLocales, console);
+
+    const nonStandardLocales = outputLocales.filter(
+      (locale) => !isValidLocale(locale) && !REGION_SHAPED_LOCALE.test(locale)
+    );
+    for (const code of nonStandardLocales) {
+      console.log(chalk.yellow(`\n'${code}' is not a standard locale code — the details below define it as a custom locale.`));
+      const name = await promptService.input({
+        message: `Display name for '${code}' (shown in Localhero, e.g. "Easy Japanese"):`,
+        default: code
+      });
+      let baseLanguage = '';
+      while (!/^[a-z]{2}$/.test(baseLanguage)) {
+        baseLanguage = (await promptService.input({
+          message: `Base language for '${code}' (a 2-letter code, like "ja" for Japanese):`,
+          default: code.split(/[_-]/)[0]
+        })).trim().toLowerCase();
+      }
+      customLocales.push({ code, name, baseLanguage });
+    }
 
     projectName = await promptService.input({
       message: 'Project name:',
@@ -873,6 +896,7 @@ async function collectInputsInteractive(
     projectName,
     sourceLocale,
     outputLocales,
+    ...(customLocales.length > 0 && { customLocales }),
     translationPath,
     filePattern,
     ignorePaths: parseCsv(ignorePathsRaw)
@@ -948,6 +972,16 @@ async function collectInputsFromFlags(
     throw new Error('After removing the source locale, no target locales remain');
   }
 
+  const nonStandard = outputLocales.filter(
+    (locale) => !isValidLocale(locale) && !REGION_SHAPED_LOCALE.test(locale)
+  );
+  if (nonStandard.length > 0) {
+    throw new Error(
+      `Non-standard locale codes need custom-locale details: ${nonStandard.join(', ')}. ` +
+      'Run `localhero init` interactively to declare them.'
+    );
+  }
+
   return {
     mode: 'new',
     projectName: options.projectName ?? path.basename(process.cwd()),
@@ -974,7 +1008,8 @@ async function finalizeProjectAndBuildConfig(
       const created = await projectService.createProject({
         name: inputs.projectName as string,
         sourceLocale: inputs.sourceLocale,
-        targetLocales: inputs.outputLocales
+        targetLocales: inputs.outputLocales,
+        ...(inputs.customLocales?.length && { customLocales: inputs.customLocales })
       });
       projectId = created.id;
       projectUrl = created.url;
@@ -996,6 +1031,7 @@ async function finalizeProjectAndBuildConfig(
     projectId,
     sourceLocale: inputs.sourceLocale,
     outputLocales: inputs.outputLocales,
+    ...(inputs.customLocales?.length && { customLocales: inputs.customLocales }),
     translationFiles: {
       paths: inputs.translationPath ? [inputs.translationPath] : [],
       pattern: inputs.filePattern || '**/*.{json,yml,yaml,po}',

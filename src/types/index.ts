@@ -38,6 +38,19 @@ export interface TranslationWithMetadata {
 }
 
 /**
+ * A customer-declared non-standard locale (e.g. ja_easy).
+ * The backend validates baseLanguage and creates the locale; the CLI only collects and forwards.
+ */
+export interface CustomLocale {
+  /** Literal locale code as used in filenames/config (e.g. 'ja_easy') */
+  code: string;
+  /** Human-readable name (e.g. 'Easy Japanese') */
+  name: string;
+  /** ISO-639-1 base language driving plurals/flag (e.g. 'ja') */
+  baseLanguage: string;
+}
+
+/**
  * Project configuration interface
  *
  * This is the single source of truth for project configuration
@@ -54,6 +67,9 @@ export interface ProjectConfig {
 
   /** Target locale codes (e.g., ['fr', 'de', 'es']) */
   outputLocales: string[];
+
+  /** Declared custom locales — whitelists non-standard codes through backend validation */
+  customLocales?: CustomLocale[];
 
   /** Translation files configuration */
   translationFiles: TranslationFileConfig;
