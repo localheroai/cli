@@ -184,4 +184,38 @@ describe('readFileContentWithKeys with ignoreMatcher', () => {
     expect(filteredObj).toEqual(legacyObj);
     expect(filtered.removed).toEqual([]);
   });
+
+  it('key names from a wrapped single-lang YAML do NOT include the locale prefix', async () => {
+    // Regression: the locale wrapper (e.g. `en:`) must not be re-prepended to key
+    // names. The server stores keys without the locale, so a leaking `en.` prefix
+    // makes --prune think every key is missing locally and flags the whole project.
+    const src = [
+      'en:',
+      '  datetime:',
+      '    distance_in_words:',
+      '      less_than_x_minutes:',
+      '        one: "less than a minute"',
+      '        other: "less than %{count} minutes"',
+      '  activerecord:',
+      '    errors:',
+      '      messages:',
+      '        record_invalid: "Validation failed"',
+      '',
+    ].join('\n');
+    const p = path.join(tmp, 'rails.en.yml');
+    await fs.writeFile(p, src, 'utf8');
+    const matcher = createIgnoreMatcher(['system.*']);
+    const out = await readFileContentWithKeys(
+      p,
+      { sourceLanguage: 'en', currentLanguage: 'en' },
+      { ignoreMatcher: matcher, knownLocales, sourceLocale: 'en' }
+    );
+    const keyNames = out.keys.map((k) => k.name).sort();
+    expect(keyNames).toEqual([
+      'activerecord.errors.messages.record_invalid',
+      'datetime.distance_in_words.less_than_x_minutes.one',
+      'datetime.distance_in_words.less_than_x_minutes.other',
+    ]);
+    expect(keyNames.some((n) => n.startsWith('en.'))).toBe(false);
+  });
 });

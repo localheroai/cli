@@ -159,17 +159,18 @@ function readYaml(
 
   const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
   const removed: RemovedKey[] = [];
+  // Key names exclude the locale wrapper (pathPrefix): the server keys by name,
+  // locale lives on the translation.
   const keptNames: string[] = [];
 
   for (const { obj, pathPrefix, locale } of subtrees) {
     const flat = flattenTranslations(obj);
     for (const flatKey of Object.keys(flat)) {
-      const fullName = pathPrefix.length > 0 ? `${pathPrefix.join('.')}.${flatKey}` : flatKey;
       if (matcher(flatKey)) {
         doc.deleteIn([...pathPrefix, ...flatKey.split('.')]);
         removed.push({ name: flatKey, locale });
       } else {
-        keptNames.push(fullName);
+        keptNames.push(flatKey);
       }
     }
   }
@@ -209,6 +210,8 @@ function readJson(
     const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
     const removed: RemovedKey[] = [];
     const keptFlat: Record<string, unknown> = {};
+    // Key names are stored without the locale wrapper
+    const keptNames: string[] = [];
 
     for (const { obj, pathPrefix, locale } of subtrees) {
       const flat = flattenTranslations(obj);
@@ -219,11 +222,12 @@ function readJson(
         }
         const fullKey = pathPrefix.length > 0 ? `${pathPrefix.join('.')}.${name}` : name;
         keptFlat[fullKey] = value;
+        keptNames.push(name);
       }
     }
     return {
       content: Buffer.from(JSON.stringify(keptFlat)).toString('base64'),
-      keys: Object.keys(keptFlat).map((name) => ({ name, context: null })),
+      keys: keptNames.map((name) => ({ name, context: null })),
       removed,
     };
   } catch {
