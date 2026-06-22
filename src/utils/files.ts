@@ -93,6 +93,17 @@ export function extractLocaleFromPath(filePath: string, localeRegex?: string, kn
     return dirNameOriginal;
   }
 
+  if (dirNameOriginal === 'LC_MESSAGES') {
+    const localeDir = path.dirname(path.dirname(filePath));
+    const gettextLocale = path.basename(localeDir);
+    // In a gettext layout the directory directly above LC_MESSAGES is always the
+    // locale (priv/gettext/<locale>/LC_MESSAGES/<domain>.po), so trust it even for
+    // custom or non-standard codes. Guard against LC_MESSAGES sitting at the root.
+    if (gettextLocale && gettextLocale !== localeDir && gettextLocale !== '.') {
+      return gettextLocale;
+    }
+  }
+
   const filenameOriginal = path.basename(filePath);
   const regexPattern = new RegExp(effectiveLocaleRegex);
   const regexMatch = filenameOriginal.match(regexPattern);

@@ -6,6 +6,7 @@ import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
+import { localeCodesMatch } from './translation-processor.js';
 import { detectMultiLanguage } from './multi-language-detection.js';
 import type { IgnoreSummary, RemovedKey } from './ignore-keys.js';
 import { summarizeRemoved } from './ignore-keys.js';
@@ -80,6 +81,14 @@ function normalizeFormat(format: string): string {
   if (format === 'yml') return 'yaml';
   if (format === 'pot') return 'po';
   return format;
+}
+
+export function isConfiguredTargetLocale(outputLocales: string[], language: string): boolean {
+  // An empty outputLocales means "no restriction" (validated configs always have
+  // at least one). Match tolerantly so a config locale (pt-BR) still matches a
+  // gettext directory name (pt_BR).
+  return outputLocales.length === 0 ||
+    outputLocales.some(locale => localeCodesMatch(locale, language));
 }
 
 let poWarningEmitted = false;
@@ -333,8 +342,11 @@ export const importService = {
       return { status: 'no_files' };
     }
 
+    const outputLocales = config.outputLocales ?? [];
     const sourceFiles = files.filter(file => file.language === config.sourceLocale);
-    const targetFiles = files.filter(file => file.language !== config.sourceLocale);
+    const targetFiles = files.filter(
+      file => file.language !== config.sourceLocale && isConfiguredTargetLocale(outputLocales, file.language)
+    );
     const importedFiles = {
       source: sourceFiles,
       target: targetFiles

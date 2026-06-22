@@ -172,6 +172,39 @@ describe('separator-suffix matching via knownLocales', () => {
   });
 });
 
+describe('gettext LC_MESSAGES layout', () => {
+  const knownLocales = ['en', 'sv', 'da', 'de'];
+
+  it('extracts the locale from the directory above LC_MESSAGES when known', () => {
+    expect(extractLocaleFromPath('priv/gettext/sv/LC_MESSAGES/errors.po', undefined, knownLocales)).toBe('sv');
+  });
+
+  it('extracts the locale from an umbrella gettext path when known', () => {
+    expect(extractLocaleFromPath('apps/myapp_web/priv/gettext/da/LC_MESSAGES/default.po', undefined, knownLocales)).toBe('da');
+  });
+
+  it('extracts a gettext locale from the directory structure even when not in knownLocales', () => {
+    expect(extractLocaleFromPath('apps/myapp_web/priv/gettext/fr/LC_MESSAGES/errors.po', undefined, knownLocales)).toBe('fr');
+  });
+
+  it('extracts a regional gettext locale from the directory structure', () => {
+    expect(extractLocaleFromPath('priv/gettext/pt_BR/LC_MESSAGES/default.po', undefined, knownLocales)).toBe('pt_BR');
+  });
+
+  it('extracts a custom locale directory from the gettext layout', () => {
+    expect(extractLocaleFromPath('priv/gettext/ja_easy/LC_MESSAGES/default.po', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('trusts any directory above LC_MESSAGES as the locale, including non-standard codes', () => {
+    expect(extractLocaleFromPath('priv/gettext/valencia/LC_MESSAGES/errors.po', undefined, knownLocales)).toBe('valencia');
+  });
+
+  it('throws when there is no directory above LC_MESSAGES', () => {
+    expect(() => extractLocaleFromPath('LC_MESSAGES/errors.po', undefined, knownLocales))
+      .toThrow(/Could not extract locale from path/);
+  });
+});
+
 describe('extractLocaleFromPath — custom regex', () => {
   it('returns captured locale when user-supplied custom regex matches, even if not in knownLocales', () => {
     // When the caller provides their own regex, we trust it — useful for

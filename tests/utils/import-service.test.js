@@ -9,6 +9,7 @@ describe('importService', () => {
   let mockFs;
   let mockImportsApi;
   let importService;
+  let isConfiguredTargetLocale;
   let originalConsole;
 
   beforeEach(async () => {
@@ -118,6 +119,7 @@ describe('importService', () => {
 
     const importServiceModule = await import('../../src/utils/import-service.js');
     importService = importServiceModule.importService;
+    isConfiguredTargetLocale = importServiceModule.isConfiguredTargetLocale;
   });
 
   afterEach(() => {
@@ -345,6 +347,63 @@ describe('importService', () => {
         }
       ]);
       expect(result.statistics).toBeDefined();
+    });
+
+    it('excludes locales that are not in outputLocales from the import payload', async () => {
+      const scopedConfig = {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['sv'],
+        translationFiles: { paths: ['locales'], ignore: [] }
+      };
+
+      const files = [
+        path.join(TEST_BASE_PATH, 'locales/en.json'),
+        path.join(TEST_BASE_PATH, 'locales/sv.json'),
+        path.join(TEST_BASE_PATH, 'locales/fr.json')
+      ];
+
+      mockGlob.mockResolvedValue(files);
+      mockFs.promises.readFile.mockImplementation((filePath) => {
+        if (filePath.endsWith('en.json')) return Promise.resolve('{"hello":"Hello"}');
+        if (filePath.endsWith('sv.json')) return Promise.resolve('{"hello":"Hej"}');
+        if (filePath.endsWith('fr.json')) return Promise.resolve('{"hello":"Bonjour"}');
+        return Promise.reject(new Error(`Unexpected file: ${filePath}`));
+      });
+
+      mockImportsApi.createImport.mockResolvedValue({
+        import: { status: 'completed', id: 'import-123', statistics: { total_keys: 1, languages: [] }, warnings: [], translations_url: 'http://example.com' }
+      });
+
+      const result = await importService.importTranslations(scopedConfig, TEST_BASE_PATH);
+
+      expect(result.status).toBe('completed');
+      const languages = mockImportsApi.createImport.mock.calls[0][0].translations.map(t => t.language);
+      expect(languages).toEqual(['en', 'sv']);
+      expect(languages).not.toContain('fr');
+    });
+
+  });
+
+  describe('isConfiguredTargetLocale', () => {
+    it('includes an exact configured locale', () => {
+      expect(isConfiguredTargetLocale(['sv', 'da'], 'sv')).toBe(true);
+    });
+
+    it('excludes a locale that is not configured', () => {
+      expect(isConfiguredTargetLocale(['sv', 'da'], 'fr')).toBe(false);
+    });
+
+    it('matches across separator differences (config pt-BR vs gettext dir pt_BR)', () => {
+      expect(isConfiguredTargetLocale(['pt-BR'], 'pt_BR')).toBe(true);
+    });
+
+    it('matches case-insensitively', () => {
+      expect(isConfiguredTargetLocale(['pt-BR'], 'PT_br')).toBe(true);
+    });
+
+    it('treats an empty outputLocales as no restriction', () => {
+      expect(isConfiguredTargetLocale([], 'anything')).toBe(true);
     });
   });
 
