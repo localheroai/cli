@@ -9,8 +9,8 @@ export interface ProjectSettings {
   length_preference: string | null;
   gender_handling: string | null;
   style_guide: string | null;
-  source_language: { code: string; name: string };
-  target_languages: Array<{ code: string; name: string }>;
+  source_language: { code: string; name: string; plural_categories?: string[] };
+  target_languages: Array<{ code: string; name: string; plural_categories?: string[] }>;
 }
 
 export interface SettingsResponse {

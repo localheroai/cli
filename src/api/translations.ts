@@ -64,8 +64,8 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
     apiKey
   });
 
-  if (!response.jobs || !response.jobs.length) {
-    throw new Error('No translation jobs were created');
+  if (!response || !Array.isArray(response.jobs)) {
+    throw new Error('Invalid translation job response: missing jobs array');
   }
 
   return {

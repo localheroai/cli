@@ -5,6 +5,7 @@ describe('translate command', () => {
   let mockConsole;
   let configUtils;
   let authUtils;
+  let settingsUtils;
   let fileUtils;
   let translationUtils;
   let syncService;
@@ -16,6 +17,7 @@ describe('translate command', () => {
       console: mockConsole,
       configUtils,
       authUtils,
+      settingsUtils,
       fileUtils,
       translationUtils,
       syncService,
@@ -35,6 +37,7 @@ describe('translate command', () => {
     configUtils = {
       getProjectConfig: jest.fn().mockResolvedValue({
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: {
@@ -46,6 +49,10 @@ describe('translate command', () => {
 
     authUtils = {
       checkAuth: jest.fn().mockResolvedValue(true)
+    };
+
+    settingsUtils = {
+      fetchSettings: jest.fn().mockResolvedValue({ settings: { target_languages: [] } })
     };
 
     fileUtils = {
@@ -194,6 +201,7 @@ describe('translate command', () => {
       undefined,
       {
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: {
@@ -219,6 +227,90 @@ describe('translate command', () => {
 
     // Verify no errors were logged
     expect(mockConsole.error).not.toHaveBeenCalled();
+  });
+
+  function stubFilesForCategoryTest() {
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [{ path: 'locales/en.json', format: 'json', content: Buffer.from('{}').toString('base64') }],
+      targetFilesByLocale: {},
+      allFiles: [{ path: 'locales/en.json', format: 'json' }]
+    });
+    translationUtils.findMissingTranslationsByLocale.mockReturnValue({ missing: {}, removed: [] });
+  }
+
+  it('installs valid plural categories into the config map', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockResolvedValue({
+      settings: { target_languages: [{ code: 'id', plural_categories: ['other'] }] }
+    });
+
+    await translate({}, createTranslateDeps());
+
+    const config = translationUtils.findMissingTranslationsByLocale.mock.calls[0][2];
+    expect(config.localePluralCategories).toEqual({ id: ['other'] });
+  });
+
+  it('ignores malformed plural categories (empty / no other / bad value)', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockResolvedValue({
+      settings: { target_languages: [
+        { code: 'a', plural_categories: [] },
+        { code: 'b', plural_categories: ['one'] },
+        { code: 'c', plural_categories: ['bogus'] },
+        { code: 'd', plural_categories: 'other' }
+      ] }
+    });
+
+    await translate({}, createTranslateDeps());
+
+    const config = translationUtils.findMissingTranslationsByLocale.mock.calls[0][2];
+    expect(config.localePluralCategories).toEqual({});
+  });
+
+  it('falls back to an empty map when settings fetch fails', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new Error('network'));
+
+    await translate({}, createTranslateDeps());
+
+    const config = translationUtils.findMissingTranslationsByLocale.mock.calls[0][2];
+    expect(config.localePluralCategories).toEqual({});
+  });
+
+  it('keys the category map by the config locale spelling (zh_cn vs zh-CN)', async () => {
+    stubFilesForCategoryTest();
+    configUtils.getProjectConfig.mockResolvedValue({
+      projectId: 'test-project',
+      sourceLocale: 'en',
+      outputLocales: ['zh_cn'],
+      translationFiles: { paths: ['locales/'] }
+    });
+    settingsUtils.fetchSettings.mockResolvedValue({
+      settings: { target_languages: [{ code: 'zh-CN', plural_categories: ['other'] }] }
+    });
+
+    await translate({}, createTranslateDeps());
+
+    const config = translationUtils.findMissingTranslationsByLocale.mock.calls[0][2];
+    expect(config.localePluralCategories).toEqual({ zh_cn: ['other'] });
+  });
+
+  it('assigns categories to every config spelling that folds to the API code', async () => {
+    stubFilesForCategoryTest();
+    configUtils.getProjectConfig.mockResolvedValue({
+      projectId: 'test-project',
+      sourceLocale: 'en',
+      outputLocales: ['zh_cn', 'zh-CN'],
+      translationFiles: { paths: ['locales/'] }
+    });
+    settingsUtils.fetchSettings.mockResolvedValue({
+      settings: { target_languages: [{ code: 'zh-CN', plural_categories: ['other'] }] }
+    });
+
+    await translate({}, createTranslateDeps());
+
+    const config = translationUtils.findMissingTranslationsByLocale.mock.calls[0][2];
+    expect(config.localePluralCategories).toEqual({ 'zh_cn': ['other'], 'zh-CN': ['other'] });
   });
 
   it('handles multiple source files', async () => {
@@ -366,6 +458,7 @@ describe('translate command', () => {
       undefined,
       {
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: {
@@ -382,6 +475,7 @@ describe('translate command', () => {
       undefined,
       {
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: {
@@ -670,6 +764,7 @@ describe('translate command', () => {
       undefined,
       {
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: {
@@ -803,6 +898,7 @@ describe('translate command', () => {
       undefined,
       {
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr', 'sv', 'nb'],
         translationFiles: {
@@ -950,6 +1046,7 @@ describe('translate command', () => {
     it('passes an ignoreMatcher that matches configured patterns', async () => {
       configUtils.getProjectConfig.mockResolvedValue({
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }
@@ -1004,6 +1101,7 @@ describe('translate command', () => {
     it('logs ignore summary in verbose mode when keys are filtered', async () => {
       configUtils.getProjectConfig.mockResolvedValue({
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }
@@ -1032,6 +1130,7 @@ describe('translate command', () => {
     it('does not log ignore summary in non-verbose mode', async () => {
       configUtils.getProjectConfig.mockResolvedValue({
         projectId: 'test-project',
+        localePluralCategories: {},
         sourceLocale: 'en',
         outputLocales: ['fr'],
         translationFiles: { paths: ['locales/'], ignoreKeys: ['admin.*'] }

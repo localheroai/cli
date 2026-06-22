@@ -6,6 +6,8 @@ import { findTranslationFiles } from '../utils/files.js';
 import { createTranslationJob, checkJobStatus, finalizeTranslationJobs } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
+import { fetchSettings } from '../api/settings.js';
+import { localeCodesMatch } from '../utils/translation-processor.js';
 import {
   filterByGitChanges,
   isGitAvailable,
@@ -64,6 +66,9 @@ interface TranslationDependencies {
   authUtils: {
     checkAuth: () => Promise<boolean>;
   };
+  settingsUtils: {
+    fetchSettings: (projectId: string) => Promise<any>;
+  };
   fileUtils: {
     findTranslationFiles: (
       config: TranslationConfig,
@@ -81,7 +86,11 @@ interface TranslationDependencies {
       sourceLanguage?: string,
       config?: ProjectConfig
     ) => Promise<any>;
-    findMissingTranslations: (sourceFile: any, targetFiles: any[], config: ProjectConfig) => any;
+    findMissingTranslations: (
+      sourceKeys: Record<string, any>,
+      targetKeys: Record<string, any>,
+      localeCategories?: string[]
+    ) => any;
     batchKeysWithMissing: (
       sourceFiles: OriginalTranslationFile[],
       missingByLocale: Record<string, MissingLocaleEntry>
@@ -114,6 +123,7 @@ const defaultDeps: TranslationDependencies = {
   console,
   configUtils: configService,
   authUtils: { checkAuth },
+  settingsUtils: { fetchSettings },
   fileUtils: { findTranslationFiles },
   translationUtils: {
     createTranslationJob,
@@ -127,8 +137,46 @@ const defaultDeps: TranslationDependencies = {
   execUtils: { execSync }
 };
 
+async function fetchLocalePluralCategories(
+  projectId: string,
+  outputLocales: string[],
+  settingsUtils: { fetchSettings: (projectId: string) => Promise<any> },
+  verbose: boolean | undefined,
+  logger: { log: (message?: any, ...optionalParams: any[]) => void }
+): Promise<Record<string, string[]>> {
+  const CLDR_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
+  const map: Record<string, string[]> = {};
+  try {
+    const { settings } = await settingsUtils.fetchSettings(projectId);
+    for (const lang of settings?.target_languages ?? []) {
+      const categories = lang.plural_categories;
+      // Only trust a non-empty CLDR subset that includes `other`; anything else
+      // (empty, malformed, partial-rollout) falls back to exact-name matching.
+      const valid = Array.isArray(categories) &&
+        categories.length > 0 &&
+        categories.includes('other') &&
+        categories.every((c: string) => CLDR_CATEGORIES.includes(c));
+      if (!valid) continue;
+
+      // Key by the CONFIG spelling so lookup-by-outputLocale matches even when
+      // the API returns a different separator/case (config zh_cn vs API zh-CN).
+      // Assign to every config locale that folds to this code so a duplicated
+      // spelling (e.g. both zh_cn and zh-CN) is handled deterministically.
+      const matches = outputLocales.filter((l) => localeCodesMatch(l, lang.code));
+      for (const configCode of (matches.length > 0 ? matches : [lang.code])) {
+        map[configCode] = categories;
+      }
+    }
+  } catch {
+    if (verbose) {
+      logger.log(chalk.gray('ℹ Could not fetch locale plural categories; using exact key matching.'));
+    }
+  }
+  return map;
+}
+
 export async function translate(options: TranslationOptions = {}, deps: TranslationDependencies = defaultDeps): Promise<void> {
-  const { console, configUtils, authUtils, fileUtils, translationUtils, gitUtils, execUtils } = deps;
+  const { console, configUtils, authUtils, settingsUtils, fileUtils, translationUtils, gitUtils, execUtils } = deps;
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
@@ -150,6 +198,17 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     process.exit(1);
     return;
   }
+
+  // Fetch per-locale CLDR plural categories so missing-detection doesn't demand a
+  // `.one` form from other-only locales (#432). Best-effort: an older backend that
+  // omits the field leaves the map empty, falling back to exact-name matching.
+  config.localePluralCategories = await fetchLocalePluralCategories(
+    config.projectId,
+    config.outputLocales,
+    settingsUtils,
+    verbose,
+    console
+  );
 
   if (verbose) {
     console.log(chalk.blue('\nℹ Using configuration:'));

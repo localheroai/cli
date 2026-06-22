@@ -167,6 +167,88 @@ describe('translation-utils', () => {
         expect(result.missingKeys).toEqual({});
       });
     });
+
+    describe('plural cardinality (#432)', () => {
+      const nestedSource = {
+        'questions_remaining.one': { value: '1 question left' },
+        'questions_remaining.other': { value: '%{count} questions left' }
+      };
+
+      it('does not demand .one for an other-only locale', () => {
+        const result = findMissingTranslations(nestedSource, {}, ['other']);
+        expect(result.missingKeys['questions_remaining.one']).toBeUndefined();
+        expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('treats a flat target value as satisfying .other for an other-only locale', () => {
+        const flatTarget = { 'questions_remaining': { value: '%{count} soal lagi' } };
+        const result = findMissingTranslations(nestedSource, flatTarget, ['other']);
+        expect(result.missingKeys).toEqual({});
+      });
+
+      it('requires both .one and .other for a one/other locale', () => {
+        const result = findMissingTranslations(nestedSource, {}, ['one', 'other']);
+        expect(result.missingKeys['questions_remaining.one']).toBeDefined();
+        expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('keeps a source-defined .zero required (other-only still needs it)', () => {
+        const withZero = {
+          ...nestedSource,
+          'questions_remaining.zero': { value: 'No questions left' }
+        };
+        const result = findMissingTranslations(withZero, {}, ['other']);
+        expect(result.missingKeys['questions_remaining.zero']).toBeDefined();
+        expect(result.missingKeys['questions_remaining.one']).toBeUndefined();
+      });
+
+      it('without categories, behaves exactly as before (exact-name match)', () => {
+        const result = findMissingTranslations(nestedSource, {});
+        expect(result.missingKeys['questions_remaining.one']).toBeDefined();
+        expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('treats a blank target value as still missing (regression)', () => {
+        const blankTarget = { 'questions_remaining': { value: '' } };
+        const result = findMissingTranslations(nestedSource, blankTarget, ['other']);
+        expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('treats a blank exact-match target as missing without categories (regression)', () => {
+        const source = { greeting: { value: 'Hi' } };
+        const result = findMissingTranslations(source, { greeting: { value: '' } });
+        expect(result.missingKeys['greeting']).toBeDefined();
+      });
+
+      it('preserves original truthiness: array target present, 0/false missing', () => {
+        const source = { items: 'x', count: 'y', flag: 'z' };
+        const target = { items: ['a', 'b'], count: 0, flag: false };
+        const result = findMissingTranslations(source, target);
+        expect(result.missingKeys['items']).toBeUndefined(); // array is present
+        expect(result.missingKeys['count']).toBeDefined();   // 0 is missing
+        expect(result.missingKeys['flag']).toBeDefined();    // false is missing
+      });
+
+      it('does not collapse a flat target for a non-plural .other key', () => {
+        const source = { 'errors.other': { value: 'Other error' } };
+        const flatTarget = { 'errors': { value: 'some error' } };
+        const result = findMissingTranslations(source, flatTarget, ['other']);
+        expect(result.missingKeys['errors.other']).toBeDefined();
+      });
+
+      it('only collapses for exactly [other], not [few, many, other]', () => {
+        const flatTarget = { 'questions_remaining': { value: 'x' } };
+        const result = findMissingTranslations(nestedSource, flatTarget, ['few', 'many', 'other']);
+        // a few/many/other locale keeps nested forms; flat does not satisfy .other
+        expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('does not treat a non-plural key ending in .other as a plural', () => {
+        const source = { 'errors.other': { value: 'Other error' } };
+        const result = findMissingTranslations(source, {}, ['other']);
+        expect(result.missingKeys['errors.other']).toBeDefined();
+      });
+    });
   });
 
   describe('findMissingTranslationsByLocale', () => {
@@ -367,6 +449,53 @@ describe('translation-utils', () => {
       );
       const removedForSource = result.removed.find((r) => r.name === 'activerecord.errors.foo');
       expect(removedForSource.locale).toBeUndefined();
+    });
+
+    describe('plural categories (#432)', () => {
+      const yamlSource = [{
+        path: 'config/locales/en.yml',
+        format: 'yml',
+        content: createBase64Content({
+          en: { questions_remaining: { one: '1 left', other: '%{count} left' } }
+        })
+      }];
+
+      it('does not flag .one missing for an other-only locale (flat target satisfies .other)', () => {
+        const targetFilesByLocale = {
+          id: [{
+            path: 'config/locales/id.yml',
+            format: 'yml',
+            content: createBase64Content({ id: { questions_remaining: '%{count} soal lagi' } }),
+            locale: 'id'
+          }]
+        };
+        const config = { sourceLocale: 'en', outputLocales: ['id'], localePluralCategories: { id: ['other'] } };
+
+        const result = findMissingTranslationsByLocale(yamlSource, targetFilesByLocale, config, false);
+        expect(Object.keys(result.missing)).toHaveLength(0);
+      });
+
+      it('still requires both forms for a one/other locale', () => {
+        const config = { sourceLocale: 'en', outputLocales: ['tl'], localePluralCategories: { tl: ['one', 'other'] } };
+        const result = findMissingTranslationsByLocale(yamlSource, {}, config, false);
+
+        const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
+        expect(keys).toContain('questions_remaining.one');
+        expect(keys).toContain('questions_remaining.other');
+      });
+
+      it('does NOT apply cardinality to a JSON file (exact-name match preserved)', () => {
+        const jsonSource = [{
+          path: 'locales/en.json',
+          format: 'json',
+          content: createBase64Content({ 'questions_remaining.one': '1 left', 'questions_remaining.other': '%{count} left' })
+        }];
+        const config = { sourceLocale: 'en', outputLocales: ['id'], localePluralCategories: { id: ['other'] } };
+
+        const result = findMissingTranslationsByLocale(jsonSource, {}, config, false);
+        const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
+        expect(keys).toContain('questions_remaining.one');
+      });
     });
   });
 
