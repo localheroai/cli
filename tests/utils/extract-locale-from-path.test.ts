@@ -191,8 +191,16 @@ describe('gettext LC_MESSAGES layout', () => {
     expect(extractLocaleFromPath('priv/gettext/pt_BR/LC_MESSAGES/default.po', undefined, knownLocales)).toBe('pt_BR');
   });
 
-  it('throws when the gettext locale directory is not a valid locale', () => {
-    expect(() => extractLocaleFromPath('priv/gettext/sources/LC_MESSAGES/errors.po', undefined, knownLocales))
+  it('extracts a custom locale directory from the gettext layout', () => {
+    expect(extractLocaleFromPath('priv/gettext/ja_easy/LC_MESSAGES/default.po', undefined, knownLocales)).toBe('ja_easy');
+  });
+
+  it('trusts any directory above LC_MESSAGES as the locale, including non-standard codes', () => {
+    expect(extractLocaleFromPath('priv/gettext/valencia/LC_MESSAGES/errors.po', undefined, knownLocales)).toBe('valencia');
+  });
+
+  it('throws when there is no directory above LC_MESSAGES', () => {
+    expect(() => extractLocaleFromPath('LC_MESSAGES/errors.po', undefined, knownLocales))
       .toThrow(/Could not extract locale from path/);
   });
 });
