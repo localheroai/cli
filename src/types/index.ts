@@ -71,6 +71,9 @@ export interface ProjectConfig {
   /** Declared custom locales — whitelists non-standard codes through backend validation */
   customLocales?: CustomLocale[];
 
+  /** Per-locale CLDR plural categories, fetched at runtime (#432). Not persisted. */
+  localePluralCategories?: Record<string, string[]>;
+
   /** Translation files configuration */
   translationFiles: TranslationFileConfig;
 

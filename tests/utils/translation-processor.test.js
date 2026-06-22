@@ -108,6 +108,33 @@ describe('translation-processor', () => {
       expect(result.uniqueKeysTranslated.has('welcome')).toBe(true);
     });
 
+    it('handles a benign empty-jobs no-op without error (#432)', async () => {
+      const batches = [{
+        sourceFilePath: 'locales/en.json',
+        sourceFile: { path: 'locales/en.json', format: 'json', content: Buffer.from('{}').toString('base64') },
+        localeEntries: ['id:locales/en.json'],
+        locales: ['id']
+      }];
+      const missingByLocale = {
+        'id:locales/en.json': { locale: 'id', path: 'locales/en.json', targetPath: 'locales/id.json', keys: {}, keyCount: 0 }
+      };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({ jobs: [] });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        { projectId: 'test-project' },
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.checkJobStatus).not.toHaveBeenCalled();
+      expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
+      expect(result.uniqueKeysTranslated.size).toBe(0);
+      expect(result.failedLanguages).toEqual([]);
+    });
+
     it('handles job status transitions', async () => {
       const batches = [
         {

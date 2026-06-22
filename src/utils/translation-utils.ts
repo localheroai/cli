@@ -105,14 +105,70 @@ function extractPrimitiveValue(value: unknown): TranslationPrimitiveValue {
  * @param targetKeys The target translation keys
  * @returns Object containing missing and skipped keys
  */
+const CLDR_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
+
+function splitPluralKey(key: string): { base: string; category: string } | null {
+  const lastDot = key.lastIndexOf('.');
+  if (lastDot === -1) return null;
+  const category = key.slice(lastDot + 1);
+  if (!CLDR_CATEGORIES.includes(category)) return null;
+  return { base: key.slice(0, lastDot), category };
+}
+
+// A key is a real plural form only if its base has a sibling CLDR category in
+// the source — a lone `errors.other` with no `errors.one` is NOT a plural.
+function isPluralForm(key: string, sourceKeys: Record<string, any>): boolean {
+  const parsed = splitPluralKey(key);
+  if (!parsed) return false;
+  return CLDR_CATEGORIES.some(
+    (cat) => cat !== parsed.category && `${parsed.base}.${cat}` in sourceKeys
+  );
+}
+
 export function findMissingTranslations(
   sourceKeys: Record<string, any>,
-  targetKeys: Record<string, any>
+  targetKeys: Record<string, any>,
+  localeCategories?: string[]
 ): TranslationKeysResult {
   const missingKeys: Record<string, SourceKeyDetails> = {};
   const skippedKeys: Record<string, SkippedKeyDetails> = {};
+  const hasValue = (entry: any): boolean => {
+    if (entry === undefined || entry === null) return false;
+    if (Array.isArray(entry)) return true;
+    if (typeof entry === 'object') return 'value' in entry ? hasValue(entry.value) : true;
+    return Boolean(entry);
+  };
+
+  // Only an exactly-`["other"]` locale collapses a plural to a flat key.
+  const collapsesToFlat = !!localeCategories &&
+    localeCategories.length === 1 && localeCategories[0] === 'other';
+
+  const isSatisfied = (key: string): boolean => {
+    if (hasValue(targetKeys[key])) return true;
+    if (!collapsesToFlat) return false;
+
+    // A flat target value satisfies the `.other` form ONLY for a real plural
+    // group (sibling category in source) — a lone `errors.other` is not a plural
+    // and must not be silently satisfied by a flat `errors` value.
+    const parsed = splitPluralKey(key);
+    if (!parsed || parsed.category !== 'other' || !isPluralForm(key, sourceKeys)) return false;
+    return hasValue(targetKeys[parsed.base]);
+  };
+
+  const isNeeded = (key: string): boolean => {
+    if (!localeCategories) return true;
+    const parsed = splitPluralKey(key);
+    if (!parsed || !isPluralForm(key, sourceKeys)) return true;
+
+    // A source-defined `.zero` is translated even for locales without a CLDR
+    // zero category (the backend honours it); the rest follow target cardinality.
+    if (parsed.category === 'zero') return true;
+    return localeCategories.includes(parsed.category);
+  };
 
   for (const [key, details] of Object.entries(sourceKeys)) {
+    if (!isNeeded(key)) continue;
+
     if (typeof details === 'string') {
       if (
         details.toLowerCase().includes('wip_') ||
@@ -134,7 +190,7 @@ export function findMissingTranslations(
         continue;
       }
 
-      if (!targetKeys[key]) {
+      if (!isSatisfied(key)) {
         missingKeys[key] = {
           value: details,
           sourceKey: key
@@ -179,7 +235,7 @@ export function findMissingTranslations(
       continue;
     }
 
-    if (!targetKeys[key]) {
+    if (!isSatisfied(key)) {
       if (typeof details === 'object' && details !== null && 'value' in details) {
         missingKeys[key] = {
           ...details,
@@ -210,7 +266,7 @@ export function findMissingTranslations(
 export function findMissingTranslationsByLocale(
   sourceFiles: TranslationFile[],
   targetFilesByLocale: Record<string, TranslationFile[]>,
-  config: { sourceLocale: string; outputLocales: string[] },
+  config: { sourceLocale: string; outputLocales: string[]; localePluralCategories?: Record<string, string[]> },
   verbose: boolean,
   logger: { log: (message?: any, ...optionalParams: any[]) => void } = console,
   filterOptions?: { ignoreMatcher?: (keyName: string) => boolean }
@@ -251,7 +307,8 @@ export function findMissingTranslationsByLocale(
         targetFiles,
         sourceFile,
         config.sourceLocale,
-        matcher
+        matcher,
+        config.localePluralCategories?.[targetLocale]
       );
 
       if (result.targetRemoved && result.targetRemoved.length > 0) {
@@ -567,7 +624,8 @@ export function processLocaleTranslations(
   targetFiles: TranslationFile[],
   sourceFile: TranslationFile,
   sourceLocale: string,
-  matcher?: (keyName: string) => boolean
+  matcher?: (keyName: string) => boolean,
+  localeCategories?: string[]
 ): ProcessLocaleResult & { targetRemoved?: string[] } {
   try {
     const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
@@ -640,8 +698,17 @@ export function processLocaleTranslations(
         missingKeys[key] = entryData;
       });
     } else {
-      // For other file types (yml, json), use the generic missing detection
-      const result = findMissingTranslations(sourceKeys, targetKeys);
+      // For other file types (yml, json), use the generic missing detection.
+      // Plural-cardinality awareness (#432) is YAML-only: a Rails YAML plural
+      // nests CLDR categories (BASE.one/BASE.other); JSON has no such convention,
+      // so it keeps exact-name matching to avoid misreading an `errors.other` key.
+      const isYamlFile = sourceFile.format === 'yml' || sourceFile.format === 'yaml' ||
+                          sourceFile.path.endsWith('.yml') || sourceFile.path.endsWith('.yaml');
+      const result = findMissingTranslations(
+        sourceKeys,
+        targetKeys,
+        isYamlFile ? localeCategories : undefined
+      );
       missingKeys = result.missingKeys;
       skippedKeys = result.skippedKeys;
     }

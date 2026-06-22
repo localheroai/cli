@@ -93,14 +93,34 @@ describe('translations API', () => {
       });
     });
 
-    it('handles empty jobs response', async () => {
+    it('returns an empty jobs no-op instead of throwing (#432)', async () => {
+      // The backend returns { jobs: [] } when no key is eligible for translation
+      // (e.g. only a `.one` form for an other-only locale). That is a benign
+      // no-op, not an error — the CLI must accept it so the run finalizes.
       mockApiRequest.mockResolvedValueOnce({ jobs: [] });
+
+      const result = await createTranslationJob({
+        projectId: 'proj_123',
+        sourceFiles: [],
+        targetLocales: ['fr']
+      });
+
+      expect(result.jobs).toEqual([]);
+      expect(result.totalJobs).toBe(0);
+    });
+
+    it.each([
+      ['missing jobs property', {}],
+      ['null jobs', { jobs: null }],
+      ['non-array jobs', { jobs: { error: 'boom' } }]
+    ])('throws on a malformed response (%s), not a silent no-op', async (_label, body) => {
+      mockApiRequest.mockResolvedValueOnce(body);
 
       await expect(createTranslationJob({
         projectId: 'proj_123',
         sourceFiles: [],
         targetLocales: ['fr']
-      })).rejects.toThrow('No translation jobs were created');
+      })).rejects.toThrow();
     });
   });
 
