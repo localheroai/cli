@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.53] - 2026-06-22
+
+### Fixed
+- `translate` no longer re-translates the same Rails YAML plurals on every run for languages with a single plural form (Indonesian, Japanese, Chinese for example). These keys now settle after the first run instead.
+- `push --prune --force` no longer flags every key for deletion in locale-wrapped files like `rails.en.yml`.
+
+### Added
+- Gettext (`.po`) locales are picked up from the standard `LC_MESSAGES` directory layout.
+- Imports only include the locales listed in `outputLocales`.
+
 ## [0.0.52] - 2026-06-12
 
 ### Added
