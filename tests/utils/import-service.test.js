@@ -346,6 +346,40 @@ describe('importService', () => {
       ]);
       expect(result.statistics).toBeDefined();
     });
+
+    it('excludes locales that are not in outputLocales from the import payload', async () => {
+      const scopedConfig = {
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['sv'],
+        translationFiles: { paths: ['locales'], ignore: [] }
+      };
+
+      const files = [
+        path.join(TEST_BASE_PATH, 'locales/en.json'),
+        path.join(TEST_BASE_PATH, 'locales/sv.json'),
+        path.join(TEST_BASE_PATH, 'locales/fr.json')
+      ];
+
+      mockGlob.mockResolvedValue(files);
+      mockFs.promises.readFile.mockImplementation((filePath) => {
+        if (filePath.endsWith('en.json')) return Promise.resolve('{"hello":"Hello"}');
+        if (filePath.endsWith('sv.json')) return Promise.resolve('{"hello":"Hej"}');
+        if (filePath.endsWith('fr.json')) return Promise.resolve('{"hello":"Bonjour"}');
+        return Promise.reject(new Error(`Unexpected file: ${filePath}`));
+      });
+
+      mockImportsApi.createImport.mockResolvedValue({
+        import: { status: 'completed', id: 'import-123', statistics: { total_keys: 1, languages: [] }, warnings: [], translations_url: 'http://example.com' }
+      });
+
+      const result = await importService.importTranslations(scopedConfig, TEST_BASE_PATH);
+
+      expect(result.status).toBe('completed');
+      const languages = mockImportsApi.createImport.mock.calls[0][0].translations.map(t => t.language);
+      expect(languages).toEqual(['en', 'sv']);
+      expect(languages).not.toContain('fr');
+    });
   });
 
   describe('pushTranslations', () => {

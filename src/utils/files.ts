@@ -93,6 +93,13 @@ export function extractLocaleFromPath(filePath: string, localeRegex?: string, kn
     return dirNameOriginal;
   }
 
+  if (dirNameOriginal === 'LC_MESSAGES') {
+    const gettextLocale = path.basename(path.dirname(path.dirname(filePath)));
+    if (gettextLocale && isGettextLocale(gettextLocale)) {
+      return gettextLocale;
+    }
+  }
+
   const filenameOriginal = path.basename(filePath);
   const regexPattern = new RegExp(effectiveLocaleRegex);
   const regexMatch = filenameOriginal.match(regexPattern);
@@ -119,6 +126,12 @@ export function isValidLocale(locale: string): boolean {
   // Basic validation for language code (2 letters) or language-region code (e.g., en-US or en-us)
   // Case insensitive for better compatibility with existing code
   return /^[a-zA-Z]{2}(?:-[a-zA-Z]{2})?$/.test(locale);
+}
+
+function isGettextLocale(dirName: string): boolean {
+  // gettext locale directories allow an underscore-separated region (pt_BR) in
+  // addition to the dash form, e.g. priv/gettext/<locale>/LC_MESSAGES/<domain>.po
+  return /^[a-zA-Z]{2,3}(?:[_-][a-zA-Z]{2,4})?$/.test(dirName);
 }
 
 const PO_LEAF_KEYS = new Set(['value', 'context', 'metadata']);

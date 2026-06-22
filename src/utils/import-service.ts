@@ -333,8 +333,14 @@ export const importService = {
       return { status: 'no_files' };
     }
 
+    const outputLocales = config.outputLocales ?? [];
+    const isConfiguredTarget = (language: string): boolean =>
+      outputLocales.length === 0 || outputLocales.includes(language);
+
     const sourceFiles = files.filter(file => file.language === config.sourceLocale);
-    const targetFiles = files.filter(file => file.language !== config.sourceLocale);
+    const targetFiles = files.filter(
+      file => file.language !== config.sourceLocale && isConfiguredTarget(file.language)
+    );
     const importedFiles = {
       source: sourceFiles,
       target: targetFiles
