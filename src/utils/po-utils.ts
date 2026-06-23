@@ -277,8 +277,13 @@ export function createPoFile(entries: PoEntry[], headers?: Record<string, string
     }
 
     const translationEntry: any = {
+      msgid: entry.msgid,
       msgstr: entry.msgstr
     };
+
+    if (context) {
+      translationEntry.msgctxt = context;
+    }
 
     if (entry.msgid_plural) {
       translationEntry.msgid_plural = entry.msgid_plural;
