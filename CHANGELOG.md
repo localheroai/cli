@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.55] - 2026-06-23
+
+### Fixed
+- Generated `.po` files no longer come out with blank `msgid ""` entries or dropped `msgctxt` context. This affected gettext/Phoenix setups where a new target locale file is written from scratch (e.g. `LC_MESSAGES` layouts). New `.po` files also keep source references, flags, translator comments, and plural grouping.
+
+### Changed
+- An optional `.zero` plural defined in the source is no longer added to every target locale by default. A locale only gets a plural form it actually uses (its CLDR set), so optional forms like `.zero` aren't forced into languages that don't need them. Propagating it everywhere is now a per-project setting for teams that want it.
+
 ## [0.0.54] - 2026-06-23
 
 ### Fixed
