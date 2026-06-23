@@ -4,6 +4,7 @@ import path from 'path';
 export const SPECIAL_CHARS_REGEX = /[:@#,[\]{}?|>&*!\n]/;
 export const INTERPOLATION = '%{';
 export const MAX_ARRAY_LENGTH = 1000;
+export const CLDR_PLURAL_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
 
 /**
  * Checks if a file exists at the specified path
