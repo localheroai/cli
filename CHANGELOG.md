@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.54] - 2026-06-23
+
+### Fixed
+- `translate` no longer writes a value with no space after the key (`key:value`) when filling a key that previously existed with an empty value.
+- Numeric Rails config like `precision: 0` is no longer treated as a missing translation and overwritten with the source value.
+- Filling a plural form on a key that was a plain string (e.g. adding a `.zero`) now keeps the original value as `.other` instead of dropping it. Existing list values are preserved the same way.
+
 ## [0.0.53] - 2026-06-22
 
 ### Fixed
