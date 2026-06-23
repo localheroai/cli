@@ -246,20 +246,38 @@ describe('translation-utils', () => {
         expect(result.missingKeys['questions_remaining.other']).toBeDefined();
       });
 
-      it('keeps a source-defined .zero required (other-only still needs it)', () => {
+      it('does not require .zero for a locale whose categories lack zero (#438)', () => {
         const withZero = {
           ...nestedSource,
           'questions_remaining.zero': { value: 'No questions left' }
         };
         const result = findMissingTranslations(withZero, {}, ['other']);
-        expect(result.missingKeys['questions_remaining.zero']).toBeDefined();
+        expect(result.missingKeys['questions_remaining.zero']).toBeUndefined();
         expect(result.missingKeys['questions_remaining.one']).toBeUndefined();
+      });
+
+      it('requires .zero when the locale categories include zero (#438)', () => {
+        const withZero = {
+          ...nestedSource,
+          'questions_remaining.zero': { value: 'No questions left' }
+        };
+        const result = findMissingTranslations(withZero, {}, ['other', 'zero']);
+        expect(result.missingKeys['questions_remaining.zero']).toBeDefined();
       });
 
       it('without categories, behaves exactly as before (exact-name match)', () => {
         const result = findMissingTranslations(nestedSource, {});
         expect(result.missingKeys['questions_remaining.one']).toBeDefined();
         expect(result.missingKeys['questions_remaining.other']).toBeDefined();
+      });
+
+      it('without categories, a .zero source key is still requested (old-backend compat)', () => {
+        const withZero = {
+          ...nestedSource,
+          'questions_remaining.zero': { value: 'No questions left' }
+        };
+        const result = findMissingTranslations(withZero, {});
+        expect(result.missingKeys['questions_remaining.zero']).toBeDefined();
       });
 
       it('treats a blank target value as still missing (regression)', () => {
@@ -536,6 +554,30 @@ describe('translation-utils', () => {
         const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
         expect(keys).toContain('questions_remaining.one');
         expect(keys).toContain('questions_remaining.other');
+      });
+
+      const yamlSourceWithZero = [{
+        path: 'config/locales/en.yml',
+        format: 'yml',
+        content: createBase64Content({
+          en: { questions_remaining: { zero: 'None left', one: '1 left', other: '%{count} left' } }
+        })
+      }];
+
+      it('does NOT request .zero for an other-only locale whose categories lack zero (#438)', () => {
+        const config = { sourceLocale: 'en', outputLocales: ['ja'], localePluralCategories: { ja: ['other'] } };
+        const result = findMissingTranslationsByLocale(yamlSourceWithZero, {}, config, false);
+
+        const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
+        expect(keys).not.toContain('questions_remaining.zero');
+      });
+
+      it('requests .zero when the locale categories include zero (#438)', () => {
+        const config = { sourceLocale: 'en', outputLocales: ['ja'], localePluralCategories: { ja: ['other', 'zero'] } };
+        const result = findMissingTranslationsByLocale(yamlSourceWithZero, {}, config, false);
+
+        const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
+        expect(keys).toContain('questions_remaining.zero');
       });
 
       it('does NOT apply cardinality to a JSON file (exact-name match preserved)', () => {

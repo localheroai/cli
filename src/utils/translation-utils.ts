@@ -170,9 +170,9 @@ export function findMissingTranslations(
     const parsed = splitPluralKey(key);
     if (!parsed || !isPluralForm(key, sourceKeys)) return true;
 
-    // A source-defined `.zero` is translated even for locales without a CLDR
-    // zero category (the backend honours it); the rest follow target cardinality.
-    if (parsed.category === 'zero') return true;
+    // A plural form is needed only when the locale's categories include it. The
+    // backend includes `zero` for a locale when the project propagates optional
+    // plurals and for locales whose CLDR set requires it (ar/cy).
     return localeCategories.includes(parsed.category);
   };
 
