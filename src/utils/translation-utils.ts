@@ -45,7 +45,7 @@ interface TranslationKeysResult {
   skippedKeys: Record<string, SkippedKeyDetails>;
 }
 
-export type TranslationPrimitiveValue = string | boolean | string[];
+export type TranslationPrimitiveValue = string | boolean | number | string[];
 
 export interface TranslationWithMetadata {
   value: TranslationPrimitiveValue;
@@ -87,7 +87,7 @@ interface SkippedKeyDetails {
  * Extract primitive value from any value type
  */
 function extractPrimitiveValue(value: unknown): TranslationPrimitiveValue {
-  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'string') {
+  if (Array.isArray(value) || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number') {
     return value;
   }
 
@@ -137,6 +137,16 @@ export function findMissingTranslations(
     if (Array.isArray(entry)) return true;
     if (typeof entry === 'object') return 'value' in entry ? hasValue(entry.value) : true;
     return Boolean(entry);
+  };
+
+  // Presence check for non-string config scalars (numbers/booleans): a numeric `0`
+  // or boolean `false` counts as present, but `''`, null/undefined, and a blank
+  // metadata wrapper do not.
+  const hasConfigValue = (entry: any): boolean => {
+    if (entry === undefined || entry === null) return false;
+    if (typeof entry === 'object') return 'value' in entry ? hasConfigValue(entry.value) : false;
+    if (typeof entry === 'string') return entry.trim() !== '';
+    return true;
   };
 
   // Only an exactly-`["other"]` locale collapses a plural to a flat key.
@@ -199,9 +209,8 @@ export function findMissingTranslations(
       continue;
     }
 
-    if (typeof details === 'boolean') {
-      const targetValue = targetKeys[key];
-      if (targetValue === undefined || (typeof targetValue === 'object' && !('value' in targetValue))) {
+    if (typeof details === 'boolean' || typeof details === 'number') {
+      if (!hasConfigValue(targetKeys[key])) {
         missingKeys[key] = {
           value: details,
           sourceKey: key

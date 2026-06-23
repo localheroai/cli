@@ -44,6 +44,60 @@ describe('translation-utils', () => {
       expect(result.skippedKeys).toEqual({});
     });
 
+    it('does not treat an existing numeric 0 target value as missing', () => {
+      const sourceKeys = {
+        'number.format.precision': 2,
+        'number.format.significant': false
+      };
+      const targetKeys = {
+        'number.format.precision': 0,
+        'number.format.significant': false
+      };
+
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+
+      expect(result.missingKeys).toEqual({});
+    });
+
+    it('reports a numeric source with a blank (null) target as missing without throwing', () => {
+      const sourceKeys = { 'number.format.precision': 2 };
+      const targetKeys = { 'number.format.precision': null };
+
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+
+      expect(result.missingKeys['number.format.precision']).toEqual({
+        value: 2,
+        sourceKey: 'number.format.precision'
+      });
+    });
+
+    it('reports a boolean source with a blank (null) target as missing without throwing', () => {
+      const sourceKeys = { 'config.enabled': true };
+      const targetKeys = { 'config.enabled': null };
+
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+
+      expect(result.missingKeys['config.enabled']).toEqual({
+        value: true,
+        sourceKey: 'config.enabled'
+      });
+    });
+
+    it.each([
+      ['empty-string target', ''],
+      ['blank metadata-wrapper target', { value: '' }]
+    ])('reports a numeric source with a %s as missing', (_, targetValue) => {
+      const sourceKeys = { 'number.format.precision': 2 };
+      const targetKeys = { 'number.format.precision': targetValue };
+
+      const result = findMissingTranslations(sourceKeys, targetKeys);
+
+      expect(result.missingKeys['number.format.precision']).toEqual({
+        value: 2,
+        sourceKey: 'number.format.precision'
+      });
+    });
+
     it.each([
       ['wip_ prefix', 'wip_feature', 'wip_This is a work in progress'],
       ['_wip suffix', 'feature', 'This is a work in progress_wip'],
