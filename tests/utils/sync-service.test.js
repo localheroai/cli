@@ -542,7 +542,11 @@ describe('syncService', () => {
                     {
                       key: 'New key name',
                       value: 'New key name translated',
-                      old_values: [{ key: 'Old key name' }]
+                      old_values: [{ key: 'Old key name' }],
+                      metadata: {
+                        source_references: ['lib/example.ex:10'],
+                        po_flags: ['elixir-format']
+                      }
                     },
                     {
                       key: 'Unchanged key',
@@ -567,8 +571,21 @@ describe('syncService', () => {
       const translations = mockTranslationUpdater.updateTranslationFile.mock.calls[0][1];
       expect(Array.isArray(translations)).toBe(true);
       expect(translations).toEqual([
-        { key: 'New key name', value: 'New key name translated', old_values: [{ key: 'Old key name' }] },
-        { key: 'Unchanged key', value: 'Unchanged translation', old_values: undefined }
+        {
+          key: 'New key name',
+          value: 'New key name translated',
+          old_values: [{ key: 'Old key name' }],
+          metadata: {
+            source_references: ['lib/example.ex:10'],
+            po_flags: ['elixir-format']
+          }
+        },
+        {
+          key: 'Unchanged key',
+          value: 'Unchanged translation',
+          old_values: undefined,
+          metadata: undefined
+        }
       ]);
     });
 

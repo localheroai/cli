@@ -303,9 +303,18 @@ async function applyTranslations(
     console.log(chalk.blue(`  Updating translations for ${languageCode} in ${targetPath}`));
   }
 
+  const isPoFile = /\.(po|pot)$/i.test(targetPath);
+  const translationsToWrite = isPoFile
+    ? Object.entries(data.translations.data).map(([key, value]) => ({
+      key,
+      value,
+      ...(entry.keys[key]?.metadata && { metadata: entry.keys[key].metadata })
+    }))
+    : data.translations.data;
+
   const result = await translationUtils.updateTranslationFile(
     targetPath,
-    data.translations.data,
+    translationsToWrite,
     fileLocale,
     entry.path,
     undefined,

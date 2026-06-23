@@ -138,6 +138,39 @@ msgstr[1] "%(count)d items"
     });
   });
 
+  describe('createPoFile', () => {
+    it('writes the msgid for each entry (regression: empty msgid)', () => {
+      const content = createPoFile([
+        { msgid: 'Website', msgstr: ['Webbplats'] },
+        { msgid: 'should have %{count} items', msgstr: ['bör ha %{count} objekt'] }
+      ]);
+
+      expect(content).toContain('msgid "Website"');
+      expect(content).toContain('msgstr "Webbplats"');
+      expect(content).toContain('msgid "should have %{count} items"');
+      // No non-header entry should have a blank msgid paired with a real msgstr
+      expect(content).not.toMatch(/msgid ""\nmsgstr "Webbplats"/);
+    });
+
+    it('round-trips msgid and msgstr through parsePoFile', () => {
+      const content = createPoFile([{ msgid: 'Hello', msgstr: ['Hej'] }]);
+      const parsed = parsePoFile(content);
+
+      expect(parsed.entries).toHaveLength(1);
+      expect(parsed.entries[0].msgid).toBe('Hello');
+      expect(parsed.entries[0].msgstr).toEqual(['Hej']);
+    });
+
+    it('preserves msgctxt when writing', () => {
+      const content = createPoFile([
+        { msgid: 'May', msgstr: ['Maj'], msgctxt: 'ShortenedMonths' }
+      ]);
+
+      expect(content).toContain('msgctxt "ShortenedMonths"');
+      expect(content).toContain('msgid "May"');
+    });
+  });
+
   describe('poEntriesToApiFormat', () => {
     it('should convert simple entries to API format', () => {
       const entries = [

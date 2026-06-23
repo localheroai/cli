@@ -35,6 +35,16 @@ export interface TranslationWithMetadata {
   key: string;
   value: unknown;
   old_values?: Array<{ key: string }>;
+  metadata?: {
+    po_plural?: boolean;
+    plural_index?: number;
+    msgid?: string;
+    msgid_plural?: string;
+    translator_comments?: string;
+    source_references?: string[];
+    po_flags?: string[];
+    [key: string]: unknown;
+  };
 }
 
 /**
