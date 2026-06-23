@@ -194,6 +194,7 @@ export const syncService: SyncService = {
             key: t.key,
             value: t.value,
             old_values: t.old_values,
+            metadata: t.metadata
           }));
         } else {
           const record: Record<string, string> = {};

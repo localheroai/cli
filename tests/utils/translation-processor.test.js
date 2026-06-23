@@ -108,6 +108,61 @@ describe('translation-processor', () => {
       expect(result.uniqueKeysTranslated.has('welcome')).toBe(true);
     });
 
+    it('passes source metadata through when writing PO translations', async () => {
+      const batches = [{
+        sourceFilePath: 'locales/en/messages.po',
+        sourceFile: {
+          path: 'locales/en/messages.po',
+          format: 'po',
+          content: Buffer.from('{}').toString('base64')
+        },
+        localeEntries: ['de:locales/en/messages.po'],
+        locales: ['de']
+      }];
+      const metadata = {
+        source_references: ['activity/settings_views.py', 'chat/settings_views.py'],
+        po_flags: ['elixir-autogen', 'elixir-format'],
+        translator_comments: 'Settings label'
+      };
+      const missingByLocale = {
+        'de:locales/en/messages.po': {
+          locale: 'de',
+          path: 'locales/en/messages.po',
+          targetPath: 'locales/de/messages.po',
+          keys: {
+            Website: { value: 'Website', sourceKey: 'Website', metadata }
+          },
+          keyCount: 1
+        }
+      };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-po', language: { code: 'de' } }]
+      });
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: { data: { Website: 'Website' } },
+        language: { code: 'de' }
+      });
+
+      await processTranslationBatches(
+        batches,
+        missingByLocale,
+        { projectId: 'test-project' },
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/de/messages.po',
+        [{ key: 'Website', value: 'Website', metadata }],
+        'de',
+        'locales/en/messages.po',
+        undefined,
+        { projectId: 'test-project' }
+      );
+    });
+
     it('handles a benign empty-jobs no-op without error (#432)', async () => {
       const batches = [{
         sourceFilePath: 'locales/en.json',
