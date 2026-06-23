@@ -329,7 +329,11 @@ export function spliceYamlUpdate(
       }
       const keyColumn = lineStartColumnOf(source, range[0]);
       const serialized = serializeScalarValue(value, existingType, keyColumn, indentUnit);
-      patches.push({ start: range[0], end: range[1], text: serialized });
+      const gluedToColon = range[0] > 0 && source[range[0] - 1] === ':';
+      const leadingSeparator = gluedToColon ? ' ' : '';
+      const followedByComment = source[range[1]] === '#';
+      const trailingSeparator = followedByComment ? ' ' : '';
+      patches.push({ start: range[0], end: range[1], text: leadingSeparator + serialized + trailingSeparator });
       continue;
     }
 

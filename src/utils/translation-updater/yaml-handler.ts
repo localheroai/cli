@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import yaml from 'yaml';
-import { SPECIAL_CHARS_REGEX, INTERPOLATION, fileExists, tryParseJsonArray } from './common.js';
+import { SPECIAL_CHARS_REGEX, INTERPOLATION, CLDR_PLURAL_CATEGORIES, fileExists, tryParseJsonArray } from './common.js';
 import {
   spliceYamlUpdate,
   spliceYamlDelete,
@@ -84,6 +84,20 @@ function shouldForceQuotes(str: unknown): boolean {
   return needsQuotes(str);
 }
 
+// A node worth preserving as `.other` when a flat value is migrated into a
+// plural map: a scalar with a real value, or a non-empty sequence. Blank
+// scalars and empty sequences carry nothing to keep.
+function hasPreservableNode(node: unknown): boolean {
+  if (yaml.isScalar(node)) {
+    const value = node.value;
+    return value !== undefined && value !== null && value !== '';
+  }
+  if (yaml.isSeq(node)) {
+    return node.items.length > 0;
+  }
+  return false;
+}
+
 function processArrayItems(array: unknown[], yamlDoc: yaml.Document): YamlNode[] {
   return array.map(item => {
     const itemNode = yamlDoc.createNode(item) as YamlNode;
@@ -154,9 +168,14 @@ async function updateYamlTranslations(
       if (!current.has(key)) {
         current.set(key, yamlDoc.createNode({}));
       }
-      const nextNode = current.get(key);
+      const nextNode = current.get(key, true);
       if (!yaml.isMap(nextNode)) {
         const newNode = yamlDoc.createNode({}) as YamlMap;
+        const nestingTerminalPluralCategory = i + 1 === keys.length - 1 &&
+          CLDR_PLURAL_CATEGORIES.includes(keys[i + 1]);
+        if (nestingTerminalPluralCategory && hasPreservableNode(nextNode)) {
+          newNode.set('other', nextNode);
+        }
         current.set(key, newNode);
         current = newNode;
       } else {

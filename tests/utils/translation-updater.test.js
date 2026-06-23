@@ -853,6 +853,111 @@ en:
       });
     });
 
+    describe('empty-key writing', () => {
+      it('inserts a space when filling a key that existed with an empty value', async () => {
+        const filePath = path.join(tempDir, 'devise.views.id.yml');
+        const initialContent = `id:
+  devise:
+    sessions:
+      already_signed_out:
+      new:
+        sign_in: Masuk
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'devise.sessions.already_signed_out': 'Keluar dari akun berhasil.'
+        }, 'id');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+
+        expect(updated).toContain('already_signed_out: Keluar dari akun berhasil.');
+        expect(updated).not.toContain('already_signed_out:Keluar');
+
+        const reparsed = yaml.parse(updated);
+        expect(reparsed.id.devise.sessions.already_signed_out).toBe('Keluar dari akun berhasil.');
+        expect(reparsed.id.devise.sessions.new.sign_in).toBe('Masuk');
+      });
+
+      it('preserves an inline comment when filling an empty key', async () => {
+        const filePath = path.join(tempDir, 'commented.yml');
+        const initialContent = `en:
+  greeting: # please translate
+  other: value
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, { 'greeting': 'Hello' }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const reparsed = yaml.parse(updated);
+
+        expect(reparsed.en.greeting).toBe('Hello');
+        expect(updated).toContain('# please translate');
+      });
+    });
+
+    describe('scalar-to-plural migration', () => {
+      it('preserves the original flat value as .other when nesting a plural category under it', async () => {
+        const filePath = path.join(tempDir, 'ja.yml');
+        const initialContent = `ja:
+  category_card:
+    sr:
+      show_description: '概要'
+    lessons_count: '%{count}レッスン'
+    select: '詳細を見る'
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'category_card.lessons_count.zero': 'レッスンなし'
+        }, 'ja');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const reparsed = yaml.parse(updated);
+
+        expect(reparsed.ja.category_card.lessons_count.other).toBe('%{count}レッスン');
+        expect(reparsed.ja.category_card.lessons_count.zero).toBe('レッスンなし');
+        expect(reparsed.ja.category_card.select).toBe('詳細を見る');
+      });
+
+      it('preserves an existing sequence value as .other when nesting a plural category', async () => {
+        const filePath = path.join(tempDir, 'seq.yml');
+        const initialContent = `en:
+  count:
+    - one
+    - two
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, { 'count.zero': 'None' }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const reparsed = yaml.parse(updated);
+
+        expect(reparsed.en.count.other).toEqual(['one', 'two']);
+        expect(reparsed.en.count.zero).toBe('None');
+      });
+
+      it('does not invent .other when a plural-category name is a non-terminal path segment', async () => {
+        const filePath = path.join(tempDir, 'settings.yml');
+        const initialContent = `en:
+  settings: old value
+`;
+        fs.writeFileSync(filePath, initialContent);
+
+        await updateTranslationFile(filePath, {
+          'settings.one.label': 'A label'
+        }, 'en');
+
+        const updated = fs.readFileSync(filePath, 'utf8');
+        const reparsed = yaml.parse(updated);
+
+        expect(reparsed.en.settings.other).toBeUndefined();
+        expect(reparsed.en.settings.one.label).toBe('A label');
+      });
+    });
+
     describe('multi-key deletion safety', () => {
       it('deleting all children of a nested map removes the parent without losing siblings', async () => {
         const filePath = path.join(tempDir, 'multi-delete.yml');
