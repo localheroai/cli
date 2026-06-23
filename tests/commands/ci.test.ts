@@ -537,5 +537,49 @@ describe('ci command', () => {
 
       expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledTimes(1);
     });
+
+    it('maps file_references to metadata.source_references for .po files', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      mockConfigUtils.getValidProjectConfig = jest.fn().mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['pl'],
+        translationFiles: { paths: ['locales/'] }
+      });
+      mockConfigUtils.saveProjectConfig = jest.fn().mockResolvedValue(undefined);
+
+      const deps = {
+        console: mockConsole,
+        configUtils: mockConfigUtils,
+        authUtils: mockAuthUtils,
+        githubUtils: { ...mockGithubUtils, autoCommitSyncChanges: jest.fn().mockResolvedValue(undefined) },
+        env: mockEnv,
+        translateCommand: mockTranslateCommand,
+        syncApi: {
+          getSyncTranslations: jest.fn().mockResolvedValue({
+            sync: {
+              sync_id: 'sync_abc', status: 'completed', created_at: '2026-04-23T00:00:00Z',
+              sync_url: 'https://example.com/sync', branch_name: 'localhero/sync', modified_keys_count: 1,
+              files: [{
+                path: 'locales/pl/LC_MESSAGES/messages.po',
+                language: 'pl',
+                translations: [{
+                  key: 'Website', name: 'Website', value: 'Witryna',
+                  file_references: ['lib/web.ex:10'], updated_at: '2026-04-23T00:00:00Z'
+                }]
+              }]
+            },
+            pagination: { current_page: 1, total_pages: 1, total_count: 1, next_page: null, prev_page: null, items_per_page: 500 }
+          }),
+          completeSyncUpdate: jest.fn().mockResolvedValue({ success: true })
+        },
+        updateTranslationFile: jest.fn().mockResolvedValue(undefined)
+      };
+
+      await ci({ skipCommit: true }, deps);
+
+      const passedTranslations = deps.updateTranslationFile.mock.calls[0][1];
+      expect(passedTranslations[0].metadata?.source_references).toEqual(['lib/web.ex:10']);
+    });
   });
 });

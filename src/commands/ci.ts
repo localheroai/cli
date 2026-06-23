@@ -170,9 +170,19 @@ async function runSyncMode(
       console.log(chalk.gray(`  Updating ${file.path} (${file.language})...`));
     }
 
+    const isPoFile = /\.(po|pot)$/i.test(file.path);
+    const translations = isPoFile
+      ? file.translations.map(t => ({
+        key: t.key,
+        value: t.value,
+        old_values: t.old_values,
+        ...(t.file_references?.length && { metadata: { source_references: t.file_references } })
+      }))
+      : file.translations;
+
     await updateTranslationFile(
       file.path,
-      file.translations,
+      translations,
       file.language,
       undefined,
       config.sourceLocale,
