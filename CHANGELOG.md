@@ -2,10 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.56] - 2026-06-23
+
+### Fixed
+- Newly created `.po` files now keep their `#:` source-reference comments during Export to GitHub (the `ci` sync path). The server was sending the references, but they were dropped when a target locale file was written from scratch; existing files were unaffected.
+
 ## [0.0.55] - 2026-06-23
 
 ### Fixed
-- Generated `.po` files no longer come out with blank `msgid ""` entries or dropped `msgctxt` context. This affected gettext/Phoenix setups where a new target locale file is written from scratch (e.g. `LC_MESSAGES` layouts). New `.po` files also keep source references, flags, translator comments, and plural grouping.
+- Generated `.po` files no longer come out with blank `msgid ""` entries or dropped `msgctxt` context. This affected gettext/Phoenix setups where a new target locale file is written from scratch (e.g. `LC_MESSAGES` layouts). New `.po` files also keep flags, translator comments, and plural grouping.
 
 ### Changed
 - An optional `.zero` plural defined in the source is no longer added to every target locale by default. A locale only gets a plural form it actually uses (its CLDR set), so optional forms like `.zero` aren't forced into languages that don't need them. Propagating it everywhere is now a per-project setting for teams that want it.
