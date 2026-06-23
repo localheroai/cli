@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { assertValidPo } from '../helpers/assert-valid-po.js';
 
 describe('po-surgical', () => {
   let surgicalUpdatePoFile;
@@ -496,6 +497,7 @@ msgstr "Befintlig"
         references: { 'This is the title of our website.': ['src/components/Header.jsx:11'] }
       });
 
+      assertValidPo(result);
       expect(result).toContain('#: src/components/Header.jsx:11');
       expect(result).toContain('msgid "This is the title of our website."');
       expect(result).toContain('msgstr "Det här är titeln på vår webbplats."');

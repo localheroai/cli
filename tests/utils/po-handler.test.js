@@ -3,6 +3,7 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFileSync, spawnSync } from 'child_process';
+import { assertValidPo } from '../helpers/assert-valid-po.js';
 
 describe('po-handler', () => {
   let updatePoFile;
@@ -52,6 +53,7 @@ msgstr "Hello"
 
       const targetContent = await fs.readFile(targetFilePath, 'utf-8');
 
+      assertValidPo(targetContent);
       expect(targetContent).toContain('"Language: \\n"');
       expect(targetContent).not.toContain('"Language: sv\\n"');
       expect(targetContent).toContain('msgstr "Hej"');
@@ -180,6 +182,7 @@ msgstr "Old translation"
       await updatePoFile(targetFilePath, translations, 'sv');
       const updatedContent = await fs.readFile(targetFilePath, 'utf-8');
 
+      assertValidPo(updatedContent);
       expect(updatedContent).toContain('"Plural-Forms: nplurals=2; plural=(n != 1);\\n"');
       expect(updatedContent).toContain('msgctxt "navigation"');
       expect(updatedContent).toContain('msgid "%(count)d item"');
@@ -250,6 +253,7 @@ msgstr "Old translation"
       await updatePoFile(targetFilePath, translations, locale);
       const updatedContent = await fs.readFile(targetFilePath, 'utf-8');
 
+      assertValidPo(updatedContent);
       expect(updatedContent).toContain(header);
       expect(updatedContent.match(/msgstr\[\d+\]/g)).toHaveLength(formCount);
       if (msgfmtAvailable) {

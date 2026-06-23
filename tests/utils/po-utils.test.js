@@ -1,6 +1,7 @@
 import { jest } from '@jest/globals';
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { assertValidPo } from '../helpers/assert-valid-po.js';
 
 const loadFixture = (name) => {
   const fixturePath = join(process.cwd(), 'tests', 'fixtures', 'po', `${name}.po`);
@@ -145,6 +146,7 @@ msgstr[1] "%(count)d items"
         { msgid: 'should have %{count} items', msgstr: ['bör ha %{count} objekt'] }
       ]);
 
+      assertValidPo(content);
       expect(content).toContain('msgid "Website"');
       expect(content).toContain('msgstr "Webbplats"');
       expect(content).toContain('msgid "should have %{count} items"');
