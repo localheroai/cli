@@ -503,6 +503,28 @@ msgstr "Befintlig"
       expect(result).toContain('msgstr "Det här är titeln på vår webbplats."');
     });
 
+    test('separates appended entries with a single blank line (no extra padding)', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=utf-8\\n"
+
+#: src/App.jsx:1
+msgid "Existing"
+msgstr "Befintlig"
+`;
+      const translations = { 'New one': 'Ny ett' };
+
+      const result = surgicalUpdatePoFile(original, translations, {
+        sourceLanguage: 'en',
+        targetLanguage: 'sv'
+      });
+
+      expect(result).not.toMatch(/\n\n\n/); // no triple newline (= 2+ blank lines)
+      expect(result).toContain('msgid "New one"');
+      expect(result.endsWith('\n')).toBe(true); // single trailing newline
+      expect(result.endsWith('\n\n')).toBe(false);
+    });
+
     test('writes one #: line per reference and de-duplicates', () => {
       const original = `msgid ""
 msgstr ""

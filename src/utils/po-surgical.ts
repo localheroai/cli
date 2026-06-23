@@ -373,8 +373,7 @@ function processLineByLine(
     const newEntries = addNewEntries(translations, parsed, changesToMake, options);
     if (newEntries.length > 0) {
       const lines = content.split('\n');
-      lines.push('');
-      lines.push(...newEntries);
+      appendNewEntries(lines, newEntries);
       return lines.join('\n');
     }
     return content;
@@ -612,12 +611,23 @@ function processLineByLine(
   // Add new entries that don't exist in the original file
   const newEntries = addNewEntries(translations, parsed, changesToMake, options);
   if (newEntries.length > 0) {
-    // Add new entries at the end
-    result.push('');
-    result.push(...newEntries);
+    appendNewEntries(result, newEntries);
   }
 
   return result.join('\n');
+}
+
+/**
+ * Append new entries after existing content. New entries already start with
+ * their own blank-line separator, so trim trailing blanks first to avoid
+ * stacking multiple blank lines (a well-formed file ends with a newline).
+ */
+function appendNewEntries(lines: string[], newEntries: string[]): void {
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+  lines.push(...newEntries);
+  lines.push(''); // keep a single trailing newline after join('\n')
 }
 
 /**

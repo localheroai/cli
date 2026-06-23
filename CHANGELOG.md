@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.58] - 2026-06-23
+
+### Fixed
+- New entries appended to an existing `.po` file are now separated by a single blank line instead of stacking up to three, and the file keeps exactly one trailing newline. Cosmetic only (the output was already valid), but it keeps Export-to-GitHub diffs clean.
+
 ## [0.0.57] - 2026-06-23
 
 ### Fixed
