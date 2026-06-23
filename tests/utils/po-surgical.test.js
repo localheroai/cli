@@ -479,6 +479,63 @@ msgstr "annan"`;
     });
   });
 
+  describe('Source References on New Entries', () => {
+    test('writes #: source references when adding a new entry to an existing file', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=utf-8\\n"
+
+msgid "Existing"
+msgstr "Befintlig"
+`;
+      const translations = { 'This is the title of our website.': 'Det här är titeln på vår webbplats.' };
+
+      const result = surgicalUpdatePoFile(original, translations, {
+        sourceLanguage: 'en',
+        targetLanguage: 'sv',
+        references: { 'This is the title of our website.': ['src/components/Header.jsx:11'] }
+      });
+
+      expect(result).toContain('#: src/components/Header.jsx:11');
+      expect(result).toContain('msgid "This is the title of our website."');
+      expect(result).toContain('msgstr "Det här är titeln på vår webbplats."');
+    });
+
+    test('writes one #: line per reference and de-duplicates', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=utf-8\\n"
+`;
+      const translations = { 'Save': 'Spara' };
+
+      const result = surgicalUpdatePoFile(original, translations, {
+        sourceLanguage: 'en',
+        targetLanguage: 'sv',
+        references: { 'Save': ['a.ex:1', 'b.ex:2', 'a.ex:1'] }
+      });
+
+      expect(result).toContain('#: a.ex:1');
+      expect(result).toContain('#: b.ex:2');
+      expect(result.match(/#: a\.ex:1/g)).toHaveLength(1);
+    });
+
+    test('omits #: line when no references provided', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=utf-8\\n"
+`;
+      const translations = { 'Save': 'Spara' };
+
+      const result = surgicalUpdatePoFile(original, translations, {
+        sourceLanguage: 'en',
+        targetLanguage: 'sv'
+      });
+
+      expect(result).toContain('msgid "Save"');
+      expect(result).not.toContain('#:');
+    });
+  });
+
   describe('Source Content msgid_plural Lookup', () => {
     test('should use sourceContent to find proper msgid_plural when creating new plural entries', () => {
       const sourceContent = `msgid ""

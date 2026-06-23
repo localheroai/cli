@@ -13,6 +13,7 @@ export function surgicalUpdatePoFile(
     targetLanguage?: string;
     sourceContent?: string;
     keyMappings?: Record<string, string>; // Map of old keys to new keys (for PO versioning)
+    references?: Record<string, string[]>; // uniqueKey -> source references (#: lines)
   }
 ): string {
   // If keyMappings are provided, skip the allIdentical optimization
@@ -263,6 +264,7 @@ function processLineByLine(
     targetLanguage?: string;
     sourceContent?: string;
     keyMappings?: Record<string, string>;
+    references?: Record<string, string[]>;
   }
 ): string {
   const lines = content.split('\n');
@@ -625,7 +627,7 @@ function addNewEntries(
   translations: Record<string, string>,
   parsed: any,
   existingChanges: Map<string, string>,
-  options?: { sourceLanguage?: string; targetLanguage?: string; sourceContent?: string }
+  options?: { sourceLanguage?: string; targetLanguage?: string; sourceContent?: string; references?: Record<string, string[]> }
 ): string[] {
   const result: string[] = [];
   const updatedTranslations = new Set<string>();
@@ -658,7 +660,7 @@ function addNewEntries(
         return;
       }
 
-      result.push(...createNewEntry(msgid, value, context));
+      result.push(...createNewEntry(msgid, value, context, options?.references?.[uniqueKey]));
       updatedTranslations.add(uniqueKey);
     }
   });
@@ -706,7 +708,7 @@ function addNewEntries(
       // Extract nplurals from the target file's headers
       const targetNplurals = extractNPlurals(parsed.headers || {});
 
-      result.push(...createNewPluralEntry(msgid, msgid_plural, pluralData, context, targetNplurals));
+      result.push(...createNewPluralEntry(msgid, msgid_plural, pluralData, context, targetNplurals, options?.references?.[uniqueKey]));
 
       // Mark all plural keys as updated
       updatedTranslations.add(uniqueKey);
@@ -724,10 +726,12 @@ function addNewEntries(
 /**
  * Create a new regular translation entry
  */
-function createNewEntry(msgid: string, msgstr: string, context?: string): string[] {
+function createNewEntry(msgid: string, msgstr: string, context?: string, references?: string[]): string[] {
   const result: string[] = [];
 
   result.push('');
+
+  pushReferenceComments(result, references);
 
   if (context) {
     result.push(`msgctxt "${escapePoString(context)}"`);
@@ -739,6 +743,15 @@ function createNewEntry(msgid: string, msgstr: string, context?: string): string
   return result;
 }
 
+function pushReferenceComments(result: string[], references?: string[]): void {
+  if (!references?.length) {
+    return;
+  }
+  for (const reference of Array.from(new Set(references))) {
+    result.push(`#: ${reference}`);
+  }
+}
+
 /**
  * Create a new plural translation entry
  */
@@ -747,11 +760,14 @@ function createNewPluralEntry(
   msgid_plural: string,
   translations: string[],
   context?: string,
-  nplurals: number = 2
+  nplurals: number = 2,
+  references?: string[]
 ): string[] {
   const result: string[] = [];
 
   result.push('');
+
+  pushReferenceComments(result, references);
 
   if (context) {
     result.push(`msgctxt "${escapePoString(context)}"`);

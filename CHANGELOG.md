@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.57] - 2026-06-23
+
+### Fixed
+- Entries added to an existing `.po` file during Export to GitHub now include their `#:` source-reference comments. Previously references were only written for brand-new files (0.0.56); when a new key was added to a locale file that already existed, the reference was dropped.
+
 ## [0.0.56] - 2026-06-23
 
 ### Fixed

@@ -87,6 +87,19 @@ function commentsFromMetadata(metadata: TranslationWithMetadata['metadata']): Po
   return Object.keys(comments).length > 0 ? comments : undefined;
 }
 
+function referencesByKey(
+  metadataByKey: Map<string, TranslationWithMetadata['metadata']>
+): Record<string, string[]> {
+  const references: Record<string, string[]> = {};
+  for (const [key, metadata] of metadataByKey) {
+    const refs = metadata?.source_references;
+    if (refs?.length) {
+      references[key] = refs;
+    }
+  }
+  return references;
+}
+
 /**
  * Updates a .po file with new translations
  */
@@ -143,7 +156,8 @@ export async function updatePoFile(
       sourceLanguage,
       targetLanguage: languageCode,
       sourceContent,
-      keyMappings: hasKeyMappings ? keyMappings : undefined
+      keyMappings: hasKeyMappings ? keyMappings : undefined,
+      references: referencesByKey(metadataByKey)
     });
 
     if (updatedContent !== originalContent) {
