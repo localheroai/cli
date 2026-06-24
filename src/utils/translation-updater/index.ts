@@ -80,8 +80,11 @@ async function _updateTranslationFile(
   }
 
   if (fileExt === 'po' || fileExt === 'pot') {
-    // Preserve old_values metadata for key versioning
-    const poResult = await updatePoFile(filePath, translations, languageCode, sourceFilePath, sourceLanguage);
+    // Array form carries old_values metadata for key versioning, pass it through.
+    // Record form has no metadata, so use the null-stripped map (as JSON/YAML do)
+    // to avoid writing awaiting keys as the literal string "null" into msgstr.
+    const poTranslations = Array.isArray(translations) ? translations : filteredTranslations;
+    const poResult = await updatePoFile(filePath, poTranslations, languageCode, sourceFilePath, sourceLanguage);
 
     if (config && isDjangoWorkflow(config) && Object.keys(filteredTranslations).length > 0) {
       await updateDjangoSourcesFile(filePath, filteredTranslations, languageCode, sourceFilePath, sourceLanguage);

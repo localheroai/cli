@@ -180,6 +180,13 @@ export interface KeyIdentifier {
   context?: string;
 }
 
+// A target language the backend declined to auto-translate (e.g. auto_translate
+// disabled for the locale), reported in the translation job creation response.
+export interface SkippedLanguage {
+  code: string;
+  reason: string;
+}
+
 // Prunable key from API (for --prune functionality)
 export interface PrunableKey {
   id: string;

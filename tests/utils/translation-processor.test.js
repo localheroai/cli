@@ -108,6 +108,58 @@ describe('translation-processor', () => {
       expect(result.uniqueKeysTranslated.has('welcome')).toBe(true);
     });
 
+    it('treats an auto_translate_disabled job as skipped even when it carries existing content', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ welcome: 'Welcome' })).toString('base64')
+          },
+          localeEntries: ['ja_easy:locales/en.json'],
+          locales: ['ja_easy']
+        }
+      ];
+
+      const missingByLocale = {
+        'ja_easy:locales/en.json': {
+          locale: 'ja_easy',
+          path: 'locales/en.json',
+          targetPath: 'locales/ja_easy.json',
+          keys: { welcome: { value: 'Welcome', sourceKey: 'welcome' } },
+          keyCount: 1
+        }
+      };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-skip', language: { code: 'ja_easy' } }]
+      });
+
+      // The skipped job echoes the locale's EXISTING translation as content.
+      // The client must rely on the explicit skip signal, not on content shape.
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        auto_translate_disabled: true,
+        translations: { data: { welcome: 'ようこそ' } },
+        language: { code: 'ja_easy' }
+      });
+
+      const result = await processTranslationBatches(
+        batches,
+        missingByLocale,
+        { projectId: 'test-project' },
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
+      expect(result.totalLanguages).toBe(0);
+      expect(result.languages).not.toContain('ja_easy');
+      expect(result.skippedLanguages).toContain('ja_easy');
+      expect(result.uniqueKeysTranslated.size).toBe(0);
+    });
+
     it('passes source metadata through when writing PO translations', async () => {
       const batches = [{
         sourceFilePath: 'locales/en/messages.po',

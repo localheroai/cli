@@ -1351,6 +1351,36 @@ en:
       expect(content).toContain('Auf Wiedersehen');
     });
 
+    it('does not write null target values as the literal string "null" in .po files', async () => {
+      const sourceFilePath = path.join(tempDir, 'source.po');
+      const sourceContent = [
+        'msgid ""',
+        'msgstr ""',
+        '"Content-Type: text/plain; charset=UTF-8\\n"',
+        '',
+        'msgid "hello"',
+        'msgstr "Hello"',
+        '',
+        'msgid "goodbye"',
+        'msgstr "Goodbye"',
+        ''
+      ].join('\n');
+      fs.writeFileSync(sourceFilePath, sourceContent);
+
+      const targetFilePath = path.join(tempDir, 'target.po');
+      // Mixed payload: one translated key, one still awaiting (null).
+      const translations = {
+        hello: 'Hej',
+        goodbye: null
+      };
+
+      await updateTranslationFile(targetFilePath, translations, 'sv', sourceFilePath);
+
+      const targetContent = fs.readFileSync(targetFilePath, 'utf8');
+      expect(targetContent).toContain('msgstr "Hej"');
+      expect(targetContent).not.toContain('msgstr "null"');
+    });
+
     it('deletes keys from YAML files with duplicate keys without crashing', async () => {
       const filePath = path.join(tempDir, 'sv.yml');
       const yamlWithDuplicates = [

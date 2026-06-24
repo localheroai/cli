@@ -233,7 +233,7 @@ export function getChangedKeysForProject(
 /**
  * Get base branch from config, environment, or default
  */
-function getBaseBranch(config: ProjectConfig): string {
+export function getBaseBranch(config: ProjectConfig): string {
   return config.translationFiles?.baseBranch
     || process.env.GITHUB_BASE_REF
     || 'main';
@@ -293,7 +293,7 @@ function resolveBranchRef(branch: string): string | null {
  * example on shallow clones where the real ancestor was pruned — so behavior
  * degrades to the pre-fix state rather than aborting `--changed-only`.
  */
-function resolveCompareRef(branch: string, verbose = false): string | null {
+export function resolveCompareRef(branch: string, verbose = false): string | null {
   const resolvedBase = resolveBranchRef(branch);
   if (!resolvedBase) return null;
 
@@ -319,7 +319,7 @@ function resolveCompareRef(branch: string, verbose = false): string | null {
   }
 }
 
-interface FileDiff {
+export interface FileDiff {
   oldFlat: Record<string, any>;
   newFlat: Record<string, any>;
 }
@@ -328,7 +328,7 @@ interface FileDiff {
  * Get the old (base branch) and new (working directory) flattened key maps for a file.
  * Returns null if the current file cannot be read/parsed (caller should skip).
  */
-function diffFileKeys(
+export function diffFileKeys(
   file: TranslationFile,
   resolvedRef: string,
   verbose: boolean
