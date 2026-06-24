@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.59] - 2026-06-24
+
+### Added
+- Bring-your-own-translations: locales with auto-translation turned off (a project setting) are no longer machine-translated. Their keys are still added to the review flow as empty, editable rows so a human can fill them in, and `translate` now reports `Auto-translation off for <locale>` and leaves those files untouched instead of counting them as translated.
+- `translate --changed-only` detects translations you edited directly in a PR (added or updated target values, via git diff) and sends them to the review page, so manual edits are tracked alongside machine translations.
+
 ## [0.0.58] - 2026-06-23
 
 ### Fixed
