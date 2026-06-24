@@ -23,6 +23,8 @@ import {
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
 import { autoCommitChanges } from '../utils/github.js';
+import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
+import { createPullRequestImport } from '../api/pull-request-imports.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
@@ -248,6 +250,36 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
   const projectId = config.projectId;
 
+  async function sendPullRequestImport(
+    targetChanges: TargetChangeFile[],
+    jobGroupId: string
+  ): Promise<void> {
+    if (targetChanges.length === 0) return;
+
+    try {
+      const branch = await getCurrentBranch();
+      if (!branch) return;
+
+      const importResult = await createPullRequestImport({
+        projectId,
+        branch,
+        jobGroupId,
+        files: targetChanges
+      });
+
+      if (importResult.imported_count > 0) {
+        console.log(`» Sent ${importResult.imported_count} translation value${importResult.imported_count === 1 ? '' : 's'} from this PR for review`);
+      }
+      for (const skipped of importResult.skipped) {
+        console.log(chalk.yellow(`  Skipped ${skipped.path}: ${skipped.key} (${skipped.reason})`));
+      }
+    } catch (err) {
+      if (verbose) {
+        console.log(chalk.dim(`Translation ingestion skipped: ${(err as Error).message}`));
+      }
+    }
+  }
+
   async function sendFinalize(
     manifest: Record<string, any>,
     jobGroupId: string,
@@ -301,9 +333,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   // This is the complete snapshot of "what differs from main" for this push.
   let manifest: Record<string, any> | null = null;
   let removedManifest: Record<string, any> | null = null;
+  let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
+    targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose) ?? [];
 
     const filtered = filterByGitChanges(
       sourceFiles,
@@ -314,9 +348,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     if (filtered !== null) {
       if (Object.keys(filtered).length === 0) {
+        const jobGroupId = nanoid();
         if (manifest !== null) {
-          await sendFinalize(manifest, nanoid(), removedManifest);
+          await sendFinalize(manifest, jobGroupId, removedManifest);
         }
+        await sendPullRequestImport(targetChanges, jobGroupId);
         console.log(chalk.green('✓ All changed keys are already translated'));
         return;
       }
@@ -381,6 +417,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     if (manifest !== null) {
       await sendFinalize(manifest, jobGroupId, removedManifest);
+    }
+
+    await sendPullRequestImport(targetChanges, jobGroupId);
+
+    const translatedLocales = new Set(translationResult.languages);
+    const onlySkipped = translationResult.skippedLanguages.filter((locale) => !translatedLocales.has(locale));
+    if (onlySkipped.length > 0) {
+      console.log(chalk.blue(`ℹ Auto-translation off for ${onlySkipped.join(', ')} (project setting)`));
     }
 
     await configUtils.updateLastSyncedAt();

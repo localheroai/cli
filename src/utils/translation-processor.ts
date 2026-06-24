@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { ProjectConfig } from '../types/index.js';
+import type { SkippedLanguage } from '../types/index.js';
 import { Spinner } from './spinner.js';
 
 /**
@@ -11,6 +12,7 @@ export interface TranslationStats {
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
   failedLanguages: Set<string>;
+  skippedLanguages: Set<string>;
 }
 
 export interface TranslationJob {
@@ -26,6 +28,7 @@ export interface TranslationJobResponse {
     id: string;
     short_url: string;
   };
+  skipped_languages?: SkippedLanguage[];
 }
 
 export interface JobSourceInfo {
@@ -87,6 +90,7 @@ export interface TranslationResult {
   allJobIds: string[];
   resultsBaseUrl: string | null;
   jobGroupShortUrl: string | null;
+  skippedLanguages: string[];
   uniqueKeysTranslated: Set<string>;
   failedLanguages: string[];
 }
@@ -290,6 +294,24 @@ async function applyTranslations(
     return false;
   }
 
+  // Skip-auto-translation jobs are authoritative on the job, not its content:
+  // the API may echo the locale's existing translations as content, so we must
+  // not infer "translated" from a populated payload. Nothing to write, and the
+  // locale counts as skipped rather than translated.
+  if (data.auto_translate_disabled) {
+    stats.skippedLanguages.add(languageCode);
+    return false;
+  }
+
+  // Fallback for older backends without the explicit flag: a skipped job
+  // completes with all-nil content. Nothing to write either way.
+  const hasContent = Object.values(data.translations.data).some(
+    (value) => value !== null && value !== undefined
+  );
+  if (!hasContent) {
+    return false;
+  }
+
   const localeSourceKey = findMissingEntryKey(missingByLocale, languageCode, sourceInfo.sourceFilePath);
 
   if (!localeSourceKey || processedEntries.has(localeSourceKey)) {
@@ -381,6 +403,10 @@ async function processBatch(
   // Capture job group short URL if present in the response
   if (response.job_group?.short_url && !stats.jobGroupShortUrl) {
     stats.jobGroupShortUrl = response.job_group.short_url;
+  }
+
+  for (const skipped of response.skipped_languages ?? []) {
+    stats.skippedLanguages.add(skipped.code);
   }
 
   const jobSourceMapping = createJobSourceMapping(jobs, sourceFilePath);
@@ -481,7 +507,8 @@ export async function processTranslationBatches(
     languages: new Set<string>(),
     resultsBaseUrl: null,
     jobGroupShortUrl: null,
-    failedLanguages: new Set<string>()
+    failedLanguages: new Set<string>(),
+    skippedLanguages: new Set<string>()
   };
   const processedEntries = new Set<string>();
   const allJobIds: string[] = [];
@@ -515,6 +542,7 @@ export async function processTranslationBatches(
     allJobIds,
     resultsBaseUrl: stats.resultsBaseUrl,
     jobGroupShortUrl: stats.jobGroupShortUrl,
+    skippedLanguages: Array.from(stats.skippedLanguages),
     uniqueKeysTranslated,
     failedLanguages: Array.from(stats.failedLanguages)
   };
