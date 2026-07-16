@@ -173,6 +173,70 @@ describe('detectTargetChanges', () => {
   });
 });
 
+describe('detectTargetChanges — ingestion hardening', () => {
+  const manyKeys = (prefix: string, n: number) =>
+    Array.from({ length: n }, (_, i) => `  k${i}: "${prefix}${i}"`).join('\n');
+
+  test('git failures other than a missing base file do not fabricate additions', () => {
+    mockExecSync.mockImplementation((cmd: any) => {
+      if (cmd === 'git rev-parse --git-dir') return '';
+      if (String(cmd).includes('git rev-parse --verify')) return '';
+      if (String(cmd).includes('git merge-base')) return 'abc123\n';
+      if (String(cmd).includes('git show')) {
+        if (String(cmd).includes('ja_easy.yml')) throw new Error('fatal: unable to read tree abc123');
+        return 'en:\n  greeting: "Hello"\n';
+      }
+      throw new Error(`Unexpected git command: ${cmd}`);
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  greeting: "Hello"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+    });
+
+    // The unchanged ja_easy greeting must not be reported as added just because
+    // git failed — the backend would trust it and create/stage from it.
+    expect(detectTargetChanges(sourceFiles, targetFilesByLocale, config, false)).toEqual([]);
+  });
+
+  test('an unpaired target file does not consume the ingestion cap', () => {
+    const pairedAndUnpaired = {
+      ja_easy: [
+        { path: 'config/locales/extra/notes.yml', format: 'yml', locale: 'ja_easy' },
+        { path: 'config/locales/ja_easy.yml', format: 'yml', locale: 'ja_easy' }
+      ]
+    } as any;
+    setupGitMock({ oldContent: { 'en.yml': 'en:\n  title: "App"\n' } });
+    setupReadMock({
+      'en.yml': 'en:\n  title: "App"\n',
+      'extra/notes.yml': `ja_easy:\n${manyKeys('n', 600)}\n`,
+      'ja_easy.yml': `ja_easy:\n${manyKeys('j', 600)}\n`
+    });
+
+    const result = detectTargetChanges(sourceFiles, pairedAndUnpaired, config, false);
+
+    // 600 changes in the unpaired notes.yml must not push the paired file over the cap.
+    const paired = result?.find(r => r.path === 'config/locales/ja_easy.yml');
+    expect(paired?.changes).toHaveLength(600);
+  });
+
+  test('cap suppression is reported without verbose', () => {
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      setupGitMock({ oldContent: { 'en.yml': 'en:\n  title: "App"\n' } });
+      setupReadMock({
+        'en.yml': 'en:\n  title: "App"\n',
+        'ja_easy.yml': `ja_easy:\n${manyKeys('j', 1100)}\n`
+      });
+
+      expect(detectTargetChanges(sourceFiles, targetFilesByLocale, config, false)).toBeNull();
+      const logged = spy.mock.calls.map(args => String(args[0])).join('\n');
+      expect(logged).toContain('more than 1000 changed values');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('detectTargetChanges — source_value attachment', () => {
   test('attaches source_value to target changes whose key exists in the source file', () => {
     setupGitMock({
