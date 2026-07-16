@@ -63,20 +63,18 @@ export function detectTargetChanges(
       const changes = detectFileChanges(targetFile, resolvedRef, verbose);
       if (changes.length === 0) continue;
 
-      totalChanges += changes.length;
-      if (totalChanges > MAX_TOTAL_CHANGES) {
-        if (verbose) {
-          console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
-        }
-        return null;
-      }
-
       const sourcePath = sourcePathFor(targetFile, locale, sourceFiles, targetFiles, config);
       if (!sourcePath) {
         if (verbose) {
           console.log(chalk.dim(`  ${targetFile.path}: no matching source file, skipping ingestion`));
         }
         continue;
+      }
+
+      totalChanges += changes.length;
+      if (totalChanges > MAX_TOTAL_CHANGES) {
+        console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
+        return null;
       }
 
       result.push({
@@ -103,9 +101,7 @@ export function detectTargetChanges(
 
     totalChanges += updatedChanges.length;
     if (totalChanges > MAX_TOTAL_CHANGES) {
-      if (verbose) {
-        console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
-      }
+      console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
       return null;
     }
 
@@ -152,9 +148,7 @@ function detectFileChanges(
 
     return changes;
   } catch (error) {
-    if (verbose) {
-      console.log(chalk.dim(`  Skipping ${targetFile.path}: ${(error as Error).message}`));
-    }
+    console.log(chalk.yellow(`  Skipping ${targetFile.path} from translation ingestion: ${(error as Error).message}`));
     return [];
   }
 }

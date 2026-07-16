@@ -346,13 +346,16 @@ export function diffFileKeys(
     const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
     oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
   } catch (error) {
+    const err = error as Error;
+    const missingAtRef = err.message.includes('exists on disk, but not in') || err.message.includes('does not exist');
+    if (!missingAtRef) {
+      // A git failure or an unparsable base file is NOT an empty base — falling through
+      // would report every key as added, and the backend trusts those. Callers catch
+      // per-file and skip.
+      throw error;
+    }
     if (verbose) {
-      const err = error as Error;
-      if (err.message.includes('exists on disk, but not in') || err.message.includes('does not exist')) {
-        console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
-      } else {
-        console.log(chalk.yellow(`  ${file.path}: Parse error - ${err.message}`));
-      }
+      console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
     }
   }
 
