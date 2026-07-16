@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.60] - 2026-07-16
+
+### Added
+- Source-locale edits made directly in a PR are now detected by `translate --changed-only` and sent to the review page.
+- Every PR-detected change now carries the source file's current value (`source_value`), so the backend can create keys it has never imported.
+
+### Fixed
+- A git failure while diffing against the base branch no longer reports every key in the file as added, only a file genuinely missing at the base ref does.
+- Target files without a matching source file no longer count toward the PR-ingestion change cap.
+
 ## [0.0.59] - 2026-06-24
 
 ### Added
