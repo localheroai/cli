@@ -36,16 +36,32 @@ const targetFilesByLocale = {
   ja_easy: [{ path: 'config/locales/ja_easy.yml', format: 'yml', locale: 'ja_easy' }]
 };
 
-function setupGitMock({ oldContent }: { oldContent: string | null }) {
+type OldContentMap = Record<string, string | null>;
+
+function setupGitMock({ oldContent }: { oldContent: string | null | OldContentMap }) {
   mockExecSync.mockImplementation((cmd: any) => {
     if (cmd === 'git rev-parse --git-dir') return '';
     if (String(cmd).includes('git rev-parse --verify')) return '';
     if (String(cmd).includes('git merge-base')) return 'abc123\n';
     if (String(cmd).includes('git show')) {
+      if (typeof oldContent === 'object' && oldContent !== null) {
+        const matchedPath = Object.keys(oldContent).find(p => String(cmd).includes(p));
+        const content = matchedPath !== undefined ? oldContent[matchedPath] : null;
+        if (content === null) throw new Error('does not exist');
+        return content;
+      }
       if (oldContent === null) throw new Error('does not exist');
       return oldContent;
     }
     throw new Error(`Unexpected git command: ${cmd}`);
+  });
+}
+
+function setupReadMock(contentByPath: Record<string, string>) {
+  mockReadFileSync.mockImplementation((filePath: any) => {
+    const matchedPath = Object.keys(contentByPath).find(p => String(filePath).includes(p));
+    if (matchedPath !== undefined) return contentByPath[matchedPath];
+    throw new Error(`Unexpected readFileSync path: ${filePath}`);
   });
 }
 
@@ -56,12 +72,17 @@ beforeEach(() => {
 
 describe('detectTargetChanges', () => {
   test('detects updated and added values with old values attached', () => {
+    const enContent = 'en:\n  title: "App"\n';
     setupGitMock({
-      oldContent: 'ja_easy:\n  greeting: "こんにちは"\n  farewell: "さようなら"\n'
+      oldContent: {
+        'en.yml': enContent,
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n  farewell: "さようなら"\n'
+      }
     });
-    mockReadFileSync.mockReturnValue(
-      'ja_easy:\n  greeting: "やあ"\n  farewell: "さようなら"\n  hint: "ヒント"\n'
-    );
+    setupReadMock({
+      'en.yml': enContent,
+      'ja_easy.yml': 'ja_easy:\n  greeting: "やあ"\n  farewell: "さようなら"\n  hint: "ヒント"\n'
+    });
 
     const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
 
@@ -119,10 +140,10 @@ describe('detectTargetChanges', () => {
   });
 
   test('multi-language files use their own path as source_path', () => {
-    setupGitMock({
-      oldContent: 'en:\n  greeting: "Hello"\nsv:\n  greeting: "Hej"\n'
-    });
-    mockReadFileSync.mockReturnValue('en:\n  greeting: "Hello"\nsv:\n  greeting: "Tjena"\n');
+    const oldShared = 'en:\n  greeting: "Hello"\nsv:\n  greeting: "Hej"\n';
+    const newShared = 'en:\n  greeting: "Hello"\nsv:\n  greeting: "Tjena"\n';
+    setupGitMock({ oldContent: { 'shared.yml': oldShared } });
+    setupReadMock({ 'shared.yml': newShared });
 
     const result = detectTargetChanges(
       [{ path: 'config/locales/shared.yml', format: 'yml', locale: 'en', multiLanguage: true }] as any,
@@ -131,17 +152,16 @@ describe('detectTargetChanges', () => {
       false
     );
 
-    expect(result).toEqual([
-      {
-        path: 'config/locales/shared.yml',
-        source_path: 'config/locales/shared.yml',
-        locale: 'sv',
-        format: 'yml',
-        changes: [
-          { key: 'greeting', status: 'updated', value: 'Tjena', old_value: 'Hej' }
-        ]
-      }
-    ]);
+    const targetEntry = result?.find(r => r.locale === 'sv');
+    expect(targetEntry).toEqual({
+      path: 'config/locales/shared.yml',
+      source_path: 'config/locales/shared.yml',
+      locale: 'sv',
+      format: 'yml',
+      changes: [
+        { key: 'greeting', status: 'updated', value: 'Tjena', old_value: 'Hej', source_value: 'Hello' }
+      ]
+    });
   });
 
   test('returns null when git is unavailable', () => {
@@ -150,5 +170,254 @@ describe('detectTargetChanges', () => {
     });
 
     expect(detectTargetChanges(sourceFiles, targetFilesByLocale, config, false)).toBeNull();
+  });
+});
+
+describe('detectTargetChanges — source_value attachment', () => {
+  test('attaches source_value to target changes whose key exists in the source file', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  greeting: "Hello"\n  cta: "Sign up"\n',
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  greeting: "Hello"\n  cta: "Sign up"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n  cta: "登録"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+
+    const targetEntry = result?.find(r => r.locale === 'ja_easy');
+    expect(targetEntry!.changes).toEqual([
+      { key: 'cta', status: 'added', value: '登録', source_value: 'Sign up' }
+    ]);
+  });
+
+  test('omits source_value when the key is absent from the source file', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  greeting: "Hello"\n',
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  greeting: "Hello"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n  stray: "はぐれ"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+
+    const targetEntry = result?.find(r => r.locale === 'ja_easy');
+    expect(targetEntry!.changes).toEqual([
+      { key: 'stray', status: 'added', value: 'はぐれ' }
+    ]);
+  });
+
+  test('source-pass changes carry their own value as source_value', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  confirm: "Confirm"\n',
+        'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  confirm: "Please confirm"\n',
+      'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry!.changes).toEqual([
+      { key: 'confirm', status: 'updated', value: 'Please confirm', old_value: 'Confirm', source_value: 'Please confirm' }
+    ]);
+  });
+});
+
+describe('detectTargetChanges — source pass', () => {
+  test('emits updated change for changed source value', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  confirm: "Confirm"\n',
+        'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  confirm: "Please confirm"\n',
+      'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeDefined();
+    expect(sourceEntry).toEqual({
+      path: 'config/locales/en.yml',
+      source_path: 'config/locales/en.yml',
+      locale: 'en',
+      format: 'yml',
+      changes: [
+        { key: 'confirm', status: 'updated', value: 'Please confirm', old_value: 'Confirm', source_value: 'Please confirm' }
+      ]
+    });
+  });
+
+  test('emits nothing when source value is cleared to empty string', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  confirm: "Confirm"\n',
+        'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  confirm: ""\n',
+      'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeUndefined();
+  });
+
+  test('does not emit added source keys (only updated)', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  greeting: "Hello"\n',
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  greeting: "Hello"\n  new_key: "Brand new"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeUndefined();
+  });
+
+  test('emits nothing when source is unchanged', () => {
+    const enContent = 'en:\n  greeting: "Hello"\n';
+    setupGitMock({
+      oldContent: {
+        'en.yml': enContent,
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': enContent,
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeUndefined();
+  });
+
+  test('does not emit PO source file changes', () => {
+    const poSourceFiles = [
+      { path: 'locale/en.po', format: 'po', locale: 'en' }
+    ];
+    setupGitMock({
+      oldContent: {
+        'en.po': 'msgid "Confirm"\nmsgstr "Confirm"\n',
+        'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+      }
+    });
+    setupReadMock({
+      'en.po': 'msgid "Please confirm"\nmsgstr "Please confirm"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+    });
+
+    const result = detectTargetChanges(poSourceFiles, targetFilesByLocale, config, false);
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeUndefined();
+  });
+
+  test('does not emit ignored source keys', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  confirm: "Confirm"\n  ignored_key: "Old ignored"\n',
+        'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  confirm: "Please confirm"\n  ignored_key: "New ignored"\n',
+      'ja_easy.yml': 'ja_easy:\n  confirm: "確認"\n'
+    });
+
+    const ignoreMatcher = (key: string) => key === 'ignored_key';
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false, ignoreMatcher);
+
+    const sourceEntry = result?.find(r => r.locale === 'en');
+    expect(sourceEntry).toBeDefined();
+    expect(sourceEntry!.changes).toEqual([
+      { key: 'confirm', status: 'updated', value: 'Please confirm', old_value: 'Confirm', source_value: 'Please confirm' }
+    ]);
+    expect(sourceEntry!.changes.find(c => c.key === 'ignored_key')).toBeUndefined();
+  });
+
+  test('target added changes are still emitted (regression)', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  greeting: "Hello"\n',
+        'ja_easy.yml': null
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  greeting: "Hello"\n',
+      'ja_easy.yml': 'ja_easy:\n  greeting: "こんにちは"\n'
+    });
+
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+    const targetEntry = result?.find(r => r.locale === 'ja_easy');
+    expect(targetEntry).toBeDefined();
+    expect(targetEntry!.changes).toEqual([
+      { key: 'greeting', status: 'added', value: 'こんにちは', source_value: 'Hello' }
+    ]);
+  });
+
+  test('ignoreMatcher does NOT filter target changes (source-pass only)', () => {
+    setupGitMock({
+      oldContent: {
+        'en.yml': 'en:\n  ignored_key: "Hello"\n',
+        'ja_easy.yml': 'ja_easy:\n  ignored_key: "旧"\n'
+      }
+    });
+    setupReadMock({
+      'en.yml': 'en:\n  ignored_key: "Hello"\n',
+      'ja_easy.yml': 'ja_easy:\n  ignored_key: "新"\n'
+    });
+
+    const ignoreMatcher = (key: string) => key === 'ignored_key';
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false, ignoreMatcher);
+
+    // Source unchanged so no en entry; the matcher must NOT suppress the target update.
+    expect(result?.find(r => r.locale === 'en')).toBeUndefined();
+    const targetEntry = result?.find(r => r.locale === 'ja_easy');
+    expect(targetEntry!.changes).toEqual([
+      { key: 'ignored_key', status: 'updated', value: '新', old_value: '旧', source_value: 'Hello' }
+    ]);
+  });
+
+  test('returns null when combined target + source changes exceed the cap', () => {
+    const manyKeys = (prefix: string, n: number) =>
+      Array.from({ length: n }, (_, i) => `  k${i}: "${prefix}${i}"`).join('\n');
+
+    setupGitMock({
+      oldContent: {
+        'en.yml': `en:\n${manyKeys('old', 600)}\n`,
+        'ja_easy.yml': `ja_easy:\n${manyKeys('jold', 600)}\n`
+      }
+    });
+    setupReadMock({
+      'en.yml': `en:\n${manyKeys('new', 600)}\n`,
+      'ja_easy.yml': `ja_easy:\n${manyKeys('jnew', 600)}\n`
+    });
+
+    // 600 target + 600 source updates = 1200 > MAX_TOTAL_CHANGES (1000) → skip ingestion.
+    const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
+    expect(result).toBeNull();
   });
 });
