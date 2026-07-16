@@ -1,11 +1,14 @@
+import { readFileSync } from 'fs';
 import chalk from 'chalk';
 import type { ProjectConfig, TranslationFile } from '../types/index.js';
 import {
   isGitAvailable,
   getBaseBranch,
   resolveCompareRef,
-  diffFileKeys
+  diffFileKeys,
+  extractLocaleContent
 } from './git-changes.js';
+import { parseFile, flattenTranslations } from './files.js';
 import { findTargetFile } from './translation-utils.js';
 
 export interface TargetChange {
@@ -13,6 +16,7 @@ export interface TargetChange {
   status: 'added' | 'updated';
   value: string;
   old_value?: string;
+  source_value?: string;
 }
 
 export interface TargetChangeFile {
@@ -24,6 +28,7 @@ export interface TargetChangeFile {
 }
 
 const MAX_TOTAL_CHANGES = 1000;
+const PO_FORMATS = new Set(['po', 'pot']);
 
 /**
  * Detect target translations the PR adds or changes, by diffing each target
@@ -37,7 +42,8 @@ export function detectTargetChanges(
   sourceFiles: TranslationFile[],
   targetFilesByLocale: Record<string, TranslationFile[]>,
   config: ProjectConfig,
-  verbose: boolean
+  verbose: boolean,
+  ignoreMatcher?: (keyName: string) => boolean
 ): TargetChangeFile[] | null {
   if (!isGitAvailable()) {
     return null;
@@ -50,6 +56,7 @@ export function detectTargetChanges(
 
   const result: TargetChangeFile[] = [];
   let totalChanges = 0;
+  const sourceValuesFor = buildSourceValueLookup(sourceFiles);
 
   for (const [locale, targetFiles] of Object.entries(targetFilesByLocale)) {
     for (const targetFile of targetFiles) {
@@ -59,7 +66,7 @@ export function detectTargetChanges(
       totalChanges += changes.length;
       if (totalChanges > MAX_TOTAL_CHANGES) {
         if (verbose) {
-          console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed target values`));
+          console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
         }
         return null;
       }
@@ -77,9 +84,40 @@ export function detectTargetChanges(
         source_path: sourcePath,
         locale,
         format: targetFile.format,
-        changes
+        changes: attachSourceValues(changes, sourceValuesFor(sourcePath))
       });
     }
+  }
+
+  for (const sourceFile of sourceFiles) {
+    if (PO_FORMATS.has(sourceFile.format.toLowerCase())) continue;
+
+    const allChanges = detectFileChanges(sourceFile, resolvedRef, verbose);
+    let updatedChanges = allChanges.filter(c => c.status === 'updated');
+
+    if (ignoreMatcher) {
+      updatedChanges = updatedChanges.filter(c => !ignoreMatcher(c.key));
+    }
+
+    if (updatedChanges.length === 0) continue;
+
+    totalChanges += updatedChanges.length;
+    if (totalChanges > MAX_TOTAL_CHANGES) {
+      if (verbose) {
+        console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
+      }
+      return null;
+    }
+
+    result.push({
+      path: sourceFile.path,
+      source_path: sourceFile.path,
+      locale: config.sourceLocale,
+      format: sourceFile.format,
+      // A source-pass change's new value IS the current source value; carrying it as
+      // source_value lets the backend hydrate keys it has never imported (issue #442).
+      changes: updatedChanges.map(c => ({ ...c, source_value: c.value }))
+    });
   }
 
   return result;
@@ -118,6 +156,49 @@ function detectFileChanges(
       console.log(chalk.dim(`  Skipping ${targetFile.path}: ${(error as Error).message}`));
     }
     return [];
+  }
+}
+
+/**
+ * Attach the current source-file value to each change so the backend can create
+ * keys it has never imported (issue #442). Keys absent from the source file are
+ * sent without source_value — the backend keeps its key_not_found behavior.
+ */
+function attachSourceValues(
+  changes: TargetChange[],
+  sourceValues: Record<string, any> | null
+): TargetChange[] {
+  if (!sourceValues) return changes;
+
+  return changes.map(change => {
+    const sourceValue = sourceValues[change.key];
+    return typeof sourceValue === 'string' ? { ...change, source_value: sourceValue } : change;
+  });
+}
+
+function buildSourceValueLookup(sourceFiles: TranslationFile[]) {
+  const cache = new Map<string, Record<string, any> | null>();
+  return (sourcePath: string): Record<string, any> | null => {
+    if (!cache.has(sourcePath)) {
+      cache.set(sourcePath, readSourceValues(sourcePath, sourceFiles));
+    }
+    return cache.get(sourcePath) ?? null;
+  };
+}
+
+function readSourceValues(
+  sourcePath: string,
+  sourceFiles: TranslationFile[]
+): Record<string, any> | null {
+  const sourceFile = sourceFiles.find(f => f.path === sourcePath);
+  if (!sourceFile || PO_FORMATS.has(sourceFile.format.toLowerCase())) return null;
+
+  try {
+    const content = readFileSync(sourceFile.path, 'utf-8');
+    const parsed = parseFile(content, sourceFile.format, sourceFile.path);
+    return flattenTranslations(extractLocaleContent(parsed, sourceFile.locale));
+  } catch {
+    return null;
   }
 }
 
