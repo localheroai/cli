@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- Removed the unused `@oclif/core` dependency (the CLI is built on commander). Shrinks the install and clears 11 Dependabot alerts for transitive packages only oclif pulled in.
+- Bumped `yaml` to ^2.8.3 (CVE-2026-33532 hardening) and `glob` to ^10.5.0.
+
 ## [0.0.60] - 2026-07-16
 
 ### Added
