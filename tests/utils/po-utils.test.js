@@ -842,6 +842,84 @@ msgstr ""
       });
     });
 
+    it('uses the source msgstr as source value for explicit-id entries', () => {
+      // Lingui explicit ids: msgid is an opaque key, the English lives in the
+      // source catalog's msgstr. Sending the msgid as source value makes the
+      // backend store the key name as the English text.
+      const sourceContent = `msgid ""
+msgstr ""
+
+#. js-lingui-explicit-id
+msgid "footer.license"
+msgstr "Licensed under the MIT License"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+
+#. js-lingui-explicit-id
+msgid "footer.license"
+msgstr ""
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].key).toBe('footer.license');
+      expect(result[0].value).toBe('Licensed under the MIT License');
+    });
+
+    it('falls back to msgid when the source msgstr is empty (gettext convention)', () => {
+      const sourceContent = `msgid ""
+msgstr ""
+
+msgid "Save changes"
+msgstr ""
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+
+msgid "Save changes"
+msgstr ""
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].value).toBe('Save changes');
+    });
+
+    it('uses source msgstr plural forms for explicit-id plural entries', () => {
+      const sourceContent = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#. js-lingui-explicit-id
+msgid "cart.items"
+msgid_plural "cart.items_plural"
+msgstr[0] "One item"
+msgstr[1] "{count} items"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#. js-lingui-explicit-id
+msgid "cart.items"
+msgid_plural "cart.items_plural"
+msgstr[0] ""
+msgstr[1] ""
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(2);
+      expect(result[0].value).toBe('One item');
+      expect(result[1].value).toBe('{count} items');
+    });
+
     it('should find missing translations with context', () => {
       const sourceContent = `msgid ""
 msgstr ""

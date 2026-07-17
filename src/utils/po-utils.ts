@@ -317,6 +317,19 @@ export interface MissingTranslation {
   };
 }
 
+/**
+ * The source text for a missing entry. Normally the msgid IS the source (gettext
+ * convention, empty source msgstr), but Lingui explicit-id entries carry an opaque
+ * key as msgid and the real English in the source catalog's msgstr — prefer that
+ * when present, or the backend stores the key name as the source text.
+ */
+function sourceValueFor(entry: PoEntry, pluralIndex: number): string {
+  const msgstr = entry.msgstr?.[pluralIndex];
+  if (msgstr && msgstr.trim() !== '') return msgstr;
+
+  return pluralIndex === 0 ? entry.msgid : (entry.msgid_plural ?? entry.msgid);
+}
+
 export function findMissingPoTranslations(
   sourceContent: string,
   targetContent: string
@@ -373,7 +386,7 @@ export function findMissingPoTranslations(
           missing.push({
             key: keyName,
             context: entry.msgctxt,
-            value: i === 0 ? entry.msgid : entry.msgid_plural,
+            value: sourceValueFor(entry, i),
             isPlural: true,
             pluralForm: entry.msgid_plural,
             ...(hasMetadata && { metadata })
@@ -391,7 +404,7 @@ export function findMissingPoTranslations(
         missing.push({
           key: entry.msgid,
           context: entry.msgctxt,
-          value: entry.msgid,
+          value: sourceValueFor(entry, 0),
           isPlural: false,
           pluralForm: entry.msgid_plural,
           ...(hasMetadata && { metadata })
