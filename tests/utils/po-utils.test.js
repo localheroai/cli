@@ -920,6 +920,63 @@ msgstr[1] ""
       expect(result[1].value).toBe('{count} items');
     });
 
+    it('reuses the last source plural form when the target has more forms (explicit-id)', () => {
+      // en (2 forms) -> pl (3 forms): form 2 has no source msgstr index. It must
+      // reuse the last real source form, not leak the opaque msgid_plural key.
+      const sourceContent = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#. js-lingui-explicit-id
+msgid "cart.items"
+msgid_plural "cart.items_plural"
+msgstr[0] "One item"
+msgstr[1] "{count} items"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=3; plural=(n==1 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\\n"
+
+#. js-lingui-explicit-id
+msgid "cart.items"
+msgid_plural "cart.items_plural"
+msgstr[0] ""
+msgstr[1] ""
+msgstr[2] ""
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(3);
+      expect(result[0].value).toBe('One item');
+      expect(result[1].value).toBe('{count} items');
+      expect(result[2].value).toBe('{count} items');
+    });
+
+    it('prefers a differing source msgstr even without an explicit-id marker', () => {
+      // The rule is unconditional by design — it matches the push path
+      // (poEntriesToApiFormat), which also prefers a non-empty source msgstr.
+      const sourceContent = `msgid ""
+msgstr ""
+
+msgid "Copyright notice"
+msgstr "© 2026 Localhero.ai"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+
+msgid "Copyright notice"
+msgstr ""
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].value).toBe('© 2026 Localhero.ai');
+    });
+
     it('should find missing translations with context', () => {
       const sourceContent = `msgid ""
 msgstr ""
