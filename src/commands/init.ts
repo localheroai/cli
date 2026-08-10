@@ -183,6 +183,16 @@ const PROJECT_TYPES: ProjectTypes = {
       'config/locales'
     ]
   },
+  phoenix: {
+    directIndicators: ['mix.exs'],
+    defaults: {
+      translationPath: 'priv/gettext/',
+      filePattern: '**/*.po'
+    },
+    commonPaths: [
+      'priv/gettext'
+    ]
+  },
   nextIntl: {
     directIndicators: [],
     packageCheck: {

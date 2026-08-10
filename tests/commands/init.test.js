@@ -799,6 +799,47 @@ describe('init command', () => {
     fs.promises.stat = originalStat;
   });
 
+  it('detects Phoenix projects from mix.exs and proposes gettext defaults', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('sv,nb')
+      .mockResolvedValueOnce('phoenix-project')
+      .mockResolvedValueOnce('priv/gettext/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_phoenix',
+      name: 'phoenix-project'
+    });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false);
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) => {
+      if (path === 'mix.exs') {
+        return Promise.resolve({ isFile: () => true });
+      }
+      return originalStat(path);
+    });
+
+    await init(createInitDeps());
+
+    const saveConfigCall = configUtils.saveProjectConfig.mock.calls[0];
+    const savedConfig = saveConfigCall[0];
+
+    expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+    expect(savedConfig.translationFiles.paths).toContain('priv/gettext/');
+    expect(savedConfig.translationFiles.workflow).toBeUndefined();
+
+    // Restore original stat function
+    fs.promises.stat = originalStat;
+  });
+
   describe('Lingui project detection', () => {
     async function runInitWithMocks({ statIndicator, packageDeps }) {
       configUtils.getProjectConfig.mockResolvedValue(null);
