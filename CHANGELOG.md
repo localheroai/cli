@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.61] - 2026-08-11
+
+### Added
+- `init` recognises Phoenix/Elixir projects (via `mix.exs`) and suggests `priv/gettext/` with a `**/*.po` pattern, instead of leaving you to fill the paths in by hand.
+
 ## [0.0.60] - 2026-07-16
 
 ### Added
