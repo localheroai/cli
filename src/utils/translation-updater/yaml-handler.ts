@@ -128,6 +128,88 @@ async function createYamlDocument(filePath: string): Promise<YamlDocumentResult>
   };
 }
 
+// Duplicate key names within a single mapping level, keyed by the dotted
+// path to that mapping (e.g. "sv.section" -> {"keep_me"}). Only duplicates
+// actually present are returned; a map with no repeated keys contributes
+// nothing, so an empty result means "no duplicates anywhere in this doc".
+function collectDuplicateKeyNames(node: unknown, pathPrefix: string[] = [], acc: Map<string, Set<string>> = new Map()): Map<string, Set<string>> {
+  if (yaml.isMap(node)) {
+    const seen = new Map<string, number>();
+    for (const item of (node as YamlMap).items) {
+      const keyStr = yaml.isScalar(item.key) ? String((item.key as YamlScalar).value) : JSON.stringify(item.key);
+      seen.set(keyStr, (seen.get(keyStr) ?? 0) + 1);
+      collectDuplicateKeyNames(item.value, [...pathPrefix, keyStr], acc);
+    }
+    const duplicates = new Set<string>();
+    for (const [key, count] of seen) {
+      if (count > 1) duplicates.add(key);
+    }
+    if (duplicates.size > 0) acc.set(pathPrefix.join('.'), duplicates);
+  } else if (yaml.isSeq(node)) {
+    (node as YamlSeq).items.forEach((item, i) => collectDuplicateKeyNames(item, [...pathPrefix, String(i)], acc));
+  }
+  return acc;
+}
+
+function isSubsetOfExistingDuplicates(
+  outputDuplicates: Map<string, Set<string>>,
+  sourceDuplicates: Map<string, Set<string>>
+): boolean {
+  for (const [mapPath, keys] of outputDuplicates) {
+    const sourceKeys = sourceDuplicates.get(mapPath);
+    if (!sourceKeys) return false;
+    for (const key of keys) {
+      if (!sourceKeys.has(key)) return false;
+    }
+  }
+  return true;
+}
+
+// The splice writer computes byte-range patches by hand rather than a
+// round-trip library serialize (see yaml-splicer.ts header comment), so a
+// wrong offset/indentation calculation can silently produce syntactically
+// invalid YAML (#509). Re-parsing before writing catches that before a
+// corrupted file ships; callers fall back to the safe full-document
+// rewrite path instead of writing unverified output.
+//
+// A DUPLICATE_KEY error in the output is only tolerated (warned, not
+// blocked) when that exact key, at that exact mapping path, was ALREADY
+// duplicated in the source. That matches the tolerance clearDuplicateKeyErrors
+// already applies on read (and how Ruby's YAML loader behaves — last-value-wins,
+// no crash), without waving through a NEW duplicate a bad splice offset could
+// introduce by inserting a key where one with the same name already exists.
+interface SpliceValidation {
+  valid: boolean;
+  reason?: string;
+}
+
+function validateSplicedOutput(source: string, output: string, filePath: string): SpliceValidation {
+  const reparsed = yaml.parseDocument(output, { strict: true });
+  const blockingErrors = reparsed.errors.filter(e => e.code !== 'DUPLICATE_KEY');
+
+  if (blockingErrors.length > 0) {
+    return { valid: false, reason: `failed to re-parse (${blockingErrors[0].message})` };
+  }
+
+  const outputDuplicates = collectDuplicateKeyNames(reparsed.contents);
+  if (outputDuplicates.size === 0) return { valid: true };
+
+  const sourceDoc = yaml.parseDocument(source);
+  const sourceDuplicates = collectDuplicateKeyNames(sourceDoc.contents);
+
+  if (!isSubsetOfExistingDuplicates(outputDuplicates, sourceDuplicates)) {
+    return { valid: false, reason: 'introduces a new duplicate key not present in the source file' };
+  }
+
+  const duplicateCount = [...outputDuplicates.values()].reduce((sum, keys) => sum + keys.size, 0);
+  console.warn(
+    `Warning: ${filePath} has ${duplicateCount} duplicate key(s) after this write; ` +
+    'the source file already had them. YAML parsers using last-value-wins semantics will still ' +
+    'read it correctly, but the duplicate keys should be cleaned up.'
+  );
+  return { valid: true };
+}
+
 function clearDuplicateKeyErrors(doc: yaml.Document, filePath: string): void {
   if (doc.errors.length === 0) return;
 
@@ -266,11 +348,17 @@ export async function updateYamlFile(
   if (canSplice) {
     const { output, applied } = spliceYamlUpdate(source, doc, translations, languageCode, options.indent);
     if (applied) {
-      await writeYamlFile(filePath, output);
-      return {
-        updatedKeys: Object.keys(translations),
-        created: false
-      };
+      const validation = validateSplicedOutput(source, output, filePath);
+      if (validation.valid) {
+        await writeYamlFile(filePath, output);
+        return {
+          updatedKeys: Object.keys(translations),
+          created: false
+        };
+      }
+      console.warn(
+        `Warning: splice-writer output for ${filePath} ${validation.reason}; falling back to full-document rewrite.`
+      );
     }
   }
 
@@ -298,6 +386,12 @@ export async function deleteKeysFromYamlFile(
 
     const { output, deletedKeys } = spliceYamlDelete(source, doc, keysToDelete, languageCode);
     if (deletedKeys.length > 0) {
+      const validation = validateSplicedOutput(source, output, filePath);
+      if (!validation.valid) {
+        throw new Error(
+          `Splice-writer output ${validation.reason}, and deletion has no full-rewrite fallback; file was not modified`
+        );
+      }
       await writeYamlFile(filePath, output);
     }
     return deletedKeys;
