@@ -237,7 +237,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true });
-  const { sourceFiles, targetFilesByLocale, allFiles } = result as TranslationFilesResult;
+  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [] } = result as TranslationFilesResult;
+
+  if (parseFailures.length > 0) {
+    console.error(chalk.red(`\n✖ ${parseFailures.length} translation file(s) failed to parse and were skipped:`));
+    for (const failure of parseFailures) {
+      console.error(chalk.red(`  - ${failure.path}: ${failure.error}`));
+    }
+    console.error(chalk.red('Every key in a skipped file is missing from this run. Fix the file and re-run.\n'));
+    process.exitCode = 1;
+  }
 
   if (!allFiles || allFiles.length === 0) {
     console.error(chalk.red('\n✖ No translation files found in the specified paths.\n'));
@@ -450,6 +459,10 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       console.error(chalk.red(`» ${translationResult.failedLanguages.length} language(s) failed: ${translationResult.failedLanguages.join(', ')}`));
       if (translationResult.uniqueKeysTranslated.size > 0) {
         console.log(`» Successfully updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
+      }
+    } else if (parseFailures.length > 0) {
+      if (translationResult.uniqueKeysTranslated.size > 0) {
+        console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
     } else {
       console.log(chalk.green('✓ Translations complete!'));

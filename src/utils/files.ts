@@ -7,6 +7,7 @@ import { promises as fs } from 'fs';
 import type {
   TranslationConfig,
   TranslationFile,
+  TranslationFileParseFailure,
   TranslationFilesResult,
   TranslationFileOptions
 } from '../types/index.js';
@@ -351,6 +352,7 @@ export async function findTranslationFiles(
   } = translationFiles || {};
 
   const processedFiles: TranslationFile[] = [];
+  const parseFailures: TranslationFileParseFailure[] = [];
   let betaNoticeEmitted = false;
 
   // Adjustment to handle single-item braces, common mistake to use {json} instead of *.json, its not supported by glob
@@ -526,6 +528,8 @@ export async function findTranslationFiles(
           } else if (format === 'yml' || format === 'yaml') {
             console.warn(chalk.gray('  Tip: Check for proper indentation and quote matching in your YAML file.'));
           }
+
+          parseFailures.push({ path: file, error: error.message });
         } else if (error.message.includes('Could not extract locale from path')) {
           console.warn(chalk.yellow(`Warning: ${error.message}`), chalk.gray('[Skipping file]'));
         } else if (verbose) {
@@ -556,7 +560,8 @@ export async function findTranslationFiles(
   return {
     allFiles,
     sourceFiles,
-    targetFilesByLocale
+    targetFilesByLocale,
+    parseFailures
   };
 }
 

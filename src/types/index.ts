@@ -167,11 +167,17 @@ export interface Organization {
   projects: Project[];
 }
 
+export interface TranslationFileParseFailure {
+  path: string;
+  error: string;
+}
+
 // For translation file results
 export interface TranslationFilesResult {
   allFiles: TranslationFile[];
   sourceFiles: TranslationFile[];
   targetFilesByLocale: Record<string, TranslationFile[]>;
+  parseFailures: TranslationFileParseFailure[];
 }
 
 // Key identifier for manifest (used in finalize endpoint)

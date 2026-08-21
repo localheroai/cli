@@ -98,6 +98,7 @@ describe('translate command', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    process.exitCode = undefined;
   });
 
   it('successfully translates missing keys', async () => {
@@ -228,6 +229,34 @@ describe('translate command', () => {
 
     // Verify no errors were logged
     expect(mockConsole.error).not.toHaveBeenCalled();
+  });
+
+  it('exits non-zero and reports files that failed to parse, even when translation succeeds', async () => {
+    const sourceFilePath = 'locales/en/common.json';
+
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [{
+        path: sourceFilePath,
+        format: 'json',
+        content: Buffer.from(JSON.stringify({ hello: 'Hello' })).toString('base64')
+      }],
+      targetFilesByLocale: { fr: [] },
+      allFiles: [{ path: sourceFilePath, locale: 'en' }],
+      parseFailures: [
+        { path: 'locales/en/broken.yml', error: 'Failed to parse yml file in locales/en/broken.yml: Map keys must be unique at line 12' }
+      ]
+    });
+
+    translationUtils.findMissingTranslationsByLocale.mockReturnValue({ missing: {}, removed: [] });
+
+    await translate({ verbose: false }, createTranslateDeps());
+
+    const errorOutput = mockConsole.error.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+
+    expect(errorOutput).toContain('locales/en/broken.yml');
+    expect(process.exitCode).toBe(1);
   });
 
   function stubFilesForCategoryTest() {
