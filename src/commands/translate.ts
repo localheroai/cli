@@ -139,6 +139,22 @@ const defaultDeps: TranslationDependencies = {
   execUtils: { execSync }
 };
 
+// Names the actual failure (bad key / rate limit / network / server error)
+// instead of a generic "could not fetch".
+function pluralCategoriesFailureReason(error: unknown): string {
+  if (error instanceof ApiResponseError) {
+    if (error.code === 'rate_limit_exceeded') {
+      return 'the API rate limit was exceeded — try again later';
+    }
+    const message = error.cliErrorMessage?.trim() || error.message.trim();
+    return message || 'an unknown error';
+  }
+  if (error instanceof Error) {
+    return error.message.trim() || 'an unknown error';
+  }
+  return 'an unknown error';
+}
+
 async function fetchLocalePluralCategories(
   projectId: string,
   outputLocales: string[],
@@ -168,11 +184,12 @@ async function fetchLocalePluralCategories(
         map[configCode] = categories;
       }
     }
-  } catch {
+  } catch (error) {
     // Without categories, missing-detection falls back to exact key matching, which
     // re-flags flat-target plurals as missing on every run and re-charges credits
     // (#432). Always warn, not just under --verbose.
-    logger.log(chalk.yellow('\n⚠ Could not fetch locale plural categories. Falling back to exact key matching, which can re-translate plural keys that are already translated and use credits. Re-run once the connection is restored if you see unexpected plural updates.\n'));
+    const reason = pluralCategoriesFailureReason(error);
+    logger.log(chalk.yellow(`\n⚠ Could not fetch locale plural categories (${reason}). Falling back to exact key matching, which can re-translate plural keys that are already translated and use credits. Re-run once resolved if you see unexpected plural updates.\n`));
   }
   return map;
 }
