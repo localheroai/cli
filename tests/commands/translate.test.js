@@ -277,6 +277,19 @@ describe('translate command', () => {
     expect(config.localePluralCategories).toEqual({});
   });
 
+  it('warns without --verbose when the category fetch fails (credit risk, #432)', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new Error('network'));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Could not fetch locale plural categories');
+    expect(consoleOutput).toContain('credits');
+  });
+
   it('keys the category map by the config locale spelling (zh_cn vs zh-CN)', async () => {
     stubFilesForCategoryTest();
     configUtils.getProjectConfig.mockResolvedValue({
