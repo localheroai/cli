@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
 import { translate } from '../../src/commands/translate.js';
+import { ApiResponseError } from '../../src/types/index.js';
 
 describe('translate command', () => {
   let mockConsole;
@@ -288,6 +289,108 @@ describe('translate command', () => {
       .join('\n');
     expect(consoleOutput).toContain('Could not fetch locale plural categories');
     expect(consoleOutput).toContain('credits');
+  });
+
+  it('relays an invalid-API-key error message (the login hint is already in it)', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError(
+      'Your API key is invalid or has been revoked. Please run `npx @localheroai/cli login` to update your API key.',
+      { code: 'invalid_api_key' }
+    ));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Could not fetch locale plural categories');
+    expect(consoleOutput).toContain('npx @localheroai/cli login');
+  });
+
+  it('prefers cliErrorMessage over message when they differ', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError(
+      'raw API error text',
+      { code: 'API_ERROR', cliErrorMessage: 'Server error: raw API error text' }
+    ));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Server error: raw API error text');
+    expect(consoleOutput).not.toContain('categories (raw API error text)');
+  });
+
+  it('falls back to message for the no-body server-error shape (no cliErrorMessage set)', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError(
+      'Our server is temporarily unavailable. Please try again in a minute.',
+      { code: 'server_error', details: { status: 503 } }
+    ));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Our server is temporarily unavailable');
+  });
+
+  it('names a rate-limit error with a specific, actionable reason', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError(
+      'Rate limit exceeded. Please try again later.',
+      { code: 'rate_limit_exceeded', details: { retry_after: 60 } }
+    ));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('rate limit was exceeded');
+  });
+
+  it('names a network error as the reason, using its friendly message', async () => {
+    stubFilesForCategoryTest();
+    const networkError = new Error('Unable to connect to https://api.localhero.ai. Please check your internet connection and try again.');
+    settingsUtils.fetchSettings.mockRejectedValue(networkError);
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Could not fetch locale plural categories');
+    expect(consoleOutput).toContain('Unable to connect to https://api.localhero.ai');
+  });
+
+  it('falls back to "an unknown error" for a non-Error rejection', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue('not an Error instance');
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('Could not fetch locale plural categories');
+    expect(consoleOutput).toContain('an unknown error');
+  });
+
+  it('falls back to "an unknown error" when both message and cliErrorMessage are blank', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError('', { code: 'API_ERROR', cliErrorMessage: '' }));
+
+    await translate({}, createTranslateDeps());
+
+    const consoleOutput = mockConsole.log.mock.calls
+      .map(call => typeof call[0] === 'string' ? call[0] : JSON.stringify(call[0]))
+      .join('\n');
+    expect(consoleOutput).toContain('an unknown error');
+    expect(consoleOutput).not.toContain('categories ().');
   });
 
   it('keys the category map by the config locale spelling (zh_cn vs zh-CN)', async () => {
