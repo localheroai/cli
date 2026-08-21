@@ -376,6 +376,31 @@ en:
     expect(result[0].path).toBe('config/locales/en.json');
   });
 
+  it('reports parse failures in the full result instead of silently dropping them', async () => {
+    mockGlob.mockResolvedValue(['config/locales/en.json', 'config/locales/invalid.json']);
+    mockReadFile.mockImplementation((path) => {
+      if (path === 'config/locales/en.json') {
+        return Promise.resolve('{"hello": "Hello"}');
+      } else {
+        return Promise.resolve('{ invalid json }');
+      }
+    });
+
+    const config = {
+      translationFiles: {
+        paths: ['config/locales/'],
+        localeRegex: '([a-z]{2}(?:-[A-Z]{2})?)\\.(?:yml|yaml|json)$'
+      }
+    };
+
+    const result = await findTranslationFiles(config, { returnFullResult: true });
+
+    expect(result.allFiles).toHaveLength(1);
+    expect(result.parseFailures).toHaveLength(1);
+    expect(result.parseFailures[0].path).toBe('config/locales/invalid.json');
+    expect(result.parseFailures[0].error).toMatch(/Failed to parse/);
+  });
+
   it('finds files in nested directories', async () => {
     mockGlob.mockResolvedValue([
       'config/locales/en/common.json',
