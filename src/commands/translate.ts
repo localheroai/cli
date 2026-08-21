@@ -143,7 +143,6 @@ async function fetchLocalePluralCategories(
   projectId: string,
   outputLocales: string[],
   settingsUtils: { fetchSettings: (projectId: string) => Promise<any> },
-  verbose: boolean | undefined,
   logger: { log: (message?: any, ...optionalParams: any[]) => void }
 ): Promise<Record<string, string[]>> {
   const CLDR_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
@@ -170,9 +169,10 @@ async function fetchLocalePluralCategories(
       }
     }
   } catch {
-    if (verbose) {
-      logger.log(chalk.gray('ℹ Could not fetch locale plural categories; using exact key matching.'));
-    }
+    // Without categories, missing-detection falls back to exact key matching, which
+    // re-flags flat-target plurals as missing on every run and re-charges credits
+    // (#432). Always warn, not just under --verbose.
+    logger.log(chalk.yellow('\n⚠ Could not fetch locale plural categories. Falling back to exact key matching, which can re-translate plural keys that are already translated and use credits. Re-run once the connection is restored if you see unexpected plural updates.\n'));
   }
   return map;
 }
@@ -208,7 +208,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     config.projectId,
     config.outputLocales,
     settingsUtils,
-    verbose,
     console
   );
 
