@@ -138,6 +138,145 @@ describe('githubService', () => {
       expect(fileContent).toContain('- "i18n/*.json"');
     });
 
+    it('adds a makemessages extract step for django projects', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv', 'de']
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('uses: actions/setup-python@v5');
+      expect(fileContent).toContain('sudo apt-get install -y -qq gettext');
+      expect(fileContent).toContain('python manage.py makemessages -l sv -l de');
+      expect(fileContent).not.toContain('--no-obsolete');
+      expect(fileContent.indexOf('makemessages')).toBeLessThan(
+        fileContent.indexOf('uses: localheroai/localhero-action@v1')
+      );
+    });
+
+    it('converts language codes to django locale names in the extract step', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['pt-br', 'de-at', 'en']
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('makemessages -l pt_BR -l de_AT -l en');
+    });
+
+    it('falls back to --all when no locales are known', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, { extractor: 'django' });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('python manage.py makemessages --all');
+    });
+
+    it('skips extraction on sync and dispatch runs', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv']
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+    });
+
+    it('uses uv when the project has a uv lockfile', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv'],
+        pythonInstall: 'uv sync --frozen'
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('uv sync --frozen');
+      expect(fileContent).toContain('uv run python manage.py makemessages -l sv');
+      expect(fileContent).not.toContain('pip install');
+    });
+
+    it('installs uv before using it', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv'],
+        pythonInstall: 'uv sync --frozen'
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('astral-sh/setup-uv@v5');
+      expect(fileContent.indexOf('setup-uv')).toBeLessThan(fileContent.indexOf('uv sync'));
+    });
+
+    it('does not add a uv setup step for pip projects', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv']
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).not.toContain('setup-uv');
+    });
+
+    it('falls back to pip when no other manifest is present', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, {
+        extractor: 'django',
+        locales: ['sv']
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('pip install -r requirements.txt');
+      expect(fileContent).toContain('python manage.py makemessages -l sv');
+      expect(fileContent).not.toContain('uv run');
+    });
+
+    it('adds a gettext extract step for phoenix projects', async () => {
+      await createGitHubActionFile('/project', ['priv/gettext/**'], undefined, { extractor: 'phoenix' });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('uses: erlef/setup-beam@v1');
+      expect(fileContent).toContain('mix deps.get');
+      expect(fileContent).toContain('mix gettext.extract --merge');
+      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+      expect(fileContent.indexOf('gettext.extract')).toBeLessThan(
+        fileContent.indexOf('uses: localheroai/localhero-action@v1')
+      );
+    });
+
+    it('runs the phoenix extract step inside the app dir for umbrella projects', async () => {
+      await createGitHubActionFile('/project', ['apps/myapp_web/priv/gettext/**'], undefined, {
+        extractor: 'phoenix',
+        extractWorkingDirectory: 'apps/myapp_web'
+      });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).toContain('working-directory: apps/myapp_web');
+      expect(fileContent).toContain('mix gettext.extract --merge');
+    });
+
+    it('omits working-directory for a plain phoenix project', async () => {
+      await createGitHubActionFile('/project', ['priv/gettext/**'], undefined, { extractor: 'phoenix' });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).not.toContain('working-directory');
+    });
+
+    it('does not install gettext system packages for phoenix', async () => {
+      await createGitHubActionFile('/project', ['priv/gettext/**'], undefined, { extractor: 'phoenix' });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).not.toContain('apt-get');
+      expect(fileContent).not.toContain('makemessages');
+    });
+
+    it('does not add an extract step for rails and other key-based projects', async () => {
+      await createGitHubActionFile('/project', ['config/locales/**']);
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).not.toContain('makemessages');
+      expect(fileContent).not.toContain('actions/setup-python');
+      expect(fileContent).not.toContain('setup-beam');
+      expect(fileContent).not.toContain('gettext.extract');
+    });
+
     it('writes sourceCodePaths as literal patterns without brace expansion', async () => {
       const sourceCodePaths = ['src/**/*.ts', 'src/**/*.tsx', 'src/**/*.js', 'src/**/*.jsx'];
       await createGitHubActionFile('/project', ['src/locales/**'], sourceCodePaths);

@@ -592,6 +592,50 @@ export async function findFirstExistingPath(paths: string[], fsModule = fs): Pro
   return null;
 }
 
+// A directory named locale/, locales/ or translations/ is not necessarily a gettext
+// catalog. Wagtail ships a `locales/` Django app and Saleor a `translations/` Python
+// package, both of which a name-only check would wrongly propose. Require the
+// <lang>/LC_MESSAGES/*.po shape that Django and Phoenix actually use.
+const GETTEXT_CATALOG_PATTERN = '*/LC_MESSAGES/*.po';
+
+function catalogRootFromMatch(matchPath: string): string | null {
+  const marker = `${path.sep}LC_MESSAGES${path.sep}`;
+  const normalized = matchPath.split('/').join(path.sep);
+  const idx = normalized.lastIndexOf(marker);
+  if (idx === -1) {
+    return null;
+  }
+  return path.dirname(normalized.slice(0, idx));
+}
+
+export async function findFirstGettextCatalogPath(paths: string[], fsModule = fs): Promise<string | null> {
+  const empties: string[] = [];
+
+  for (const candidate of paths) {
+    const matches = await glob(`${candidate}/${GETTEXT_CATALOG_PATTERN}`);
+    // A candidate may be a pattern (umbrella apps/*/priv/gettext), so derive the
+    // real directory from the match rather than returning the pattern itself.
+    const catalogRoot = matches.length > 0 ? catalogRootFromMatch(matches[0]) : null;
+    if (catalogRoot) {
+      return catalogRoot;
+    }
+    // Only a literal path can be inspected for the greenfield case; an unmatched
+    // pattern has no single directory to fall back to.
+    if (candidate.includes('*') || !(await directoryExists(candidate, fsModule))) {
+      continue;
+    }
+    // An empty directory is a project that has not extracted yet, so it stays a
+    // candidate. A directory with other content and no catalog is something else
+    // wearing the name, and is skipped.
+    const contents = await fsModule.readdir(candidate);
+    if (contents.length === 0) {
+      empties.push(candidate);
+    }
+  }
+
+  return empties[0] ?? null;
+}
+
 /**
  * Get contents of a directory, categorized by file type
  */
