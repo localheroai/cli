@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.62] - 2026-08-25
+
+### Added
+- `init` sets up Django and Phoenix projects so the GitHub workflow actually works on the first PR. Gettext stacks only translate what is already in the catalogs, so a workflow without an extract step ran green and translated nothing. The generated workflow now runs `makemessages` (Django) or `mix gettext.extract --merge` (Phoenix) before translating, installs the toolchain it needs, and watches your source files so a PR that adds a new string triggers a run. Dependency manager is picked from the lockfile (uv, poetry, pipenv, or pip), and Phoenix umbrella apps get the right `working-directory`.
+
+### Fixed
+- `init` no longer mistakes a source directory for a translation directory on gettext projects. Wagtail ships a `locales/` app and Saleor a `translations/` package, and both were being suggested as the catalog path. Detection now looks for an actual `*/LC_MESSAGES/*.po` layout.
+- A source file that fails to parse is now reported and exits non-zero. Previously it was dropped at discovery and the run still printed "✓ Translations complete!" and exited 0, so every key in a file with a syntax error was excluded from every run with nothing to show for it.
+- When the locale plural-categories fetch fails, the warning is always shown instead of only under `--verbose`. Without those categories, missing-detection falls back to exact key matching, which re-flags already-translated plural keys as missing and spends credits on every run. The warning now says so, and names the actual cause (bad API key, rate limit, network) rather than a generic failure.
+
+### Changed
+- Dropped the unused `@oclif/core` dependency and bumped `yaml`, `glob`, and `nanoid`.
+
 ## [0.0.61] - 2026-08-11
 
 ### Added
