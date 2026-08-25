@@ -7,8 +7,8 @@ import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
-import { createGitHubActionFile, workflowExists } from '../utils/github.js';
-import { directoryExists, findFirstExistingPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
+import { createGitHubActionFile, workflowExists, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
+import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
@@ -71,6 +71,7 @@ interface ProjectTypeConfig {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    extractor?: string;
     // Literal glob patterns for the GitHub Actions paths: filter.
     // Do not use brace expansion ({ts,tsx}); list one entry per extension.
     sourceCodePaths?: string[];
@@ -92,6 +93,7 @@ interface ProjectDetectionResult {
     commonPaths?: string[];
     ignorePaths?: string[];
     workflow?: string;
+    extractor?: string;
     // Literal glob patterns for the GitHub Actions paths: filter.
     // Do not use brace expansion ({ts,tsx}); list one entry per extension.
     sourceCodePaths?: string[];
@@ -165,12 +167,14 @@ const PROJECT_TYPES: ProjectTypes = {
       translationPath: 'translations/',
       filePattern: '**/*.po',
       ignorePaths: ['**/sources/**'],
-      workflow: 'django'
+      workflow: 'django',
+      extractor: 'django',
+      sourceCodePaths: ['**/*.py', '**/*.html', '**/*.txt']
     },
     commonPaths: [
-      'translations',
       'locale',
-      'locales'
+      'locales',
+      'translations'
     ]
   },
   rails: {
@@ -187,10 +191,18 @@ const PROJECT_TYPES: ProjectTypes = {
     directIndicators: ['mix.exs'],
     defaults: {
       translationPath: 'priv/gettext/',
-      filePattern: '**/*.po'
+      filePattern: '**/*.po',
+      extractor: 'phoenix',
+      // Umbrella projects keep code in apps/<app>/lib, so both shapes are watched.
+      sourceCodePaths: [
+        'lib/**/*.ex', 'lib/**/*.exs', 'lib/**/*.eex', 'lib/**/*.heex', 'lib/**/*.leex',
+        'apps/*/lib/**/*.ex', 'apps/*/lib/**/*.exs', 'apps/*/lib/**/*.eex',
+        'apps/*/lib/**/*.heex', 'apps/*/lib/**/*.leex'
+      ]
     },
     commonPaths: [
-      'priv/gettext'
+      'priv/gettext',
+      'apps/*/priv/gettext'
     ]
   },
   nextIntl: {
@@ -422,7 +434,13 @@ async function detectProjectType(): Promise<ProjectDetectionResult> {
     if (!isFramework) continue;
 
     if (config.commonPaths) {
-      const translationPath = await findFirstExistingPath(config.commonPaths);
+      // For gettext projects the catalog check is authoritative: falling back to a
+      // name-only match would re-propose the directories it just rejected (a Django
+      // app named locales/, a Python package named translations/). When it finds
+      // nothing, the framework default is the better answer than a wrong directory.
+      const translationPath = config.defaults.extractor
+        ? await findFirstGettextCatalogPath(config.commonPaths)
+        : await findFirstExistingPath(config.commonPaths);
       if (translationPath) {
         return {
           type,
@@ -555,15 +573,34 @@ async function handleImportProcess(
   }
 }
 
-async function handleGitHubWorkflowSetup(
-  basePath: string,
-  translationPaths: string[],
-  promptService: IPromptService,
-  console: Console,
-  githubUtils: { createGitHubActionFile: typeof createGitHubActionFile; workflowExists: typeof workflowExists },
-  autoAnswer?: boolean,
-  sourceCodePaths?: string[]
-): Promise<WorkflowSetupResult> {
+interface WorkflowSetupParams {
+  basePath: string;
+  translationPaths: string[];
+  promptService: IPromptService;
+  console: Console;
+  githubUtils: { createGitHubActionFile: typeof createGitHubActionFile; workflowExists: typeof workflowExists };
+  autoAnswer?: boolean;
+  sourceCodePaths?: string[];
+  extractor?: string;
+  locales?: string[];
+  extractWorkingDirectory?: string;
+  pythonInstall?: string;
+}
+
+async function handleGitHubWorkflowSetup(params: WorkflowSetupParams): Promise<WorkflowSetupResult> {
+  const {
+    basePath,
+    translationPaths,
+    promptService,
+    console,
+    githubUtils,
+    autoAnswer,
+    sourceCodePaths,
+    extractor,
+    locales,
+    extractWorkingDirectory,
+    pythonInstall
+  } = params;
   if (githubUtils.workflowExists(basePath)) {
     console.log(chalk.green('✓ GitHub Actions workflow found'));
     console.log(chalk.yellow('\n⚠️  Remember to add your API key to repository secrets:'));
@@ -588,7 +625,12 @@ async function handleGitHubWorkflowSetup(
   }
 
   try {
-    const workflowFile = await githubUtils.createGitHubActionFile(basePath, translationPaths, sourceCodePaths);
+    const workflowFile = await githubUtils.createGitHubActionFile(
+      basePath,
+      translationPaths,
+      sourceCodePaths,
+      { extractor, locales, extractWorkingDirectory, pythonInstall }
+    );
     console.log(chalk.green(`\n✓ Created GitHub Action workflow at ${workflowFile}`));
     console.log('\nNext steps:');
     console.log('1. Add your API key to your repository\'s secrets:');
@@ -616,6 +658,33 @@ function printLinguiWorkflowNotice(console: Console): void {
   console.log('\nWithout this, the workflow will not pick up new translatable strings.\n');
 }
 
+function printExtractorNotice(extractor: string | undefined, console: Console, pythonInstall?: string): void {
+  if (extractor === 'django') {
+    printDjangoWorkflowNotice(console, pythonInstall);
+  } else if (extractor === 'phoenix') {
+    printPhoenixWorkflowNotice(console);
+  }
+}
+
+function printPhoenixWorkflowNotice(console: Console): void {
+  console.log(chalk.yellow('\n⚠️  Check the extract step in the generated workflow'));
+  console.log('\nThe workflow runs `mix gettext.extract --merge` to pick up new messages');
+  console.log(`before translating, on Elixir ${PHOENIX_ELIXIR_VERSION} / OTP ${PHOENIX_OTP_VERSION}.`);
+  console.log('Adjust the versions to match your project.\n');
+}
+
+function printDjangoWorkflowNotice(console: Console, pythonInstall?: string): void {
+  const install = pythonInstall || 'pip install -r requirements.txt';
+  console.log(chalk.yellow('\n⚠️  Check the extract step in the generated workflow'));
+  console.log('\nThe workflow runs `makemessages` to pick up new strings before translating.');
+  console.log(`It installs dependencies with \`${install}\` on Python ${DJANGO_PYTHON_VERSION},`);
+  console.log('so adjust that if your project does it differently.');
+  console.log('\nIf you wrap extraction in your own command or make target, point the step');
+  console.log('at that instead. Extra flags like --ignore or --add-location belong there too.');
+  console.log('\nTranslated .po files still need `compilemessages` to take effect,');
+  console.log('usually already part of your build or deploy rather than CI.\n');
+}
+
 function displayFinalInstructions(
   workflowCreated: boolean,
   workflowExists: boolean,
@@ -638,6 +707,78 @@ function displayFinalInstructions(
     console.log('\nYou can run translations manually with:');
   }
   console.log('  npx @localheroai/cli translate');
+}
+
+// Lockfile decides how CI installs dependencies. requirements.txt is the fallback
+// because it is the only one that works without an extra tool.
+const PYTHON_INSTALLERS: Array<{ lockfile: string; install: string }> = [
+  { lockfile: 'uv.lock', install: 'uv sync --frozen' },
+  { lockfile: 'poetry.lock', install: 'poetry install --no-interaction' },
+  { lockfile: 'Pipfile.lock', install: 'pipenv install --deploy' }
+];
+
+async function detectPythonInstall(): Promise<string | undefined> {
+  for (const { lockfile, install } of PYTHON_INSTALLERS) {
+    try {
+      const stats = await fs.stat(lockfile);
+      if (stats.isFile()) return install;
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+const UMBRELLA_APP_PATTERN = /^(apps\/[^/]+)\//;
+
+// `mix gettext.extract` must run inside the child app: from the umbrella root gettext
+// warns about conflicting backends and writes only one app's catalogs.
+function umbrellaAppDirectory(translationPaths: string[]): string | undefined {
+  for (const candidate of translationPaths) {
+    // Detection can yield native separators, so normalize before matching.
+    const match = UMBRELLA_APP_PATTERN.exec(candidate.split('\\').join('/'));
+    if (match) {
+      return match[1];
+    }
+  }
+  return undefined;
+}
+
+type ProjectDefaults = ProjectDetectionResult['defaults'];
+
+const GETTEXT_PATH_PATTERN = /(^|\/)priv\/gettext(\/|$)/;
+
+// Detection is filesystem-relative and can miss when init runs from a subdirectory
+// or the project root marker is not where it is expected. The saved config is then
+// the better evidence: an explicit django workflow, or a Phoenix-shaped catalog path.
+async function rootMarkerExists(marker: string): Promise<boolean> {
+  try {
+    return (await fs.stat(marker)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+// The generated extract step runs from the repository root, so an extractor is only
+// safe to infer when the project's root marker is actually there. Without this a
+// project whose manage.py sits in a subdirectory would get `python manage.py`
+// commands that cannot run, replacing a workflow that used to succeed.
+async function resolveWorkflowDefaults(
+  detected: ProjectDefaults | undefined,
+  existingConfig: BaseProjectConfig
+): Promise<ProjectDefaults | undefined> {
+  if (!detected || detected.extractor) {
+    return detected;
+  }
+  if (existingConfig.translationFiles?.workflow === 'django' && await rootMarkerExists('manage.py')) {
+    return PROJECT_TYPES.django.defaults;
+  }
+  const paths = existingConfig.translationFiles?.paths || [];
+  const looksLikePhoenix = paths.some(p => GETTEXT_PATH_PATTERN.test(p.split('\\').join('/')));
+  if (looksLikePhoenix && await rootMarkerExists('mix.exs')) {
+    return PROJECT_TYPES.phoenix.defaults;
+  }
+  return detected;
 }
 
 async function handleExistingConfiguration(
@@ -704,15 +845,38 @@ async function handleExistingConfiguration(
     }
   }
 
-  const workflowResult = await handleGitHubWorkflowSetup(
+  // The extractor is derived from the project type rather than persisted, so it has
+  // to be re-detected. Detection is filesystem-relative and can miss (init run from a
+  // subdirectory, manage.py not at the root), so a persisted django workflow is
+  // trusted as evidence when it does.
+  const detectedDefaults = githubUtils.workflowExists(basePath)
+    ? undefined
+    : (await detectProjectType()).defaults;
+  const workflowDefaults = await resolveWorkflowDefaults(detectedDefaults, existingConfig);
+
+  const existingPythonInstall = workflowDefaults?.extractor === 'django'
+    ? await detectPythonInstall()
+    : undefined;
+  const workflowResult = await handleGitHubWorkflowSetup({
     basePath,
-    existingConfig.translationFiles?.paths || [''],
+    translationPaths: existingConfig.translationFiles?.paths || [''],
     promptService,
     console,
     githubUtils,
-    nonInteractive ? options.githubAction === true : undefined
-  );
+    autoAnswer: nonInteractive ? options.githubAction === true : undefined,
+    sourceCodePaths: workflowDefaults?.sourceCodePaths,
+    extractor: workflowDefaults?.extractor,
+    locales: existingConfig.outputLocales,
+    extractWorkingDirectory: workflowDefaults?.extractor === 'phoenix'
+      ? umbrellaAppDirectory(existingConfig.translationFiles?.paths || [])
+      : undefined,
+    pythonInstall: existingPythonInstall
+  });
   workflowCreated = workflowResult.created;
+
+  if (workflowCreated) {
+    printExtractorNotice(workflowDefaults?.extractor, console, existingPythonInstall);
+  }
 
   displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), false, console);
 }
@@ -750,19 +914,32 @@ async function handleNewProjectSetup(
     console.log(chalk.green(`✓ Project created, view it at: ${url}\n`));
   }
 
-  const workflowResult = await handleGitHubWorkflowSetup(
+  const pythonInstall = projectDefaults.defaults.extractor === 'django'
+    ? await detectPythonInstall()
+    : undefined;
+  const workflowResult = await handleGitHubWorkflowSetup({
     basePath,
-    config.translationFiles.paths.length > 0 ? config.translationFiles.paths : [''],
+    translationPaths: config.translationFiles.paths.length > 0 ? config.translationFiles.paths : [''],
     promptService,
     console,
     githubUtils,
-    nonInteractive ? options.githubAction === true : undefined,
-    projectDefaults.defaults.sourceCodePaths
-  );
+    autoAnswer: nonInteractive ? options.githubAction === true : undefined,
+    sourceCodePaths: projectDefaults.defaults.sourceCodePaths,
+    extractor: projectDefaults.defaults.extractor,
+    locales: config.outputLocales,
+    extractWorkingDirectory: projectDefaults.defaults.extractor === 'phoenix'
+      ? umbrellaAppDirectory(config.translationFiles.paths)
+      : undefined,
+    pythonInstall
+  });
   workflowCreated = workflowResult.created;
 
   if (workflowCreated && projectDefaults.type === 'lingui') {
     printLinguiWorkflowNotice(console);
+  }
+
+  if (workflowCreated) {
+    printExtractorNotice(projectDefaults.defaults.extractor, console, pythonInstall);
   }
 
   let shouldImport: boolean;

@@ -14,6 +14,7 @@ describe('files utils', () => {
   let mockFs;
   let directoryExists;
   let findFirstExistingPath;
+  let findFirstGettextCatalogPath;
   let getDirectoryContents;
 
   beforeEach(async () => {
@@ -51,6 +52,7 @@ describe('files utils', () => {
     preserveJsonStructure = filesModule.preserveJsonStructure;
     directoryExists = filesModule.directoryExists;
     findFirstExistingPath = filesModule.findFirstExistingPath;
+    findFirstGettextCatalogPath = filesModule.findFirstGettextCatalogPath;
     getDirectoryContents = filesModule.getDirectoryContents;
   });
 
@@ -1223,6 +1225,116 @@ en:
       const result = await findFirstExistingPath(paths, mockFs);
       expect(result).toBe(null);
       expect(mockFs.stat).toHaveBeenCalledTimes(3); // Should check all paths
+    });
+  });
+
+  describe('findFirstGettextCatalogPath', () => {
+    const existsEverywhere = () => {
+      mockFs.stat.mockImplementation(() => Promise.resolve({ isDirectory: () => true }));
+      mockFs.readdir.mockResolvedValue(['some-file.py']);
+    };
+
+    it('skips a directory that exists but holds no catalog', async () => {
+      existsEverywhere();
+      mockGlob.mockImplementation((pattern) =>
+        pattern.startsWith('locale/') ? Promise.resolve(['locale/sv/LC_MESSAGES/django.po']) : Promise.resolve([])
+      );
+
+      const result = await findFirstGettextCatalogPath(['translations', 'locale'], mockFs);
+      expect(result).toBe('locale');
+    });
+
+    it('accepts a translations directory that does hold a catalog', async () => {
+      existsEverywhere();
+      mockGlob.mockImplementation((pattern) =>
+        pattern.startsWith('translations/')
+          ? Promise.resolve(['translations/sv/LC_MESSAGES/django.po'])
+          : Promise.resolve([])
+      );
+
+      const result = await findFirstGettextCatalogPath(['translations', 'locale'], mockFs);
+      expect(result).toBe('translations');
+    });
+
+    it('accepts an empty candidate directory so greenfield projects still work', async () => {
+      existsEverywhere();
+      mockFs.readdir.mockResolvedValue([]);
+      mockGlob.mockResolvedValue([]);
+
+      const result = await findFirstGettextCatalogPath(['locale', 'translations'], mockFs);
+      expect(result).toBe('locale');
+    });
+
+    it('rejects a non-empty directory that holds no catalog', async () => {
+      existsEverywhere();
+      mockFs.readdir.mockImplementation((dir) =>
+        dir === 'locales' ? Promise.resolve(['apps.py', 'views.py']) : Promise.resolve([])
+      );
+      mockGlob.mockResolvedValue([]);
+
+      const result = await findFirstGettextCatalogPath(['locales', 'translations'], mockFs);
+      expect(result).toBe('translations');
+    });
+
+    it('finds an umbrella catalog under apps/*/priv/gettext', async () => {
+      mockFs.stat.mockImplementation((dir) =>
+        dir === 'apps/myapp_web/priv/gettext'
+          ? Promise.resolve({ isDirectory: () => true })
+          : Promise.reject(Object.assign(new Error('nope'), { code: 'ENOENT' }))
+      );
+      mockFs.readdir.mockResolvedValue(['sv']);
+      mockGlob.mockImplementation((pattern) =>
+        pattern.startsWith('apps/*/priv/gettext')
+          ? Promise.resolve(['apps/myapp_web/priv/gettext/sv/LC_MESSAGES/default.po'])
+          : Promise.resolve([])
+      );
+
+      const result = await findFirstGettextCatalogPath(['priv/gettext', 'apps/*/priv/gettext'], mockFs);
+      expect(result).toBe('apps/myapp_web/priv/gettext');
+    });
+
+    it('returns null when no candidate holds a catalog', async () => {
+      existsEverywhere();
+      mockGlob.mockResolvedValue([]);
+
+      mockFs.readdir.mockResolvedValue(['apps.py']);
+      const result = await findFirstGettextCatalogPath(['translations', 'locale'], mockFs);
+      expect(result).toBe(null);
+    });
+  });
+
+  describe('greenfield fallback ordering', () => {
+    it('prefers an empty candidate over a non-empty non-catalog directory', async () => {
+      mockFs.stat.mockImplementation((dir) =>
+        dir === 'locales' || dir === 'translations'
+          ? Promise.resolve({ isDirectory: () => true })
+          : Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+      );
+      mockFs.readdir.mockImplementation((dir) =>
+        dir === 'locales' ? Promise.resolve(['apps.py', 'views.py']) : Promise.resolve([])
+      );
+      mockGlob.mockResolvedValue([]);
+
+      const result = await findFirstGettextCatalogPath(['locale', 'locales', 'translations'], mockFs);
+      expect(result).toBe('translations');
+    });
+  });
+
+  describe('catalog root derivation', () => {
+    it('uses the catalog LC_MESSAGES, not an unrelated one higher in the tree', async () => {
+      mockFs.stat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      mockGlob.mockResolvedValue(['foo/LC_MESSAGES/bar/priv/gettext/sv/LC_MESSAGES/x.po']);
+
+      const result = await findFirstGettextCatalogPath(['**/priv/gettext'], mockFs);
+      expect(result).toBe('foo/LC_MESSAGES/bar/priv/gettext');
+    });
+
+    it('ignores a match that has no LC_MESSAGES segment', async () => {
+      mockFs.stat.mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+      mockGlob.mockResolvedValue(['weird/path/without-marker.po']);
+
+      const result = await findFirstGettextCatalogPath(['weird/path'], mockFs);
+      expect(result).toBe(null);
     });
   });
 

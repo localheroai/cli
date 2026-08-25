@@ -23,6 +23,21 @@ describe('init command', () => {
     };
   }
 
+  let pristineFsStat;
+  let pristineFsReadFile;
+
+  beforeEach(async () => {
+    const fsMod = await import('fs');
+    pristineFsStat = pristineFsStat ?? fsMod.promises.stat;
+    pristineFsReadFile = pristineFsReadFile ?? fsMod.promises.readFile;
+  });
+
+  afterEach(async () => {
+    const fsMod = await import('fs');
+    fsMod.promises.stat = pristineFsStat;
+    fsMod.promises.readFile = pristineFsReadFile;
+  });
+
   beforeEach(() => {
     mockConsole = { log: jest.fn(), warn: console.warn };
     configUtils = {
@@ -756,6 +771,129 @@ describe('init command', () => {
       expect(promptService.confirm).not.toHaveBeenCalled();
     });
 
+  });
+
+  it('passes the django workflow and python source paths to the generated action', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('sv')
+      .mockResolvedValueOnce('en,da,no')
+      .mockResolvedValueOnce('django-project')
+      .mockResolvedValueOnce('locale/')
+      .mockResolvedValueOnce('**/sources/**');
+    projectApi.createProject.mockResolvedValue({
+      id: 'proj_django',
+      name: 'django-project'
+    });
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(false)
+    };
+    promptService.confirm
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) => {
+      if (path === 'manage.py') {
+        return Promise.resolve({ isFile: () => true });
+      }
+      return originalStat(path);
+    });
+
+    await init(createInitDeps({ githubUtils }));
+
+    const [, , sourceCodePaths, options] = githubUtils.createGitHubActionFile.mock.calls[0];
+    expect(options).toEqual({ extractor: 'django', locales: ['en', 'da', 'no'] });
+    expect(sourceCodePaths).toContain('**/*.py');
+    expect(sourceCodePaths).toContain('**/*.html');
+
+    fs.promises.stat = originalStat;
+  });
+
+  it('does not infer phoenix when mix.exs is not at the repository root', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing_phx',
+      sourceLocale: 'en',
+      outputLocales: ['sv'],
+      lastSyncedAt: '2026-08-01T00:00:00Z',
+      translationFiles: { paths: ['apps/myapp_web/priv/gettext/'], pattern: '**/*.po' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(false)
+    };
+    promptService.confirm.mockResolvedValue(true);
+
+    await init(createInitDeps({ githubUtils, options: { skipImport: true } }));
+
+    const [, , , options] = githubUtils.createGitHubActionFile.mock.calls[0];
+    expect(options.extractor).toBeUndefined();
+  });
+
+  it('passes the phoenix extractor and umbrella source paths to the generated action', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('en')
+      .mockResolvedValueOnce('sv,nb')
+      .mockResolvedValueOnce('phoenix-project')
+      .mockResolvedValueOnce('priv/gettext/')
+      .mockResolvedValueOnce('');
+    projectApi.createProject.mockResolvedValue({ id: 'proj_phoenix', name: 'phoenix-project' });
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(false)
+    };
+    promptService.confirm
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+
+    const fs = await import('fs');
+    fs.promises.stat = jest.fn().mockImplementation((path) =>
+      path === 'mix.exs'
+        ? Promise.resolve({ isFile: () => true })
+        : Promise.reject(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+    );
+
+    await init(createInitDeps({ githubUtils }));
+
+    const [, , sourceCodePaths, options] = githubUtils.createGitHubActionFile.mock.calls[0];
+    expect(options.extractor).toBe('phoenix');
+    expect(sourceCodePaths).toContain('lib/**/*.heex');
+    expect(sourceCodePaths).toContain('apps/*/lib/**/*.ex');
+    expect(sourceCodePaths).toContain('lib/**/*.leex');
+  });
+
+  it('does not infer django when manage.py is not at the repository root', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing',
+      sourceLocale: 'en',
+      outputLocales: ['sv'],
+      lastSyncedAt: '2026-08-01T00:00:00Z',
+      translationFiles: { paths: ['translations/'], pattern: '**/*.po', workflow: 'django' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(false)
+    };
+    promptService.confirm.mockResolvedValue(true);
+
+    await init(createInitDeps({ githubUtils, options: { skipImport: true } }));
+
+    const [, , sourceCodePaths, options] = githubUtils.createGitHubActionFile.mock.calls[0];
+    expect(options.extractor).toBeUndefined();
+    expect(sourceCodePaths).toBeUndefined();
   });
 
   it('configures Django workflow for Django projects', async () => {

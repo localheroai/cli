@@ -43,6 +43,136 @@ const defaultDependencies: GitHubDependencies = {
   fetchBranchHead
 };
 
+interface WorkflowOptions {
+  // Which extract step the generated workflow needs. Distinct from the persisted
+  // translationFiles.workflow, which controls Django .po source-file handling.
+  extractor?: string;
+  locales?: string[];
+  // How the project installs Python dependencies, e.g. `uv sync --frozen`.
+  pythonInstall?: string;
+  // Umbrella apps must extract from the child app directory; from the umbrella root
+  // gettext warns about conflicting backends and writes only one app's catalogs.
+  extractWorkingDirectory?: string;
+}
+
+export const DJANGO_PYTHON_VERSION = '3.12';
+
+// Django expects locale names on disk (pt_BR), while config stores language codes
+// (pt-br). Region subtags longer than two characters are titlecase, not uppercase,
+// so sr-latn becomes sr_Latn.
+function toDjangoLocaleName(languageCode: string): string {
+  const [language, region] = languageCode.split(/[-_]/);
+  if (!region) {
+    return language.toLowerCase();
+  }
+  const casedRegion = region.length > 2
+    ? region.charAt(0).toUpperCase() + region.slice(1).toLowerCase()
+    : region.toUpperCase();
+  return `${language.toLowerCase()}_${casedRegion}`;
+}
+
+// `makemessages --all` only picks up locales that already have a directory, so a
+// project with an empty locale/ would extract nothing. Naming the locales explicitly
+// makes it create the catalogs on first run.
+const PIP_INSTALL = 'pip install -r requirements.txt';
+
+// uv and poetry run manage.py through their own environment, so the extract command
+// has to carry the same prefix as the install step.
+function manageRunner(pythonInstall: string): string {
+  if (pythonInstall.startsWith('uv ')) return 'uv run python';
+  if (pythonInstall.startsWith('poetry ')) return 'poetry run python';
+  if (pythonInstall.startsWith('pipenv ')) return 'pipenv run python';
+  return 'python';
+}
+
+function buildMakemessagesCommand(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
+  const runner = manageRunner(pythonInstall);
+  if (!locales?.length) {
+    return `${runner} manage.py makemessages --all`;
+  }
+  const localeFlags = locales.map(l => `-l ${toDjangoLocaleName(l)}`).join(' ');
+  return `${runner} manage.py makemessages ${localeFlags}`;
+}
+
+export const PHOENIX_ELIXIR_VERSION = '1.20';
+export const PHOENIX_OTP_VERSION = '28';
+
+// Gettext-based stacks only see messages that are already in the catalogs, so the
+// workflow has to extract them first. Without this a PR that only touches source
+// code runs green and translates nothing. Extraction is skipped on sync and dispatch
+// runs, where the Action writes reviewed translations back and extraction would
+// fight it.
+// actions/setup-python provides python and pip, nothing else, so a project using
+// uv, poetry or pipenv needs that tool installed before the install command runs.
+const PYTHON_TOOL_SETUP: Record<string, string> = {
+  uv: `      - uses: astral-sh/setup-uv@v5
+        if: github.event_name == 'pull_request'
+
+`,
+  poetry: `      - name: Install poetry
+        if: github.event_name == 'pull_request'
+        run: pipx install poetry
+
+`,
+  pipenv: `      - name: Install pipenv
+        if: github.event_name == 'pull_request'
+        run: pipx install pipenv
+
+`
+};
+
+function buildPythonToolSetup(pythonInstall: string): string {
+  const tool = pythonInstall.split(' ')[0];
+  return PYTHON_TOOL_SETUP[tool] ?? '';
+}
+
+function buildDjangoExtractStep(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
+  return `      - uses: actions/setup-python@v5
+        if: github.event_name == 'pull_request'
+        with:
+          python-version: "${DJANGO_PYTHON_VERSION}"
+
+${buildPythonToolSetup(pythonInstall)}      - name: Extract messages
+        if: github.event_name == 'pull_request'
+        run: |
+          sudo apt-get install -y -qq gettext
+          ${pythonInstall}
+          ${buildMakemessagesCommand(locales, pythonInstall)}
+
+`;
+}
+
+// Elixir's gettext is a pure-Elixir implementation, so no GNU gettext binaries are
+// needed. `gettext.extract` forces its own compile, so deps.get is enough.
+function buildPhoenixExtractStep(workingDirectory?: string): string {
+  const workingDirectoryLine = workingDirectory
+    ? `\n        working-directory: ${workingDirectory}`
+    : '';
+  return `      - uses: erlef/setup-beam@v1
+        if: github.event_name == 'pull_request'
+        with:
+          elixir-version: "${PHOENIX_ELIXIR_VERSION}"
+          otp-version: "${PHOENIX_OTP_VERSION}"
+
+      - name: Extract messages
+        if: github.event_name == 'pull_request'${workingDirectoryLine}
+        run: |
+          mix deps.get
+          mix gettext.extract --merge
+
+`;
+}
+
+function buildExtractStep(options: WorkflowOptions): string {
+  if (options.extractor === 'django') {
+    return buildDjangoExtractStep(options.locales, options.pythonInstall);
+  }
+  if (options.extractor === 'phoenix') {
+    return buildPhoenixExtractStep(options.extractWorkingDirectory);
+  }
+  return '';
+}
+
 const workflowFileName = 'localhero-translate.yml';
 const GIT_USER_NAME = 'LocalHero Bot';
 const GIT_USER_EMAIL = 'hi@localhero.ai';
@@ -94,7 +224,12 @@ export const githubService = {
    * @param basePath Base path of the project
    * @param translationPaths Paths to translation files
    */
-  async createGitHubActionFile(basePath: string, translationPaths: string[], sourceCodePaths?: string[]): Promise<string> {
+  async createGitHubActionFile(
+    basePath: string,
+    translationPaths: string[],
+    sourceCodePaths?: string[],
+    options: WorkflowOptions = {}
+  ): Promise<string> {
     const { fs } = this.deps;
     const workflowDir = this.getWorkflowDir(basePath);
     const workflowFile = this.getGithubActionWorkflowFilePath(basePath);
@@ -139,7 +274,7 @@ jobs:
           ref: \${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}
           fetch-depth: 0
 
-      - name: Translate
+${buildExtractStep(options)}      - name: Translate
         uses: localheroai/localhero-action@v1
         with:
           api-key: \${{ secrets.LOCALHERO_API_KEY }}`;
@@ -585,8 +720,13 @@ jobs:
  * @param basePath Base path of the project
  * @param translationPaths Paths to translation files
  */
-export function createGitHubActionFile(basePath: string, translationPaths: string[], sourceCodePaths?: string[]): Promise<string> {
-  return githubService.createGitHubActionFile(basePath, translationPaths, sourceCodePaths);
+export function createGitHubActionFile(
+  basePath: string,
+  translationPaths: string[],
+  sourceCodePaths?: string[],
+  options?: WorkflowOptions
+): Promise<string> {
+  return githubService.createGitHubActionFile(basePath, translationPaths, sourceCodePaths, options);
 }
 
 /**
