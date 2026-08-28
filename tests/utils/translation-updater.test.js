@@ -1203,6 +1203,41 @@ en:
       });
     });
 
+    describe('post-write YAML validation', () => {
+      it('refuses to write a file the writer made unparsable', async () => {
+        const filePath = path.join(tempDir, 'de.yml');
+        const original = `de:
+  translation:
+    sidebar: {title: Titel}
+`;
+        fs.writeFileSync(filePath, original);
+
+        await expect(updateTranslationFile(filePath, {
+          'translation.sidebar.unexported_change': 'Nicht exportierte Änderung'
+        }, 'de')).rejects.toThrow('Refusing to write invalid YAML');
+
+        expect(fs.readFileSync(filePath, 'utf8')).toBe(original);
+      });
+
+      it('still writes files that parse cleanly', async () => {
+        const filePath = path.join(tempDir, 'de.yml');
+        fs.writeFileSync(filePath, `de:
+  translation:
+    sidebar:
+      title: Titel
+`);
+
+        await updateTranslationFile(filePath, {
+          'translation.sidebar.subtitle': 'Untertitel'
+        }, 'de');
+
+        expect(yaml.parse(fs.readFileSync(filePath, 'utf8')).de.translation.sidebar).toEqual({
+          title: 'Titel',
+          subtitle: 'Untertitel'
+        });
+      });
+    });
+
     describe('handling malformed YAML files', () => {
       it('handles files with only language code', async () => {
         const filePath = path.join(tempDir, 'nb.yml');
