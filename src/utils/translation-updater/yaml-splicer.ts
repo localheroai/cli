@@ -22,6 +22,7 @@ interface Patch {
   start: number;
   end: number;
   text: string;
+  column?: number;
 }
 
 interface NavigationResult {
@@ -274,8 +275,14 @@ function resolveParentContext(
   return { column, insertionOffset };
 }
 
+// Patches are applied back-to-front so earlier offsets stay valid. Insertions
+// that share an offset are applied shallowest-first, which places them
+// last in the output: a deeper block must stay adjacent to the deeper keys it
+// belongs to, otherwise its children end up nested under a shallower new key.
 function applyPatches(source: string, patches: Patch[]): string {
-  const sorted = [...patches].sort((a, b) => b.start - a.start);
+  const sorted = [...patches].sort((a, b) =>
+    b.start - a.start || (a.column ?? 0) - (b.column ?? 0)
+  );
   let result = source;
   for (const patch of sorted) {
     result = result.slice(0, patch.start) + patch.text + result.slice(patch.end);
@@ -360,7 +367,7 @@ export function spliceYamlUpdate(
     if (text.length > 0) {
       const insertStart = ctx.insertionOffset;
       const prefix = insertStart > 0 && source[insertStart - 1] !== '\n' ? '\n' : '';
-      patches.push({ start: insertStart, end: insertStart, text: prefix + text });
+      patches.push({ start: insertStart, end: insertStart, text: prefix + text, column: ctx.column });
     }
   }
 

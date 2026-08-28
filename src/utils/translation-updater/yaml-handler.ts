@@ -138,6 +138,19 @@ function clearDuplicateKeyErrors(doc: yaml.Document, filePath: string): void {
   doc.errors = doc.errors.filter(e => e.code !== 'DUPLICATE_KEY');
 }
 
+// Last line of defence: a writer bug that emits unparsable YAML takes down
+// the customer's app at boot.
+async function writeYamlFile(filePath: string, content: string): Promise<void> {
+  const doc = yaml.parseDocument(content);
+  clearDuplicateKeyErrors(doc, filePath);
+  if (doc.errors.length > 0) {
+    throw new Error(
+      `Refusing to write invalid YAML to ${filePath}: ${doc.errors[0].message}`
+    );
+  }
+  await fs.writeFile(filePath, content);
+}
+
 async function updateYamlTranslations(
   yamlDoc: yaml.Document,
   translations: Record<string, unknown>,
@@ -228,7 +241,7 @@ export async function updateYamlFile(
   if (!exists) {
     const { doc: yamlDoc, created, options } = await createYamlDocument(filePath);
     await updateYamlTranslations(yamlDoc, translations, languageCode);
-    await fs.writeFile(filePath, yamlDoc.toString({
+    await writeYamlFile(filePath, yamlDoc.toString({
       indent: options.indent,
       indentSeq: options.indentSeq,
       lineWidth: LINE_WIDTH
@@ -253,7 +266,7 @@ export async function updateYamlFile(
   if (canSplice) {
     const { output, applied } = spliceYamlUpdate(source, doc, translations, languageCode, options.indent);
     if (applied) {
-      await fs.writeFile(filePath, output);
+      await writeYamlFile(filePath, output);
       return {
         updatedKeys: Object.keys(translations),
         created: false
@@ -262,7 +275,7 @@ export async function updateYamlFile(
   }
 
   await updateYamlTranslations(doc, translations, languageCode);
-  await fs.writeFile(filePath, doc.toString({
+  await writeYamlFile(filePath, doc.toString({
     indent: options.indent,
     indentSeq: options.indentSeq,
     lineWidth: LINE_WIDTH
@@ -285,7 +298,7 @@ export async function deleteKeysFromYamlFile(
 
     const { output, deletedKeys } = spliceYamlDelete(source, doc, keysToDelete, languageCode);
     if (deletedKeys.length > 0) {
-      await fs.writeFile(filePath, output);
+      await writeYamlFile(filePath, output);
     }
     return deletedKeys;
   } catch (error) {
