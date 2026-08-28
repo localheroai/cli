@@ -1152,6 +1152,57 @@ en:
       });
     });
 
+    describe('multiple insertions into nested parents', () => {
+      it('keeps new keys at their own indentation when two parents end at the same offset', async () => {
+        const filePath = path.join(tempDir, 'de.yml');
+        fs.writeFileSync(filePath, `de:
+  translation:
+    sidebar:
+      title: Titel
+      push_confirm:
+        completed: Fertig
+        failed: Fehlgeschlagen
+`);
+
+        await updateTranslationFile(filePath, {
+          'translation.sidebar.push_confirm.pending': 'Ausstehend',
+          'translation.unexported_change': 'Nicht exportierte Änderung'
+        }, 'de');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        const parsed = yaml.parse(content);
+        expect(parsed.de.translation.unexported_change).toBe('Nicht exportierte Änderung');
+        expect(parsed.de.translation.sidebar.push_confirm).toEqual({
+          completed: 'Fertig',
+          failed: 'Fehlgeschlagen',
+          pending: 'Ausstehend'
+        });
+      });
+
+      it('does not nest deeper insertions under a shallower new key', async () => {
+        const filePath = path.join(tempDir, 'de.yml');
+        fs.writeFileSync(filePath, `de:
+  b:
+    failed:
+      d: v1
+      push_confirm: Nicht exportierte Änderung
+      title: v1
+`);
+
+        await updateTranslationFile(filePath, {
+          'b.b.failed': 'NEU',
+          'd': 'NEU'
+        }, 'de');
+
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(() => yaml.parse(content)).not.toThrow();
+        const parsed = yaml.parse(content);
+        expect(parsed.de.d).toBe('NEU');
+        expect(parsed.de.b.b.failed).toBe('NEU');
+        expect(parsed.de.b.failed.title).toBe('v1');
+      });
+    });
+
     describe('handling malformed YAML files', () => {
       it('handles files with only language code', async () => {
         const filePath = path.join(tempDir, 'nb.yml');
