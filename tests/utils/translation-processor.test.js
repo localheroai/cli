@@ -888,4 +888,159 @@ describe('translation-processor', () => {
       }
     });
   });
+
+  describe('preserving local target values (#508)', () => {
+    const config = { projectId: 'test-project' };
+
+    const buildBatch = (extension, format) => ([
+      {
+        sourceFilePath: `locales/en.${extension}`,
+        sourceFile: {
+          path: `locales/en.${extension}`,
+          format,
+          content: Buffer.from(JSON.stringify({ keys: {} })).toString('base64')
+        },
+        localeEntries: [`sv:locales/en.${extension}`],
+        locales: ['sv']
+      }
+    ]);
+
+    const buildMissing = (extension, keys) => ({
+      [`sv:locales/en.${extension}`]: {
+        locale: 'sv',
+        path: `locales/en.${extension}`,
+        targetPath: `locales/sv.${extension}`,
+        keys,
+        keyCount: Object.keys(keys).length
+      }
+    });
+
+    it('does not write back keys the CLI never asked for', async () => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-508', language: { code: 'sv' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: {
+            'pages.docs.nav.remove': 'Ta bort nycklar och språkområden',
+            'pages.docs.nav.agents': 'AI-agenter',
+            'pages.docs.nav.new': 'Ny sida'
+          }
+        },
+        language: { code: 'sv' }
+      });
+
+      const result = await processTranslationBatches(
+        buildBatch('yml', 'yaml'),
+        buildMissing('yml', {
+          'pages.docs.nav.new': { value: 'New page', sourceKey: 'pages.docs.nav.new' }
+        }),
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/sv.yml',
+        { 'pages.docs.nav.new': 'Ny sida' },
+        'sv',
+        'locales/en.yml',
+        undefined,
+        config
+      );
+      expect(result.uniqueKeysTranslated.size).toBe(1);
+      expect(result.uniqueKeysTranslated.has('pages.docs.nav.new')).toBe(true);
+    });
+
+    it('skips the write entirely when every returned key was unrequested', async () => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-508b', language: { code: 'sv' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { 'pages.docs.nav.remove': 'Ta bort nycklar och språkområden' }
+        },
+        language: { code: 'sv' }
+      });
+
+      const result = await processTranslationBatches(
+        buildBatch('yml', 'yaml'),
+        buildMissing('yml', {
+          'pages.docs.nav.new': { value: 'New page', sourceKey: 'pages.docs.nav.new' }
+        }),
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
+      expect(result.uniqueKeysTranslated.size).toBe(0);
+    });
+
+    it('filters unrequested keys for .po targets too', async () => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-508c', language: { code: 'sv' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { Welcome: 'Välkommen', Goodbye: 'Hej då' }
+        },
+        language: { code: 'sv' }
+      });
+
+      await processTranslationBatches(
+        buildBatch('po', 'po'),
+        buildMissing('po', { Welcome: { value: 'Welcome', sourceKey: 'Welcome' } }),
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/sv.po',
+        [{ key: 'Welcome', value: 'Välkommen' }],
+        'sv',
+        'locales/en.po',
+        undefined,
+        config
+      );
+    });
+
+    it('does not write an unrequested key that shadows an Object prototype member', async () => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-508d', language: { code: 'sv' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: {
+          data: { constructor: 'Konstruktor', toString: 'Till text', greeting: 'Hej' }
+        },
+        language: { code: 'sv' }
+      });
+
+      await processTranslationBatches(
+        buildBatch('json', 'json'),
+        buildMissing('json', { greeting: { value: 'Hello', sourceKey: 'greeting' } }),
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/sv.json',
+        { greeting: 'Hej' },
+        'sv',
+        'locales/en.json',
+        undefined,
+        config
+      );
+    });
+  });
 });

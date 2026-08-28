@@ -321,18 +321,31 @@ async function applyTranslations(
   const entry = missingByLocale[localeSourceKey];
   const targetPath = entry.targetPath;
   const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
+  // Only write keys this run asked for.
+  const returnedTranslations = Object.entries(data.translations.data);
+  const requestedTranslations = returnedTranslations.filter(([key]) => Object.hasOwn(entry.keys, key));
+  const unrequestedCount = returnedTranslations.length - requestedTranslations.length;
+
+  if (verbose && unrequestedCount > 0) {
+    console.log(chalk.gray(`    Ignored ${unrequestedCount} key(s) not requested for ${languageCode}; local values kept`));
+  }
+
+  if (requestedTranslations.length === 0) {
+    return false;
+  }
+
   if (verbose) {
     console.log(chalk.blue(`  Updating translations for ${languageCode} in ${targetPath}`));
   }
 
   const isPoFile = /\.(po|pot)$/i.test(targetPath);
   const translationsToWrite = isPoFile
-    ? Object.entries(data.translations.data).map(([key, value]) => ({
+    ? requestedTranslations.map(([key, value]) => ({
       key,
       value,
       ...(entry.keys[key]?.metadata && { metadata: entry.keys[key].metadata })
     }))
-    : data.translations.data;
+    : Object.fromEntries(requestedTranslations);
 
   const result = await translationUtils.updateTranslationFile(
     targetPath,
