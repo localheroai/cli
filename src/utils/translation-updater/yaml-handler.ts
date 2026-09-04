@@ -225,9 +225,9 @@ function clearDuplicateKeyErrors(doc: yaml.Document, filePath: string): void {
  * `|-`. The two are not equivalent: `>-` folds newlines to spaces, `|-` keeps them, so swapping
  * the style changes the parsed value.
  *
- * A folded scalar can only represent the new value when it round-trips: folding collapses single
- * newlines, so a value whose blank lines or indentation carry meaning must fall back to literal
- * rather than lose them.
+ * A folded scalar can only represent the new value when it round-trips, so the candidate emit is
+ * parsed back and compared before the style is kept. Anything folding cannot reproduce (CRLF, for
+ * instance) falls back to literal rather than losing it.
  */
 function preservedBlockType(existingNode: unknown, newValue: string): 'BLOCK_LITERAL' | 'BLOCK_FOLDED' {
   if (!yaml.isScalar(existingNode) || existingNode.type !== 'BLOCK_FOLDED') {
@@ -247,13 +247,6 @@ function foldedRoundTrips(value: string): boolean {
     scalar.type = 'BLOCK_FOLDED';
     (probe.contents as YamlMap).set('probe', scalar);
     const emitted = probe.toString({ lineWidth: LINE_WIDTH });
-
-    // The value must survive the round-trip, and the emitted YAML must not lean on trailing
-    // whitespace to do it — `yaml` encodes a blank line inside a folded scalar as two spaces at
-    // the end of a line, which is invisible, fragile, and noise in a review diff.
-    if (/[ \t]+$/m.test(emitted)) {
-      return false;
-    }
 
     return (yaml.parse(emitted) as Record<string, unknown>).probe === value;
   } catch {
