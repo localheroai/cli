@@ -736,14 +736,38 @@ export function getRemovedKeysPerFile(
 export function getManifestForFinalize(
   sourceFiles: TranslationFile[],
   config: ProjectConfig,
-  verbose: boolean
+  verbose: boolean,
+  ignoreMatcher?: (keyName: string) => boolean
 ): Record<string, KeyIdentifier[]> | null {
   const perFile = getChangedKeysPerFile(sourceFiles, config, verbose);
   if (perFile === null) {
     return null;
   }
 
-  return Object.fromEntries(perFile);
+  return Object.fromEntries(filterIgnoredKeys(perFile, ignoreMatcher));
+}
+
+/**
+ * Drop keys the user asked us to ignore, and any file left with none.
+ *
+ * The manifest is what the backend reconciles a PR against, so an ignored key
+ * left in it comes back as "not sent for translation" — technically true and
+ * useless, since the user is the one who said not to send it.
+ */
+function filterIgnoredKeys(
+  perFile: Map<string, KeyIdentifier[]>,
+  ignoreMatcher?: (keyName: string) => boolean
+): Map<string, KeyIdentifier[]> {
+  if (!ignoreMatcher) return perFile;
+
+  const out = new Map<string, KeyIdentifier[]>();
+  for (const [path, keys] of perFile.entries()) {
+    const kept = keys.filter((key) => !ignoreMatcher(key.name));
+    if (kept.length > 0) {
+      out.set(path, kept);
+    }
+  }
+  return out;
 }
 
 /**
@@ -753,11 +777,12 @@ export function getManifestForFinalize(
 export function getRemovedKeysManifestForFinalize(
   sourceFiles: TranslationFile[],
   config: ProjectConfig,
-  verbose: boolean
+  verbose: boolean,
+  ignoreMatcher?: (keyName: string) => boolean
 ): Record<string, KeyIdentifier[]> | null {
   const perFile = getRemovedKeysPerFile(sourceFiles, config, verbose);
   if (perFile === null) return null;
-  return Object.fromEntries(perFile);
+  return Object.fromEntries(filterIgnoredKeys(perFile, ignoreMatcher));
 }
 
 /**

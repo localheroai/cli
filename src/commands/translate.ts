@@ -360,8 +360,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   let removedManifest: Record<string, any> | null = null;
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
-    manifest = getManifestForFinalize(sourceFiles, config, !!verbose);
-    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
+    manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
+    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
 
     const filtered = filterByGitChanges(

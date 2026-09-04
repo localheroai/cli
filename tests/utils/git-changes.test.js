@@ -1165,6 +1165,73 @@ describe('getManifestForFinalize', () => {
     });
   });
 
+  it('leaves out keys the ignore matcher rejects', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    const oldContent = JSON.stringify({ greeting: 'Hi' });
+    const newContent = JSON.stringify({
+      greeting: 'Hi',
+      farewell: 'Bye',
+      'date.day_names': 'Sunday',
+      'date.month_names': 'January'
+    });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const ignoreMatcher = (name) => name.startsWith('date.');
+
+    const result = gitDiffModule.getManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false,
+      ignoreMatcher
+    );
+
+    expect(result).toEqual({
+      'locales/en.json': [{ name: 'farewell' }]
+    });
+  });
+
+  it('drops a file from the manifest when every changed key is ignored', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi' }) });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ greeting: 'Hi', 'date.order': 'ymd' })
+    );
+
+    const result = gitDiffModule.getManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false,
+      (name) => name.startsWith('date.')
+    );
+
+    expect(result).toEqual({});
+  });
+
+  it('keeps every key when no matcher is given', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi' }) });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ greeting: 'Hi', 'date.order': 'ymd' })
+    );
+
+    const result = gitDiffModule.getManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({
+      'locales/en.json': [{ name: 'date.order' }]
+    });
+  });
+
   it('returns null on failure', () => {
     setupGitMock({ branchExists: false });
 
