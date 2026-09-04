@@ -220,6 +220,47 @@ function clearDuplicateKeyErrors(doc: yaml.Document, filePath: string): void {
   doc.errors = doc.errors.filter(e => e.code !== 'DUPLICATE_KEY');
 }
 
+/**
+ * Keeps an existing folded block scalar folded, so an author's `>-` is not silently rewritten to
+ * `|-`. The two are not equivalent: `>-` folds newlines to spaces, `|-` keeps them, so swapping
+ * the style changes the parsed value.
+ *
+ * A folded scalar can only represent the new value when it round-trips: folding collapses single
+ * newlines, so a value whose blank lines or indentation carry meaning must fall back to literal
+ * rather than lose them.
+ */
+function preservedBlockType(existingNode: unknown, newValue: string): 'BLOCK_LITERAL' | 'BLOCK_FOLDED' {
+  if (!yaml.isScalar(existingNode) || existingNode.type !== 'BLOCK_FOLDED') {
+    return 'BLOCK_LITERAL';
+  }
+
+  return foldedRoundTrips(newValue) ? 'BLOCK_FOLDED' : 'BLOCK_LITERAL';
+}
+
+function foldedRoundTrips(value: string): boolean {
+  try {
+    // Probe inside a mapping, which is how the value is actually emitted. A bare document scalar
+    // indents differently and would not reproduce the folding behaviour we need to check.
+    const probe = new yaml.Document();
+    probe.contents = probe.createNode({}) as YamlMap;
+    const scalar = new yaml.Scalar(value) as YamlScalar;
+    scalar.type = 'BLOCK_FOLDED';
+    (probe.contents as YamlMap).set('probe', scalar);
+    const emitted = probe.toString({ lineWidth: LINE_WIDTH });
+
+    // The value must survive the round-trip, and the emitted YAML must not lean on trailing
+    // whitespace to do it — `yaml` encodes a blank line inside a folded scalar as two spaces at
+    // the end of a line, which is invisible, fragile, and noise in a review diff.
+    if (/[ \t]+$/m.test(emitted)) {
+      return false;
+    }
+
+    return (yaml.parse(emitted) as Record<string, unknown>).probe === value;
+  } catch {
+    return false;
+  }
+}
+
 // Last line of defence: a writer bug that emits unparsable YAML takes down
 // the customer's app at boot.
 async function writeYamlFile(filePath: string, content: string): Promise<void> {
@@ -297,7 +338,7 @@ async function updateYamlTranslations(
 
     if (typeof newValue === 'string' && newValue.includes('\n')) {
       const scalar = new yaml.Scalar(newValue) as YamlScalar;
-      scalar.type = 'BLOCK_LITERAL';
+      scalar.type = preservedBlockType(current.get(lastKey, true), newValue);
       current.set(lastKey, scalar);
       continue;
     }

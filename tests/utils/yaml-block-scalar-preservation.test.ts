@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
+import YAML from 'yaml';
 import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 
 describe('YAML scalar style preservation on update', () => {
@@ -55,6 +56,47 @@ describe('YAML scalar style preservation on update', () => {
     const result = await fs.readFile(filePath, 'utf8');
     expect(result).toContain("single: 'new single'");
     expect(result).toContain('double: "new double"');
+  });
+
+  it('keeps a paragraph break intact when preserving a folded scalar', async () => {
+    // A blank line survives folding (the emitter writes it as an extra newline), so the style is
+    // preserved here. What matters is that the round-trip value is exact either way.
+    await updateTranslationFile(filePath, { folded: 'First paragraph\n\nSecond paragraph' }, 'en');
+
+    const parsed = YAML.parse(await fs.readFile(filePath, 'utf8')) as { en: { folded: string } };
+    expect(parsed.en.folded).toBe('First paragraph\n\nSecond paragraph');
+  });
+
+  it('never trades value fidelity for style preservation', async () => {
+    // The guard round-trips a candidate folded emit and falls back to |- if it would not
+    // reproduce the value. Whatever style it lands on, the value must come back exactly.
+    const awkward = [
+      'Intro line\n    indented continuation',
+      'Trailing spaces here   \nnext line',
+      'First\n\n\nthree newlines',
+      'Ends with newline\n'
+    ];
+
+    for (const value of awkward) {
+      await updateTranslationFile(filePath, { folded: value }, 'en');
+      const parsed = YAML.parse(await fs.readFile(filePath, 'utf8')) as { en: { folded: string } };
+      expect(parsed.en.folded).toBe(value);
+    }
+  });
+
+  it('round-trips every updated value unchanged whatever style is used', async () => {
+    await updateTranslationFile(filePath, {
+      literal: 'Line A\nLine B',
+      folded: 'Folded A\nFolded B',
+      single: 'plain single',
+      double: 'plain double'
+    }, 'en');
+
+    const parsed = YAML.parse(await fs.readFile(filePath, 'utf8')) as { en: Record<string, string> };
+    expect(parsed.en.literal).toBe('Line A\nLine B');
+    expect(parsed.en.folded).toBe('Folded A\nFolded B');
+    expect(parsed.en.single).toBe('plain single');
+    expect(parsed.en.double).toBe('plain double');
   });
 
   it('does not disturb untouched block scalars when a sibling is updated', async () => {
