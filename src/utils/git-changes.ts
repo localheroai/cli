@@ -692,6 +692,11 @@ function toIdentifier(key: string, isPo: boolean): KeyIdentifier {
   return identifier;
 }
 
+// ignoreKeys has no PO support (see the warning in import-service), so the
+// manifest must leave PO files alone rather than filter them on names that do
+// not correspond to what translation processing matched.
+const PO_MANIFEST_FORMATS = new Set([ 'po', 'pot' ]);
+
 export function getChangedKeysPerFile(
   sourceFiles: TranslationFile[],
   config: ProjectConfig,
@@ -744,7 +749,7 @@ export function getManifestForFinalize(
     return null;
   }
 
-  return Object.fromEntries(filterIgnoredKeys(perFile, ignoreMatcher));
+  return Object.fromEntries(filterIgnoredKeys(perFile, sourceFiles, ignoreMatcher));
 }
 
 /**
@@ -756,12 +761,26 @@ export function getManifestForFinalize(
  */
 function filterIgnoredKeys(
   perFile: Map<string, KeyIdentifier[]>,
+  sourceFiles: TranslationFile[],
   ignoreMatcher?: (keyName: string) => boolean
 ): Map<string, KeyIdentifier[]> {
   if (!ignoreMatcher) return perFile;
 
+  const formatByPath = new Map(
+    sourceFiles.map((file) => [ file.path, file.format?.toLowerCase() ])
+  );
+
   const out = new Map<string, KeyIdentifier[]>();
   for (const [path, keys] of perFile.entries()) {
+    // ignoreKeys does not support PO files (import-service warns about this),
+    // and PO context means a manifest name like "date.foo" does not line up
+    // with the composite "menu|date.foo" translation processing matched on.
+    // Filtering here would drop keys that were still sent for translation.
+    if (PO_MANIFEST_FORMATS.has(formatByPath.get(path) ?? '')) {
+      out.set(path, keys);
+      continue;
+    }
+
     const kept = keys.filter((key) => !ignoreMatcher(key.name));
     if (kept.length > 0) {
       out.set(path, kept);
@@ -774,15 +793,20 @@ function filterIgnoredKeys(
  * Returns null when the diff failed (caller should omit the wire field).
  * Returns {} when diff succeeded with no removals.
  */
+/**
+ * Removals are never filtered by ignoreKeys. Ignoring a key suppresses
+ * translation requests for it; it does not make a deletion in the source
+ * stop being a fact. Filtering here would leave the backend key active
+ * forever, because nothing else tells it the key is gone.
+ */
 export function getRemovedKeysManifestForFinalize(
   sourceFiles: TranslationFile[],
   config: ProjectConfig,
-  verbose: boolean,
-  ignoreMatcher?: (keyName: string) => boolean
+  verbose: boolean
 ): Record<string, KeyIdentifier[]> | null {
   const perFile = getRemovedKeysPerFile(sourceFiles, config, verbose);
   if (perFile === null) return null;
-  return Object.fromEntries(filterIgnoredKeys(perFile, ignoreMatcher));
+  return Object.fromEntries(perFile);
 }
 
 /**

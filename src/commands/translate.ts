@@ -361,7 +361,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
-    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
+    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
     targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
 
     const filtered = filterByGitChanges(
