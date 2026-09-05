@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.64] - 2026-09-05
+
+### Fixed
+- Keys excluded by `ignoreKeys` no longer appear in the PR key manifest, so they stop being reported on the PR page as "not sent for translation". Deletions are still reported regardless of `ignoreKeys`, and PO files are unaffected since `ignoreKeys` does not apply to them.
+
 ## [0.0.63] - 2026-09-05
 
 ### Fixed
