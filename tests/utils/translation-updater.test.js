@@ -1204,19 +1204,25 @@ en:
     });
 
     describe('post-write YAML validation', () => {
-      it('refuses to write a file the writer made unparsable', async () => {
+      it('falls back to a full rewrite when the splice writer produces unparsable YAML', async () => {
+        // The splice writer mangles a flow mapping here. Rather than failing the
+        // user's run, the guard catches it and re-runs through the document
+        // rewrite path, which produces valid YAML with both keys intact.
         const filePath = path.join(tempDir, 'de.yml');
-        const original = `de:
+        fs.writeFileSync(filePath, `de:
   translation:
     sidebar: {title: Titel}
-`;
-        fs.writeFileSync(filePath, original);
+`);
 
-        await expect(updateTranslationFile(filePath, {
+        await updateTranslationFile(filePath, {
           'translation.sidebar.unexported_change': 'Nicht exportierte Änderung'
-        }, 'de')).rejects.toThrow('Refusing to write invalid YAML');
+        }, 'de');
 
-        expect(fs.readFileSync(filePath, 'utf8')).toBe(original);
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(() => yaml.parse(content)).not.toThrow();
+        const parsed = yaml.parse(content);
+        expect(parsed.de.translation.sidebar.title).toBe('Titel');
+        expect(parsed.de.translation.sidebar.unexported_change).toBe('Nicht exportierte Änderung');
       });
 
       it('still writes files that parse cleanly', async () => {
