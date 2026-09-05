@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.63] - 2026-09-05
+
+### Fixed
+- Inserting a nested key and a sibling at the same offset could nest the block under the wrong parent and produce invalid YAML (#509). Same-offset insertions now keep deeper blocks with their own keys.
+- YAML is re-parsed before it is written. A bad in-place write falls back to a full rewrite instead of shipping a broken file; deletions that would break the file are refused. New duplicate keys are refused, existing ones tolerated.
+- Folded block scalars (`>-`) stay folded on update instead of being rewritten as `|-`.
+- Only the keys a run requested are written. Extra keys in a translation response no longer overwrite local values.
+
 ## [0.0.62] - 2026-08-25
 
 ### Added
