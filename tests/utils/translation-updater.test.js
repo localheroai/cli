@@ -1204,19 +1204,25 @@ en:
     });
 
     describe('post-write YAML validation', () => {
-      it('refuses to write a file the writer made unparsable', async () => {
+      it('falls back to a full rewrite when the splice writer produces unparsable YAML', async () => {
+        // The splice writer mangles a flow mapping here. Rather than failing the
+        // user's run, the guard catches it and re-runs through the document
+        // rewrite path, which produces valid YAML with both keys intact.
         const filePath = path.join(tempDir, 'de.yml');
-        const original = `de:
+        fs.writeFileSync(filePath, `de:
   translation:
     sidebar: {title: Titel}
-`;
-        fs.writeFileSync(filePath, original);
+`);
 
-        await expect(updateTranslationFile(filePath, {
+        await updateTranslationFile(filePath, {
           'translation.sidebar.unexported_change': 'Nicht exportierte Änderung'
-        }, 'de')).rejects.toThrow('Refusing to write invalid YAML');
+        }, 'de');
 
-        expect(fs.readFileSync(filePath, 'utf8')).toBe(original);
+        const content = fs.readFileSync(filePath, 'utf8');
+        expect(() => yaml.parse(content)).not.toThrow();
+        const parsed = yaml.parse(content);
+        expect(parsed.de.translation.sidebar.title).toBe('Titel');
+        expect(parsed.de.translation.sidebar.unexported_change).toBe('Nicht exportierte Änderung');
       });
 
       it('still writes files that parse cleanly', async () => {
@@ -1467,7 +1473,68 @@ en:
       expect(targetContent).not.toContain('msgstr "null"');
     });
 
-    it('deletes keys from YAML files with duplicate keys without crashing', async () => {
+    it('inserting a new sibling key alongside an existing nested map does not corrupt indentation (#509)', async () => {
+      const filePath = path.join(tempDir, 'de.yml');
+      const initialContent = [
+        'de:',
+        '  translation:',
+        '    sidebar:',
+        '      export_error: Exportfehler',
+        '      push_confirm:',
+        '        completed: Updates erfolgreich übernommen',
+        '        failed: Update fehlgeschlagen',
+        ''
+      ].join('\n');
+      fs.writeFileSync(filePath, initialContent);
+
+      await updateTranslationFile(filePath, {
+        'translation.sidebar.unexported_change': 'Nicht exportierte Änderung'
+      }, 'de');
+
+      const updatedContent = fs.readFileSync(filePath, 'utf8');
+      expect(() => yaml.parseDocument(updatedContent, { strict: true }).errors.forEach(e => { throw e; }))
+        .not.toThrow();
+
+      const parsed = yaml.parse(updatedContent);
+      expect(parsed.de.translation.sidebar.unexported_change).toBe('Nicht exportierte Änderung');
+      expect(parsed.de.translation.sidebar.push_confirm.completed).toBe('Updates erfolgreich übernommen');
+      expect(parsed.de.translation.sidebar.push_confirm.failed).toBe('Update fehlgeschlagen');
+    });
+
+    it('inserting new keys into two different parents in one batch does not corrupt indentation (#509, multi-group)', async () => {
+      const filePath = path.join(tempDir, 'de.yml');
+      const initialContent = [
+        'de:',
+        '  translation:',
+        '    sidebar:',
+        '      export_error: Exportfehler',
+        '      push_confirm:',
+        '        completed: Updates erfolgreich übernommen',
+        '        failed: Update fehlgeschlagen',
+        '    dashboard:',
+        '      title: Übersicht',
+        ''
+      ].join('\n');
+      fs.writeFileSync(filePath, initialContent);
+
+      await updateTranslationFile(filePath, {
+        'translation.sidebar.unexported_change': 'Nicht exportierte Änderung',
+        'translation.dashboard.subtitle': 'Details'
+      }, 'de');
+
+      const updatedContent = fs.readFileSync(filePath, 'utf8');
+      const parseErrors = yaml.parseDocument(updatedContent, { strict: true }).errors;
+      expect(parseErrors).toEqual([]);
+
+      const parsed = yaml.parse(updatedContent);
+      expect(parsed.de.translation.sidebar.unexported_change).toBe('Nicht exportierte Änderung');
+      expect(parsed.de.translation.sidebar.push_confirm.completed).toBe('Updates erfolgreich übernommen');
+      expect(parsed.de.translation.sidebar.push_confirm.failed).toBe('Update fehlgeschlagen');
+      expect(parsed.de.translation.dashboard.subtitle).toBe('Details');
+      expect(parsed.de.translation.dashboard.title).toBe('Übersicht');
+    });
+
+    it('deletes keys from YAML files with duplicate keys without crashing, and warns about the remaining duplicates (#509)', async () => {
       const filePath = path.join(tempDir, 'sv.yml');
       const yamlWithDuplicates = [
         'sv:',
@@ -1484,6 +1551,11 @@ en:
       expect(deleted).toEqual(['section.remove_me']);
       const content = fs.readFileSync(filePath, 'utf8');
       expect(content).not.toContain('remove_me');
+
+      // The delete didn't introduce the duplicate keep_me — it was already
+      // there — but the write-time guard should still flag it so the
+      // customer knows their source file has invalid YAML to clean up.
+      expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('duplicate key'));
     });
   });
 });
