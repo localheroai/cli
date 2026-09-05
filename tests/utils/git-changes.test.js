@@ -1165,6 +1165,109 @@ describe('getManifestForFinalize', () => {
     });
   });
 
+  it('leaves out keys the ignore matcher rejects', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    const oldContent = JSON.stringify({ greeting: 'Hi' });
+    const newContent = JSON.stringify({
+      greeting: 'Hi',
+      farewell: 'Bye',
+      'date.day_names': 'Sunday',
+      'date.month_names': 'January'
+    });
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const ignoreMatcher = (name) => name.startsWith('date.');
+
+    const result = gitDiffModule.getManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false,
+      ignoreMatcher
+    );
+
+    expect(result).toEqual({
+      'locales/en.json': [{ name: 'farewell' }]
+    });
+  });
+
+  it('drops a file from the manifest when every changed key is ignored', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi' }) });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ greeting: 'Hi', 'date.order': 'ymd' })
+    );
+
+    const result = gitDiffModule.getManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false,
+      (name) => name.startsWith('date.')
+    );
+
+    expect(result).toEqual({});
+  });
+
+  it('keeps every key when no matcher is given', () => {
+    const sourceFiles = [
+      { path: 'locales/en.json', format: 'json', locale: 'en' }
+    ];
+
+    setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi' }) });
+    mockReadFileSync.mockReturnValue(
+      JSON.stringify({ greeting: 'Hi', 'date.order': 'ymd' })
+    );
+
+    const result = gitDiffModule.getManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({
+      'locales/en.json': [{ name: 'date.order' }]
+    });
+  });
+
+  it('leaves PO files unfiltered, since ignoreKeys does not support them', () => {
+    // import-service warns that ignoreKeys does not apply to PO files. Filtering
+    // them here would silently drop keys that translation processing still sent,
+    // and PO context means the names do not even line up.
+    const sourceFiles = [{ path: 'locales/en.po', format: 'po', locale: 'en' }];
+
+    const oldContent = `msgid ""
+msgstr ""
+
+msgid "greeting"
+msgstr "Hi"
+`;
+
+    const newContent = `msgid ""
+msgstr ""
+
+msgid "greeting"
+msgstr "Hi"
+
+msgid "date.order"
+msgstr "ymd"
+`;
+
+    setupGitMock({ oldContent });
+    mockReadFileSync.mockReturnValue(newContent);
+
+    const result = gitDiffModule.getManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false,
+      (name) => name.startsWith('date.')
+    );
+
+    expect(result).toEqual({ 'locales/en.po': [{ name: 'date.order' }] });
+  });
+
   it('returns null on failure', () => {
     setupGitMock({ branchExists: false });
 
@@ -1318,6 +1421,23 @@ describe('getRemovedKeysManifestForFinalize', () => {
     const result = gitDiffModule.getRemovedKeysManifestForFinalize(sourceFiles, mockConfig, false);
 
     expect(result).toEqual({ 'locales/en.json': [{ name: 'goodbye' }] });
+  });
+
+  it('still reports a deleted key even when it matches an ignore pattern', () => {
+    // ignoreKeys suppresses translation requests, not factual source deletions.
+    // Filtering removals here would leave the backend key active forever.
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+
+    setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi', 'date.order': 'ymd' }) });
+    mockReadFileSync.mockReturnValue(JSON.stringify({ greeting: 'Hi' }));
+
+    const result = gitDiffModule.getRemovedKeysManifestForFinalize(
+      sourceFiles,
+      mockConfig,
+      false
+    );
+
+    expect(result).toEqual({ 'locales/en.json': [{ name: 'date.order' }] });
   });
 
   it('returns empty object when diff succeeded with no removals', () => {
