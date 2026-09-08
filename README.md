@@ -25,7 +25,7 @@ $ npx @localheroai/cli init
 $ npx skills add localheroai/agent-skill
 ```
 
-The init wizard detects your framework, configures your translation paths, and optionally sets up the GitHub Action.
+The init wizard detects your framework, configures your translation paths, and optionally sets up the GitHub Action. The [project setup guide](https://localhero.ai/docs/setup) walks through each step, including how locale codes are matched to your filenames.
 
 ## Why Localhero.ai
 
@@ -102,6 +102,8 @@ Skip keys you don't want translated (e.g. Rails validation errors, internal admi
 Patterns are exact names or trailing wildcards (`foo.*`, recursive). Matches are skipped during `push` and `translate`; use `--verbose` for a summary. Not supported for `.po` / `.pot` files.
 
 ## Commands
+
+Every command and flag is documented in the [CLI reference](https://localhero.ai/docs/cli-reference).
 
 ### Initialize a Project
 
@@ -255,7 +257,7 @@ Configure the CLI behavior with these environment variables:
 
 ## GitHub Actions Integration
 
-LocalHero.ai automatically translate your I18n files when you push changes. During the `init` command, you'll be prompted to set up GitHub Actions.
+LocalHero.ai automatically translate your I18n files when you push changes. During the `init` command, you'll be prompted to set up GitHub Actions. The [GitHub Actions guide](https://localhero.ai/docs/github-actions) covers the workflow inputs, required permissions, and what the Action skips.
 
 1. Add your API key to your repository secrets:
    - Go to Settings > Secrets and variables > Actions
