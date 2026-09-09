@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.65] - 2026-09-09
+
+### Fixed
+- Array-valued keys are no longer reported as changed on every run. Values are compared structurally instead of by reference, so untouched arrays stop appearing in changed-key counts and in the PR key manifest. Affects any project with array values, including Rails `date.*` blocks.
+
 ## [0.0.64] - 2026-09-05
 
 ### Fixed
