@@ -676,6 +676,35 @@ msgstr[1] "Delete items"
       expect(Object.keys(result['fr:locales/en.json'].keys)).toHaveLength(2);
     });
 
+    // An untranslated array key is normally discarded by the missing-key
+    // intersection, but when it IS missing the false "changed" verdict decides
+    // whether it gets sent.
+    it('does not treat an unchanged array key as a changed key', () => {
+      const content = JSON.stringify({
+        user: { name: 'Name', email: 'Email', other: 'Other' },
+        date: { day_names: ['Sunday', 'Monday'] }
+      });
+
+      setupGitMock({ oldContent: content });
+      mockReadFileSync.mockReturnValue(content);
+
+      const missing = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: {
+            'date.day_names': { value: ['Sunday', 'Monday'], sourceKey: 'date.day_names' }
+          },
+          keyCount: 1
+        }
+      };
+
+      const result = filterByGitChanges(mockSourceFiles, missing, mockConfig, false);
+
+      expect(result).toEqual({});
+    });
+
     it('removes entries with no matching keys', () => {
       const oldContent = JSON.stringify({
         user: { name: 'Name', email: 'Email', other: 'Other' }
@@ -1105,6 +1134,139 @@ describe('getChangedKeysPerFile', () => {
     );
 
     expect(result).toBeNull();
+  });
+
+  // Regression: arrays survive flattenTranslations intact, and old/new come from
+  // separate parseFile calls, so comparing them with `!==` was always true and
+  // every array key was reported as changed on every run. For a Rails app that
+  // is the whole date.* block.
+  describe('array-valued keys', () => {
+    const sourceFiles = [{ path: 'locales/en.json', format: 'json', locale: 'en' }];
+
+    it('does not report an unchanged array key as changed', () => {
+      const content = JSON.stringify({
+        date: { day_names: ['Sunday', 'Monday', 'Tuesday'] }
+      });
+
+      setupGitMock({ oldContent: content });
+      mockReadFileSync.mockReturnValue(content);
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.size).toBe(0);
+    });
+
+    it('reports an array key whose element changed', () => {
+      setupGitMock({ oldContent: JSON.stringify({ date: { day_names: ['Sunday', 'Monday'] } }) });
+      mockReadFileSync.mockReturnValue(JSON.stringify({ date: { day_names: ['Sunday', 'Tuesday'] } }));
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.get('locales/en.json')).toEqual([{ name: 'date.day_names' }]);
+    });
+
+    it('reports an array key whose elements were reordered', () => {
+      setupGitMock({ oldContent: JSON.stringify({ date: { day_names: ['Sunday', 'Monday'] } }) });
+      mockReadFileSync.mockReturnValue(JSON.stringify({ date: { day_names: ['Monday', 'Sunday'] } }));
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.get('locales/en.json')).toEqual([{ name: 'date.day_names' }]);
+    });
+
+    it('reports an array key whose length changed', () => {
+      setupGitMock({ oldContent: JSON.stringify({ date: { day_names: ['Sunday', 'Monday'] } }) });
+      mockReadFileSync.mockReturnValue(JSON.stringify({ date: { day_names: ['Sunday', 'Monday', 'Tuesday'] } }));
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.get('locales/en.json')).toEqual([{ name: 'date.day_names' }]);
+    });
+
+    it('reports a newly added array key', () => {
+      setupGitMock({ oldContent: JSON.stringify({ greeting: 'Hi' }) });
+      mockReadFileSync.mockReturnValue(JSON.stringify({ greeting: 'Hi', order: ['year', 'month'] }));
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.get('locales/en.json')).toEqual([{ name: 'order' }]);
+    });
+
+    it('compares nested arrays and arrays of objects by value', () => {
+      const content = JSON.stringify({
+        nested: [['a', 'b'], ['c']],
+        objects: [{ x: 1 }, { y: 2 }],
+        empty: []
+      });
+
+      setupGitMock({ oldContent: content });
+      mockReadFileSync.mockReturnValue(content);
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.size).toBe(0);
+    });
+
+    it('still reports a changed string alongside an unchanged array', () => {
+      setupGitMock({
+        oldContent: JSON.stringify({ greeting: 'Hi', date: { order: ['year', 'month'] } })
+      });
+      mockReadFileSync.mockReturnValue(
+        JSON.stringify({ greeting: 'Hello', date: { order: ['year', 'month'] } })
+      );
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.get('locales/en.json')).toEqual([{ name: 'greeting' }]);
+    });
+
+    it('leaves null-valued keys unreported when unchanged', () => {
+      const content = JSON.stringify({ greeting: 'Hi', blank: null });
+
+      setupGitMock({ oldContent: content });
+      mockReadFileSync.mockReturnValue(content);
+
+      const result = gitDiffModule.getChangedKeysPerFile(sourceFiles, mockConfig, false);
+
+      expect(result.size).toBe(0);
+    });
+  });
+
+  // A false negative here silently drops translation work, and a throw is just as
+  // bad: both callers catch per-file and skip the whole file.
+  describe('valuesEqual', () => {
+    it('compares arrays and nested structures by value', () => {
+      expect(gitDiffModule.valuesEqual(['a', 'b'], ['a', 'b'])).toBe(true);
+      expect(gitDiffModule.valuesEqual([], [])).toBe(true);
+      expect(gitDiffModule.valuesEqual({ a: [1, { b: [2] }] }, { a: [1, { b: [2] }] })).toBe(true);
+      expect(gitDiffModule.valuesEqual({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+    });
+
+    it('reports genuine differences', () => {
+      expect(gitDiffModule.valuesEqual(['a', 'b'], ['a', 'c'])).toBe(false);
+      expect(gitDiffModule.valuesEqual(['a'], ['a', 'b'])).toBe(false);
+      expect(gitDiffModule.valuesEqual(['a', 'b'], ['b', 'a'])).toBe(false);
+      expect(gitDiffModule.valuesEqual({ a: [1, { b: [2] }] }, { a: [1, { b: [3] }] })).toBe(false);
+      expect(gitDiffModule.valuesEqual([1], ['1'])).toBe(false);
+      expect(gitDiffModule.valuesEqual('a,b', ['a', 'b'])).toBe(false);
+      expect(gitDiffModule.valuesEqual(null, {})).toBe(false);
+      expect(gitDiffModule.valuesEqual({ a: undefined }, {})).toBe(false);
+    });
+
+    it('does not treat an array hole as an undefined element', () => {
+      expect(gitDiffModule.valuesEqual(new Array(1), [undefined])).toBe(false);
+      expect(gitDiffModule.valuesEqual([undefined], new Array(1))).toBe(false);
+    });
+
+    it('compares cyclic values instead of overflowing the stack', () => {
+      const a = []; a.push(a);
+      const b = []; b.push(b);
+      expect(gitDiffModule.valuesEqual(a, b)).toBe(true);
+
+      const c = ['one']; c.unshift(c);
+      const d = ['two']; d.unshift(d);
+      expect(gitDiffModule.valuesEqual(c, d)).toBe(false);
+    });
   });
 
   it('omits unchanged source files from the manifest', () => {

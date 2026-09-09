@@ -178,6 +178,72 @@ function extractPoKeys(poObject: Record<string, any>): Record<string, any> {
 }
 
 /**
+ * Compare two flattened translation values structurally.
+ *
+ * flattenTranslations leaves arrays intact, and old/new come from separate
+ * parseFile calls, so `===` on an array compares distinct objects and is always
+ * false: every array key looked changed on every run.
+ *
+ * Mismatched types fall through to `===` and compare as changed. Over-reporting
+ * is safe; silently missing a change is not.
+ *
+ * `seen` guards cyclic YAML aliases (`x: &x` / `- *x`), which the parser resolves
+ * into self-referential arrays. Callers catch per-file and skip, so a stack
+ * overflow here would silently drop every key in the file.
+ */
+export function valuesEqual(a: unknown, b: unknown, seen = new Map<unknown, Set<unknown>>()): boolean {
+  if (a === b) return true;
+
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b)) return false;
+    if (a.length !== b.length) return false;
+    if (isCycle(a, b, seen)) return true;
+    for (let i = 0; i < a.length; i++) {
+      // Hole-aware: `every` skips holes, so [ ,1] would match [undefined,1].
+      if (Object.prototype.hasOwnProperty.call(a, i) !== Object.prototype.hasOwnProperty.call(b, i)) {
+        return false;
+      }
+      if (!valuesEqual(a[i], b[i], seen)) return false;
+    }
+    return true;
+  }
+
+  if (isPlainObject(a) && isPlainObject(b)) {
+    const aKeys = Object.keys(a);
+    if (aKeys.length !== Object.keys(b).length) return false;
+    if (isCycle(a, b, seen)) return true;
+    return aKeys.every(
+      (key) =>
+        Object.prototype.hasOwnProperty.call(b, key) && valuesEqual(a[key], b[key], seen)
+    );
+  }
+
+  return false;
+}
+
+/**
+ * True when this exact pair is already being compared higher up the stack.
+ * Assuming equality is the standard structural-equality treatment of cycles:
+ * the pair is equal unless some other branch proves otherwise.
+ */
+function isCycle(a: object, b: object, seen: Map<unknown, Set<unknown>>): boolean {
+  const partners = seen.get(a);
+  if (partners?.has(b)) return true;
+  if (partners) {
+    partners.add(b);
+  } else {
+    seen.set(a, new Set([b]));
+  }
+  return false;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * Check if git is available and we're in a repository
  */
 export function isGitAvailable(): boolean {
@@ -404,7 +470,7 @@ function getChangedKeys(
       const perFileSet = new Set<string>();
 
       for (const [key, value] of Object.entries(newFlat)) {
-        if (!(key in oldFlat) || oldFlat[key] !== value) {
+        if (!(key in oldFlat) || !valuesEqual(oldFlat[key], value)) {
           if (totalChangedKeys >= MAX_CHANGED_KEYS) {
             if (verbose) {
               console.log(chalk.yellow(`Warning: Exceeded ${MAX_CHANGED_KEYS} changed keys limit`));
@@ -499,7 +565,7 @@ export function diffSourceFilesPerFile(
       const removed: KeyIdentifier[] = [];
 
       for (const [key, value] of Object.entries(newFlat)) {
-        if (!(key in oldFlat) || oldFlat[key] !== value) {
+        if (!(key in oldFlat) || !valuesEqual(oldFlat[key], value)) {
           totalKeys++;
           if (cap(totalKeys)) return null;
           added.push(toIdentifier(key, isPo));

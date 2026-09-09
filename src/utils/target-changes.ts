@@ -132,6 +132,9 @@ function detectFileChanges(
     const changes: TargetChange[] = [];
 
     for (const [key, value] of Object.entries(newFlat)) {
+      // TargetChange.value is a string, so non-strings can't travel on the wire.
+      // The source side does translate arrays, as one key holding the whole
+      // sequence, so a hand-edited array here is not ingested as a human edit.
       if (typeof value !== 'string' || value === '') continue;
 
       const oldValue = oldFlat[key];
