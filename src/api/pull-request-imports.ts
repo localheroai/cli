@@ -9,9 +9,16 @@ export interface PullRequestImportParams {
   files: TargetChangeFile[];
 }
 
+export interface ImportEntry {
+  path: string;
+  key: string;
+  locale?: string;
+}
+
 export interface PullRequestImportResponse {
   imported_count: number;
-  skipped: Array<{ path: string; key: string; reason: string }>;
+  skipped: Array<ImportEntry & { reason: string }>;
+  unchanged?: ImportEntry[];
   job_group?: { id: string; short_url: string };
 }
 

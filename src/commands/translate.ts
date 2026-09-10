@@ -24,7 +24,8 @@ import {
 } from '../utils/translation-utils.js';
 import { autoCommitChanges } from '../utils/github.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
-import { createPullRequestImport } from '../api/pull-request-imports.js';
+import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
+import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
@@ -138,6 +139,10 @@ const defaultDeps: TranslationDependencies = {
   gitUtils: { autoCommitChanges },
   execUtils: { execSync }
 };
+
+function pluralize(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
 
 // Names the actual failure (bad key / rate limit / network / server error)
 // instead of a generic "could not fetch".
@@ -274,6 +279,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   const projectId = config.projectId;
+  const sourceLocale = config.sourceLocale;
 
   async function sendPullRequestImport(
     targetChanges: TargetChangeFile[],
@@ -281,27 +287,39 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   ): Promise<void> {
     if (targetChanges.length === 0) return;
 
-    try {
-      const branch = await getCurrentBranch();
-      if (!branch) return;
+    const branch = await getCurrentBranch();
+    if (!branch) return;
 
-      const importResult = await createPullRequestImport({
+    let importResult: PullRequestImportResponse;
+    try {
+      importResult = await createPullRequestImport({
         projectId,
         branch,
         jobGroupId,
         files: targetChanges
       });
-
-      if (importResult.imported_count > 0) {
-        console.log(`» Sent ${importResult.imported_count} translation value${importResult.imported_count === 1 ? '' : 's'} from this PR for review`);
-      }
-      for (const skipped of importResult.skipped) {
-        console.log(chalk.yellow(`  Skipped ${skipped.path}: ${skipped.key} (${skipped.reason})`));
-      }
     } catch (err) {
-      if (verbose) {
-        console.log(chalk.dim(`Translation ingestion skipped: ${(err as Error).message}`));
-      }
+      const changeCount = targetChanges.reduce((sum, file) => sum + file.changes.length, 0);
+      console.log(chalk.yellow(`⚠ Could not send ${pluralize(changeCount, 'changed value')} for review: ${(err as Error).message}`));
+      return;
+    }
+
+    reportImport(summarizeImport(targetChanges, sourceLocale, importResult), importResult);
+  }
+
+  function reportImport(summary: ImportSummary, importResult: PullRequestImportResponse): void {
+    if (summary.importedCount > 0) {
+      console.log(`» Sent ${pluralize(summary.importedCount, 'translation value')} from this PR for review`);
+    }
+    if (summary.unchangedCount > 0) {
+      const verb = summary.unchangedCount === 1 ? 'matches' : 'match';
+      console.log(chalk.dim(`» ${pluralize(summary.unchangedCount, 'translation value')} already ${verb}`));
+    }
+    for (const skipped of importResult.skipped) {
+      console.log(chalk.yellow(`  Skipped ${skipped.path}: ${skipped.key} (${skipped.reason})`));
+    }
+    if (summary.sourceTextsImported > 0) {
+      console.log(chalk.blue(`ℹ ${pluralize(summary.sourceTextsImported, 'source text')} changed. Existing translations were kept; review or align them from the Localhero comment on the PR.`));
     }
   }
 
@@ -378,7 +396,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           await sendFinalize(manifest, jobGroupId, removedManifest);
         }
         await sendPullRequestImport(targetChanges, jobGroupId);
-        console.log(chalk.green('✓ All changed keys are already translated'));
+        console.log(chalk.green('✓ No changed keys need translation'));
         return;
       }
       missingByLocale = filtered;
