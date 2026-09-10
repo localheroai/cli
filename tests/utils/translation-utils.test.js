@@ -718,7 +718,7 @@ describe('translation-utils', () => {
       consoleWarnSpy.mockRestore();
     });
 
-    it('splits large batches into chunks of max 100 items', async () => {
+    it('splits large batches into chunks of max 200 items', async () => {
       const sourceFiles = [
         {
           path: 'locales/en.json',

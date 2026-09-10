@@ -242,6 +242,35 @@ async function monitorJobStatus(
 }
 
 /**
+ * A file larger than the batch size is split into several batches that all share
+ * one missingByLocale entry. Each batch must write only its own chunk of keys, so
+ * the scope is per batch rather than per run.
+ */
+interface BatchScope {
+  requestedKeys: Set<string> | undefined;
+  appliedEntries: Set<string>;
+}
+
+/**
+ * Reads the keys a batch asked the API to translate.
+ *
+ * Returns undefined when the batch carries no key envelope, which leaves the
+ * caller to fall back to the missingByLocale entry as the only filter.
+ */
+function readRequestedKeys(batch: TranslationBatch): Set<string> | undefined {
+  try {
+    const content = JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString());
+    return content?.keys ? new Set(Object.keys(content.keys)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function createBatchScope(batch: TranslationBatch): BatchScope {
+  return { requestedKeys: readRequestedKeys(batch), appliedEntries: new Set<string>() };
+}
+
+/**
  * Applies completed translations to the target files
  *
  * @param jobStatus - The job status with translation data
@@ -250,7 +279,7 @@ async function monitorJobStatus(
  * @param translationUtils - Translation utilities
  * @param verbose - Whether to show verbose output
  * @param console - Console for logging
- * @param processedEntries - Set of already processed entries
+ * @param batchScope - Keys this batch asked for and the entries it has already written
  * @param uniqueKeysTranslated - Set of unique keys that were translated
  * @param stats - Statistics object to update
  * @returns Whether translations were applied
@@ -262,7 +291,7 @@ async function applyTranslations(
   translationUtils: TranslationDependencies['translationUtils'],
   verbose: boolean,
   console: TranslationDependencies['console'],
-  processedEntries: Set<string>,
+  batchScope: BatchScope,
   uniqueKeysTranslated: Set<string>,
   stats: TranslationStats,
   config: ProjectConfig
@@ -314,16 +343,18 @@ async function applyTranslations(
 
   const localeSourceKey = findMissingEntryKey(missingByLocale, languageCode, sourceInfo.sourceFilePath);
 
-  if (!localeSourceKey || processedEntries.has(localeSourceKey)) {
+  if (!localeSourceKey || batchScope.appliedEntries.has(localeSourceKey)) {
     return false;
   }
 
   const entry = missingByLocale[localeSourceKey];
   const targetPath = entry.targetPath;
   const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
-  // Only write keys this run asked for.
+  const { requestedKeys } = batchScope;
   const returnedTranslations = Object.entries(data.translations.data);
-  const requestedTranslations = returnedTranslations.filter(([key]) => Object.hasOwn(entry.keys, key));
+  const requestedTranslations = returnedTranslations.filter(
+    ([key]) => Object.hasOwn(entry.keys, key) && (!requestedKeys || requestedKeys.has(key))
+  );
   const unrequestedCount = returnedTranslations.length - requestedTranslations.length;
 
   if (verbose && unrequestedCount > 0) {
@@ -370,12 +401,11 @@ async function applyTranslations(
     });
   }
 
-  if (!processedEntries.has(`locale:${languageCode}`)) {
-    stats.totalLanguages++;
+  if (!stats.languages.has(languageCode)) {
     stats.languages.add(languageCode);
-    processedEntries.add(`locale:${languageCode}`);
+    stats.totalLanguages++;
   }
-  processedEntries.add(localeSourceKey);
+  batchScope.appliedEntries.add(localeSourceKey);
 
   return true;
 }
@@ -388,7 +418,6 @@ async function applyTranslations(
  * @param config - Project configuration
  * @param verbose - Whether to show verbose output
  * @param deps - Dependencies (console, translationUtils)
- * @param processedEntries - Set of already processed entries
  * @param uniqueKeysTranslated - Set of unique keys that were translated
  * @param allJobIds - Array of all job IDs
  * @param stats - Statistics object to update
@@ -399,7 +428,6 @@ async function processBatch(
   config: ProjectConfig,
   verbose: boolean,
   deps: TranslationDependencies,
-  processedEntries: Set<string>,
   uniqueKeysTranslated: Set<string>,
   allJobIds: string[],
   stats: TranslationStats,
@@ -407,6 +435,7 @@ async function processBatch(
 ): Promise<void> {
   const { console, translationUtils } = deps;
   const sourceFilePath = batch.sourceFilePath;
+  const batchScope = createBatchScope(batch);
   const jobRequest = createJobRequest(batch, missingByLocale, config, jobGroupId);
   const response = await translationUtils.createTranslationJob(jobRequest);
   const { jobs } = response;
@@ -471,7 +500,7 @@ async function processBatch(
           translationUtils,
           verbose,
           console,
-          processedEntries,
+          batchScope,
           uniqueKeysTranslated,
           stats,
           config
@@ -523,7 +552,6 @@ export async function processTranslationBatches(
     failedLanguages: new Set<string>(),
     skippedLanguages: new Set<string>()
   };
-  const processedEntries = new Set<string>();
   const allJobIds: string[] = [];
   const uniqueKeysTranslated = new Set<string>();
 
@@ -538,7 +566,6 @@ export async function processTranslationBatches(
         config,
         verbose,
         deps,
-        processedEntries,
         uniqueKeysTranslated,
         allJobIds,
         stats,

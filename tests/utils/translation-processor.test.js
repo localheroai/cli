@@ -1,5 +1,6 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { processTranslationBatches, MAX_JOB_STATUS_CHECK_ATTEMPTS } from '../../src/utils/translation-processor.js';
+import { batchKeysWithMissing } from '../../src/utils/translation-utils.js';
 
 describe('translation-processor', () => {
   let mockConsole;
@@ -889,16 +890,142 @@ describe('translation-processor', () => {
     });
   });
 
+  describe('a source file split into several batches (#609)', () => {
+    const config = { projectId: 'test-project' };
+    const sourcePath = 'locales/en.json';
+    const entryKey = 'sv:locales/en.json';
+
+    const batchFor = (keys) => ({
+      sourceFilePath: sourcePath,
+      sourceFile: {
+        path: sourcePath,
+        format: 'json',
+        content: Buffer.from(JSON.stringify({
+          keys: Object.fromEntries(keys.map((key) => [key, { value: `Source ${key}` }]))
+        })).toString('base64')
+      },
+      localeEntries: [entryKey],
+      locales: ['sv']
+    });
+
+    const missingWith = (keys) => ({
+      [entryKey]: {
+        locale: 'sv',
+        path: sourcePath,
+        targetPath: 'locales/sv.json',
+        keys: Object.fromEntries(keys.map((key) => [key, { value: `Source ${key}`, sourceKey: key }])),
+        keyCount: keys.length
+      }
+    });
+
+    const completedJob = (translations) => ({
+      status: 'completed',
+      translations: { data: translations },
+      language: { code: 'sv' }
+    });
+
+    it('writes every chunk of the same locale and file, not only the first', async () => {
+      mockTranslationUtils.createTranslationJob
+        .mockResolvedValueOnce({ jobs: [{ id: 'job-1', language: { code: 'sv' } }] })
+        .mockResolvedValueOnce({ jobs: [{ id: 'job-2', language: { code: 'sv' } }] });
+      mockTranslationUtils.checkJobStatus
+        .mockResolvedValueOnce(completedJob({ a: 'A', b: 'B' }))
+        .mockResolvedValueOnce(completedJob({ c: 'C' }));
+
+      const result = await processTranslationBatches(
+        [batchFor(['a', 'b']), batchFor(['c'])],
+        missingWith(['a', 'b', 'c']),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenNthCalledWith(
+        1, 'locales/sv.json', { a: 'A', b: 'B' }, 'sv', sourcePath, undefined, config
+      );
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenNthCalledWith(
+        2, 'locales/sv.json', { c: 'C' }, 'sv', sourcePath, undefined, config
+      );
+      expect(result.totalLanguages).toBe(1);
+      expect([...result.uniqueKeysTranslated].sort()).toEqual(['a', 'b', 'c']);
+    });
+
+    it('writes only the keys of the current chunk when a job echoes keys from another chunk', async () => {
+      mockTranslationUtils.createTranslationJob
+        .mockResolvedValueOnce({ jobs: [{ id: 'job-1', language: { code: 'sv' } }] })
+        .mockResolvedValueOnce({ jobs: [{ id: 'job-2', language: { code: 'sv' } }] });
+      mockTranslationUtils.checkJobStatus
+        .mockResolvedValueOnce(completedJob({ a: 'A', b: 'B' }))
+        .mockResolvedValueOnce(completedJob({ a: 'A stale', c: 'C' }));
+
+      await processTranslationBatches(
+        [batchFor(['a', 'b']), batchFor(['c'])],
+        missingWith(['a', 'b', 'c']),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenNthCalledWith(
+        2, 'locales/sv.json', { c: 'C' }, 'sv', sourcePath, undefined, config
+      );
+    });
+  });
+
+  it('writes all 450 keys of one file through the real 200/200/50 batches (#609)', async () => {
+    const keys = Array.from({ length: 450 }, (_, i) => `key_${String(i).padStart(3, '0')}`);
+    const missingByLocale = {
+      'sv:locales/en.json': {
+        locale: 'sv',
+        path: 'locales/en.json',
+        targetPath: 'locales/sv.json',
+        keys: Object.fromEntries(keys.map((key) => [key, { value: `Source ${key}`, sourceKey: key }])),
+        keyCount: keys.length
+      }
+    };
+    const { batches } = batchKeysWithMissing([{ path: 'locales/en.json', format: 'json' }], missingByLocale);
+    expect(batches.map((batch) => Object.keys(JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString()).keys).length))
+      .toEqual([200, 200, 50]);
+
+    let jobNumber = 0;
+    mockTranslationUtils.createTranslationJob.mockImplementation(async () => ({
+      jobs: [{ id: `job-${++jobNumber}`, language: { code: 'sv' } }]
+    }));
+    mockTranslationUtils.checkJobStatus.mockImplementation(async (jobId) => {
+      const chunkKeys = keys.slice((Number(jobId.slice(4)) - 1) * 200).slice(0, 200);
+      return {
+        status: 'completed',
+        translations: { data: Object.fromEntries(chunkKeys.map((key) => [key, `SV ${key}`])) },
+        language: { code: 'sv' }
+      };
+    });
+
+    const result = await processTranslationBatches(
+      batches,
+      missingByLocale,
+      { projectId: 'test-project' },
+      false,
+      { console: mockConsole, translationUtils: mockTranslationUtils }
+    );
+
+    const writtenKeyCounts = mockTranslationUtils.updateTranslationFile.mock.calls.map((call) => Object.keys(call[1]).length);
+    expect(writtenKeyCounts).toEqual([200, 200, 50]);
+    expect(result.uniqueKeysTranslated.size).toBe(450);
+    expect(result.totalLanguages).toBe(1);
+  });
+
   describe('preserving local target values (#508)', () => {
     const config = { projectId: 'test-project' };
 
-    const buildBatch = (extension, format) => ([
+    const buildBatch = (extension, format, requestedKeys) => ([
       {
         sourceFilePath: `locales/en.${extension}`,
         sourceFile: {
           path: `locales/en.${extension}`,
           format,
-          content: Buffer.from(JSON.stringify({ keys: {} })).toString('base64')
+          content: Buffer.from(JSON.stringify({
+            keys: Object.fromEntries(requestedKeys.map((key) => [key, { value: key }]))
+          })).toString('base64')
         },
         localeEntries: [`sv:locales/en.${extension}`],
         locales: ['sv']
@@ -933,7 +1060,7 @@ describe('translation-processor', () => {
       });
 
       const result = await processTranslationBatches(
-        buildBatch('yml', 'yaml'),
+        buildBatch('yml', 'yaml', ['pages.docs.nav.new']),
         buildMissing('yml', {
           'pages.docs.nav.new': { value: 'New page', sourceKey: 'pages.docs.nav.new' }
         }),
@@ -968,7 +1095,7 @@ describe('translation-processor', () => {
       });
 
       const result = await processTranslationBatches(
-        buildBatch('yml', 'yaml'),
+        buildBatch('yml', 'yaml', ['pages.docs.nav.new']),
         buildMissing('yml', {
           'pages.docs.nav.new': { value: 'New page', sourceKey: 'pages.docs.nav.new' }
         }),
@@ -995,7 +1122,7 @@ describe('translation-processor', () => {
       });
 
       await processTranslationBatches(
-        buildBatch('po', 'po'),
+        buildBatch('po', 'po', ['Welcome']),
         buildMissing('po', { Welcome: { value: 'Welcome', sourceKey: 'Welcome' } }),
         config,
         true,
@@ -1026,7 +1153,7 @@ describe('translation-processor', () => {
       });
 
       await processTranslationBatches(
-        buildBatch('json', 'json'),
+        buildBatch('json', 'json', ['greeting']),
         buildMissing('json', { greeting: { value: 'Hello', sourceKey: 'greeting' } }),
         config,
         true,
