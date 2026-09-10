@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.66] - 2026-09-10
+
+### Fixed
+- Files with more than 200 keys to translate lost everything past the first 200. Each batch now writes its own keys, so every chunk lands.
+- Translations Localhero committed itself are no longer re-sent as review proposals on the next push; they report as "already match".
+- `--changed-only` no longer claims "All changed keys are already translated" when a reworded source text was staged with its translations kept. It now says what changed and where to review it.
+- A failed review upload prints a warning instead of staying silent without `--verbose`.
+
 ## [0.0.65] - 2026-09-09
 
 ### Fixed
