@@ -60,6 +60,58 @@ describe('files utils', () => {
     global.console = originalConsole;
   });
 
+  describe('stripPotCreationDate', () => {
+    let stripPotCreationDate;
+    const withHeader = 'msgid ""\nmsgstr ""\n"POT-Creation-Date: 2026-09-13 12:23+0000\\n"\n"Language: sv\\n"\n\nmsgid "Task board"\nmsgstr "Uppgiftstavla"\n';
+
+    beforeEach(async () => {
+      const filesModule = await import('../../src/utils/files.js');
+      stripPotCreationDate = filesModule.stripPotCreationDate;
+    });
+
+    it('drops the header line from every catalog under the configured paths', async () => {
+      mockGlob.mockResolvedValue(['translations/django.pot', 'translations/sv/LC_MESSAGES/django.po']);
+      const written = {};
+      const fsModule = {
+        readFile: jest.fn().mockResolvedValue(withHeader),
+        writeFile: jest.fn().mockImplementation((p, contents) => { written[p] = contents; return Promise.resolve(); })
+      };
+
+      await stripPotCreationDate(['translations/'], fsModule);
+
+      expect(Object.keys(written).sort()).toEqual([
+        'translations/django.pot',
+        'translations/sv/LC_MESSAGES/django.po'
+      ]);
+      expect(written['translations/django.pot']).not.toContain('POT-Creation-Date');
+      expect(written['translations/django.pot']).toContain('"Language: sv\\n"');
+      expect(written['translations/django.pot']).toContain('msgstr "Uppgiftstavla"');
+    });
+
+    it('leaves a catalog untouched when the header is already absent', async () => {
+      mockGlob.mockResolvedValue(['translations/django.pot']);
+      const fsModule = {
+        readFile: jest.fn().mockResolvedValue('msgid ""\nmsgstr ""\n"Language: sv\\n"\n'),
+        writeFile: jest.fn()
+      };
+
+      await stripPotCreationDate(['translations/'], fsModule);
+
+      expect(fsModule.writeFile).not.toHaveBeenCalled();
+    });
+
+    it('never throws, so a strip failure cannot fail the caller', async () => {
+      mockGlob.mockResolvedValue(['translations/django.pot']);
+      const fsModule = {
+        readFile: jest.fn().mockRejectedValue(new Error('EACCES')),
+        writeFile: jest.fn()
+      };
+
+      await expect(stripPotCreationDate(['translations/'], fsModule)).resolves.toBeUndefined();
+      expect(fsModule.writeFile).not.toHaveBeenCalled();
+    });
+  });
+
   it('assigns a .pot the configured source locale, never a hard-coded en', async () => {
     // Kundo's shape: Swedish source, English is a target. A .pot has no locale in
     // its path, so the only correct answer is whatever the config says.

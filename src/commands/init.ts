@@ -9,7 +9,7 @@ import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
 import { createGitHubActionFile, workflowExists, buildMakemessagesCommand, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
-import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
+import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, stripPotCreationDate, DirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
@@ -639,6 +639,7 @@ async function offerDjangoExtraction(
 
   try {
     execUtils.execSync(command, { cwd: basePath, stdio: 'inherit' });
+    await stripPotCreationDate(config.translationFiles?.paths || []);
     return true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
