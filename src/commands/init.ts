@@ -7,7 +7,7 @@ import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
-import { createGitHubActionFile, workflowExists, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
+import { createGitHubActionFile, workflowExists, buildMakemessagesCommand, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
 import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
@@ -562,6 +562,10 @@ async function handleImportProcess(
     if (importResult.status === 'failed' || importResult.status === 'error') {
       console.log(chalk.red('✗ Failed to import translations'));
       console.log(chalk.red(`Error: ${importResult.error || 'Import failed'}`));
+      if (importResult.errorCode === 'missing_source' && config.translationFiles?.workflow === 'django') {
+        console.log(chalk.yellow('Django writes the source strings to a .pot and deletes it. Keep it and re-run:'));
+        console.log(chalk.yellow(`  ${buildMakemessagesCommand(config.outputLocales)}`));
+      }
       return { success: false, hasWarnings: false };
     }
 
@@ -829,6 +833,7 @@ async function handleExistingConfiguration(
     }
   }
 
+  let hasErrors = false;
   if (existingConfig.lastSyncedAt) {
     console.log(chalk.green('✓ Translation files previously imported'));
   } else {
@@ -843,7 +848,8 @@ async function handleExistingConfiguration(
     }
 
     if (shouldImport) {
-      await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils);
+      const importResult = await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils);
+      hasErrors = !importResult.success;
     }
   }
 
@@ -880,7 +886,8 @@ async function handleExistingConfiguration(
     printExtractorNotice(workflowDefaults?.extractor, console, existingPythonInstall);
   }
 
-  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), false, console);
+  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), hasErrors, console);
+  if (hasErrors) process.exitCode = 1;
 }
 
 async function handleNewProjectSetup(
@@ -964,6 +971,7 @@ async function handleNewProjectSetup(
   }
 
   displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), hasErrors, console);
+  if (hasErrors) process.exitCode = 1;
 }
 
 function normalizeTrailingSlash(p: string): string {

@@ -700,6 +700,30 @@ describe('translate command', () => {
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
+  it('names the makemessages remedy for a Django project with no source catalog', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      projectId: 'test-project',
+      localePluralCategories: {},
+      sourceLocale: 'sv',
+      outputLocales: ['en', 'pl'],
+      translationFiles: { paths: ['translations/'], workflow: 'django' }
+    });
+    fileUtils.findTranslationFiles.mockResolvedValue({
+      sourceFiles: [],
+      targetFilesByLocale: { en: [], pl: [] },
+      allFiles: [{ path: 'translations/pl/LC_MESSAGES/django.po', locale: 'pl' }]
+    });
+
+    await translate({}, createTranslateDeps());
+
+    const printed = mockConsole.error.mock.calls.map(c => c[0]).join('\n');
+    expect(printed).toContain('No source files found for locale sv');
+    expect(printed).toContain('makemessages --keep-pot -l en -l pl');
+    // The generic advice about YAML/JSON syntax is wrong for gettext and must not show.
+    expect(printed).not.toContain('YAML or JSON');
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
   it('handles errors during translation job creation', async () => {
     const sourceFilePath = 'locales/en.json';
 

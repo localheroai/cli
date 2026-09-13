@@ -36,6 +36,7 @@ describe('init command', () => {
     const fsMod = await import('fs');
     fsMod.promises.stat = pristineFsStat;
     fsMod.promises.readFile = pristineFsReadFile;
+    process.exitCode = undefined;
   });
 
   beforeEach(() => {
@@ -242,6 +243,7 @@ describe('init command', () => {
     const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
     expect(allConsoleOutput).toContain('✗ Failed to import translations');
     expect(allConsoleOutput).toContain('Error: Import failed');
+    expect(process.exitCode).toBe(1);
   });
 
   it('displays translations URL when available', async () => {
@@ -896,6 +898,34 @@ describe('init command', () => {
     expect(sourceCodePaths).toBeUndefined();
   });
 
+  it('exits non-zero and skips the success banner when an import fails against an existing config', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing',
+      sourceLocale: 'sv',
+      outputLocales: ['en'],
+      translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}', workflow: 'django' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(true)
+    };
+    promptService.confirm.mockResolvedValueOnce(true);
+    importUtils.importTranslations.mockResolvedValue({
+      status: 'failed',
+      errorCode: 'missing_source',
+      error: 'No source language files found for locale sv.'
+    });
+
+    await init(createInitDeps({ githubUtils }));
+
+    const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+    expect(allConsoleOutput).toContain('✗ Failed to import translations');
+    expect(allConsoleOutput).not.toContain('Setup complete');
+    expect(process.exitCode).toBe(1);
+  });
+
   it('configures Django workflow for Django projects', async () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
@@ -937,6 +967,43 @@ describe('init command', () => {
 
     // Restore original stat function
     fs.promises.stat = originalStat;
+  });
+
+  it('names the makemessages remedy when a Django project has no source catalog', async () => {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('sv')
+      .mockResolvedValueOnce('en,pl')
+      .mockResolvedValueOnce('django-project')
+      .mockResolvedValueOnce('translations/')
+      .mockResolvedValueOnce('**/sources/**');
+    projectApi.createProject.mockResolvedValue({ id: 'proj_django', name: 'django-project' });
+    promptService.confirm
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    importUtils.importTranslations.mockResolvedValue({
+      status: 'failed',
+      errorCode: 'missing_source',
+      error: 'No source language files found for locale sv.'
+    });
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) =>
+      path === 'manage.py' ? Promise.resolve({ isFile: () => true }) : originalStat(path)
+    );
+    try {
+      await init(createInitDeps());
+    } finally {
+      fs.promises.stat = originalStat;
+    }
+
+    const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+    expect(allConsoleOutput).toContain('makemessages --keep-pot -l en -l pl');
+    expect(process.exitCode).toBe(1);
   });
 
   it('detects Phoenix projects from mix.exs and proposes gettext defaults', async () => {

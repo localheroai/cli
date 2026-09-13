@@ -88,7 +88,7 @@ function manageRunner(pythonInstall: string): string {
 // --keep-pot: Django builds the .pot from source on every run and then deletes it.
 // A stock Django app has no source-locale .po, so the kept .pot is the only source
 // catalog there is; without it the import has nothing to treat as source.
-function buildMakemessagesCommand(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
+export function buildMakemessagesCommand(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
   const runner = manageRunner(pythonInstall);
   if (!locales?.length) {
     return `${runner} manage.py makemessages --keep-pot --all`;
