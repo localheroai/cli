@@ -1,5 +1,6 @@
 import { cloneService as defaultCloneService } from '../utils/clone-service.js';
 import { configService } from '../utils/config.js';
+import { checkAuth as defaultCheckAuth } from '../utils/auth.js';
 import chalk from 'chalk';
 
 interface CloneDependencies {
@@ -10,6 +11,7 @@ interface CloneDependencies {
       failedFiles: string[];
     }>;
   };
+  authUtils?: { checkAuth: typeof defaultCheckAuth };
 }
 
 interface CloneOptions {
@@ -28,7 +30,15 @@ export async function clone(
   deps: CloneDependencies = { cloneService: defaultCloneService }
 ): Promise<CloneResult | void> {
   const { verbose = false, force = false } = options;
-  const { cloneService } = deps;
+  const { cloneService, authUtils = { checkAuth: defaultCheckAuth } } = deps;
+
+  const isAuthenticated = await authUtils.checkAuth();
+  if (!isAuthenticated) {
+    console.error(chalk.red('\n✖ No API key found. Set LOCALHERO_API_KEY or run `npx @localheroai/cli login` first.\n'));
+    process.exit(1);
+    return;
+  }
+
   const { findTranslationFiles } = await import('../utils/files.js');
   const config = await configService.getProjectConfig();
 

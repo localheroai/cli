@@ -10,12 +10,21 @@ describe('pull command', () => {
     applyUpdates: jest.fn()
   };
 
+  const mockAuthUtils = {
+    checkAuth: jest.fn()
+  };
+
   function createPullDeps(overrides = {}) {
     return {
       syncService: mockSyncService,
+      authUtils: mockAuthUtils,
       ...overrides
     };
   }
+
+  beforeAll(() => {
+    jest.spyOn(process, 'exit').mockImplementation(() => { });
+  });
 
   beforeEach(() => {
     global.fetch.mockReset();
@@ -23,6 +32,21 @@ describe('pull command', () => {
     global.console.error.mockReset();
     mockSyncService.checkForUpdates.mockReset();
     mockSyncService.applyUpdates.mockReset();
+    mockAuthUtils.checkAuth.mockReset();
+    mockAuthUtils.checkAuth.mockResolvedValue(true);
+    process.exit.mockClear();
+  });
+
+  it('exits with a login hint when no API key is found', async () => {
+    mockAuthUtils.checkAuth.mockResolvedValue(false);
+
+    await pull({}, createPullDeps());
+
+    expect(global.console.error).toHaveBeenCalledWith(
+      expect.stringContaining('npx @localheroai/cli login')
+    );
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(mockSyncService.checkForUpdates).not.toHaveBeenCalled();
   });
 
   it('handles case when no updates are available', async () => {

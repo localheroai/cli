@@ -5,12 +5,14 @@ describe('push command', () => {
   let mockConsole;
   let mockImportService;
   let mockPrompt;
+  let mockAuthUtils;
 
   function createPushDeps(overrides = {}) {
     return {
       console: mockConsole,
       importService: mockImportService,
       prompt: mockPrompt,
+      authUtils: mockAuthUtils,
       ...overrides
     };
   }
@@ -20,15 +22,49 @@ describe('push command', () => {
     sourceLocale: 'en'
   };
 
+  beforeAll(() => {
+    jest.spyOn(process, 'exit').mockImplementation(() => { });
+  });
+
   beforeEach(() => {
-    mockConsole = { log: jest.fn() };
+    mockConsole = { log: jest.fn(), error: jest.fn() };
     mockImportService = {
       pushTranslations: jest.fn()
     };
     mockPrompt = {
       confirm: jest.fn()
     };
+    mockAuthUtils = {
+      checkAuth: jest.fn().mockResolvedValue(true)
+    };
     jest.clearAllMocks();
+  });
+
+  describe('authentication', () => {
+    it('exits with a login hint when no API key is found', async () => {
+      mockAuthUtils.checkAuth.mockResolvedValue(false);
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      expect(mockConsole.error).toHaveBeenCalledWith(
+        expect.stringContaining('npx @localheroai/cli login')
+      );
+      expect(process.exit).toHaveBeenCalledWith(1);
+      expect(mockImportService.pushTranslations).not.toHaveBeenCalled();
+    });
+
+    it('pushes when an API key is available', async () => {
+      mockImportService.pushTranslations.mockResolvedValue({
+        status: 'completed',
+        statistics: { updated_translations: 1, created_translations: 0 }
+      });
+
+      await push(mockConfig, { yes: true }, createPushDeps());
+
+      expect(mockAuthUtils.checkAuth).toHaveBeenCalled();
+      expect(mockImportService.pushTranslations).toHaveBeenCalled();
+      expect(mockConsole.error).not.toHaveBeenCalled();
+    });
   });
 
   it('prompts for confirmation before pushing', async () => {
@@ -242,7 +278,7 @@ describe('push command', () => {
       expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('old.key.two'));
       expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('(context: menu)'));
       expect(mockPrompt.confirm).toHaveBeenCalledWith({
-        message: 'Prune these keys? This cannot be undone.',
+        message: 'Prune these keys? They are removed from the dashboard, and come back if the source string returns.',
         default: false
       });
     });

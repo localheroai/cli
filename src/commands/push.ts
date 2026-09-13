@@ -4,6 +4,7 @@ import { createPromptService, ConfirmOptions, defaultInquirerAdapter } from '../
 import { bulkDeleteKeys as defaultBulkDeleteKeys } from '../api/keys.js';
 import { createIgnoreMatcher, IgnoreSummary } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
+import { checkAuth as defaultCheckAuth } from '../utils/auth.js';
 import { ProjectConfig, PrunableKey, ImportFile } from '../types/index.js';
 
 const MAX_KEYS_TO_DISPLAY = 10;
@@ -45,7 +46,9 @@ interface PushDependencies {
   };
   console?: {
     log: (message: string) => void;
+    error?: (message: string) => void;
   };
+  authUtils?: { checkAuth: typeof defaultCheckAuth };
   bulkDeleteKeys?: (params: { projectId: string; keyIds: string[] }) => Promise<{ deleted_count: number }>;
 }
 
@@ -67,7 +70,21 @@ export async function push(
   }
 ): Promise<void> {
   const { verbose = false, yes = false, force = false, prune = false } = options;
-  const { importService, prompt, console: consoleLog = console, bulkDeleteKeys = defaultBulkDeleteKeys } = deps;
+  const {
+    importService,
+    prompt,
+    console: consoleLog = console,
+    authUtils = { checkAuth: defaultCheckAuth },
+    bulkDeleteKeys = defaultBulkDeleteKeys
+  } = deps;
+
+  const isAuthenticated = await authUtils.checkAuth();
+  if (!isAuthenticated) {
+    const logError = consoleLog.error ?? console.error;
+    logError(chalk.red('\n✖ No API key found. Set LOCALHERO_API_KEY or run `npx @localheroai/cli login` first.\n'));
+    process.exit(1);
+    return;
+  }
 
   if (prune && !force && !yes) {
     consoleLog.log(chalk.yellow('\n⚠ You\'re using --prune without --force.'));
@@ -192,7 +209,7 @@ async function handlePruning(
   if (!yes) {
     consoleLog.log('');
     const confirmed = await prompt.confirm({
-      message: 'Prune these keys? This cannot be undone.',
+      message: 'Prune these keys? They are removed from the dashboard, and come back if the source string returns.',
       default: false
     });
 
