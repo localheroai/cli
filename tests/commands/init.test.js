@@ -931,7 +931,9 @@ describe('init command', () => {
 
     expect(savedConfig.translationFiles.workflow).toBe('django');
     expect(savedConfig.translationFiles.ignore).toContain('**/sources/**');
-    expect(savedConfig.translationFiles.pattern).toBe('**/*.po');
+    // Django deletes its .pot unless --keep-pot is passed, and a stock Django app has
+    // no source-locale catalog, so the kept .pot is the only source file there is.
+    expect(savedConfig.translationFiles.pattern).toBe('**/*.{po,pot}');
 
     // Restore original stat function
     fs.promises.stat = originalStat;

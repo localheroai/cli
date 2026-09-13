@@ -165,7 +165,9 @@ const PROJECT_TYPES: ProjectTypes = {
     directIndicators: ['manage.py'],
     defaults: {
       translationPath: 'translations/',
-      filePattern: '**/*.po',
+      // Django deletes its .pot unless makemessages runs with --keep-pot, and a stock
+      // Django app has no source-locale catalog, so the kept .pot is the source file.
+      filePattern: '**/*.{po,pot}',
       ignorePaths: ['**/sources/**'],
       workflow: 'django',
       extractor: 'django',

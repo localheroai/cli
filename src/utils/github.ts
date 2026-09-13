@@ -85,14 +85,24 @@ function manageRunner(pythonInstall: string): string {
   return 'python';
 }
 
+// --keep-pot: Django builds the .pot from source on every run and then deletes it.
+// A stock Django app has no source-locale .po, so the kept .pot is the only source
+// catalog there is; without it the import has nothing to treat as source.
 function buildMakemessagesCommand(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
   const runner = manageRunner(pythonInstall);
   if (!locales?.length) {
-    return `${runner} manage.py makemessages --all`;
+    return `${runner} manage.py makemessages --keep-pot --all`;
   }
   const localeFlags = locales.map(l => `-l ${toDjangoLocaleName(l)}`).join(' ');
-  return `${runner} manage.py makemessages ${localeFlags}`;
+  return `${runner} manage.py makemessages --keep-pot ${localeFlags}`;
 }
+
+// makemessages rewrites POT-Creation-Date in the .pot and every merged .po on each
+// run, so a committed catalog would churn on every CI run with no string changes.
+// Strip it from whatever this run modified or created, wherever it lives. NUL-
+// delimited so paths with spaces or a leading dash survive the pipe; the trailing
+// -- stops sed reading such a path as an option.
+const STRIP_POT_DATE = 'git ls-files --modified --others --exclude-standard -z -- \'*.po\' \'*.pot\' | xargs -0 -r sed -i \'/^"POT-Creation-Date: /d\' --';
 
 export const PHOENIX_ELIXIR_VERSION = '1.20';
 export const PHOENIX_OTP_VERSION = '28';
@@ -138,6 +148,7 @@ ${buildPythonToolSetup(pythonInstall)}      - name: Extract messages
           sudo apt-get install -y -qq gettext
           ${pythonInstall}
           ${buildMakemessagesCommand(locales, pythonInstall)}
+          ${STRIP_POT_DATE}
 
 `;
 }

@@ -60,6 +60,39 @@ describe('files utils', () => {
     global.console = originalConsole;
   });
 
+  it('assigns a .pot the configured source locale, never a hard-coded en', async () => {
+    // Kundo's shape: Swedish source, English is a target. A .pot has no locale in
+    // its path, so the only correct answer is whatever the config says.
+    mockGlob.mockResolvedValue([
+      'translations/django.pot',
+      'translations/en/LC_MESSAGES/django.po',
+      'translations/pl/LC_MESSAGES/django.po'
+    ]);
+    mockReadFile.mockResolvedValue(`msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hej"
+msgstr ""
+`);
+
+    const config = {
+      sourceLocale: 'sv',
+      outputLocales: ['en', 'pl'],
+      translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}' }
+    };
+
+    const result = await findTranslationFiles(config);
+
+    const pot = result.find(f => f.path.endsWith('.pot'));
+    expect(pot).toBeDefined();
+    expect(pot.format).toBe('pot');
+    expect(pot.locale).toBe('sv');
+
+    const en = result.find(f => f.path.includes('/en/'));
+    expect(en.locale).toBe('en');
+  });
+
   it('processes various file formats correctly', async () => {
     mockGlob.mockResolvedValue([
       'config/locales/en.yml',
