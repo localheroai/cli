@@ -8,17 +8,41 @@ describe('clone command', () => {
     cloneProject: jest.fn()
   };
 
+  const mockAuthUtils = {
+    checkAuth: jest.fn()
+  };
+
   function createCloneDeps(overrides = {}) {
     return {
       cloneService: mockCloneService,
+      authUtils: mockAuthUtils,
       ...overrides
     };
   }
+
+  beforeAll(() => {
+    jest.spyOn(process, 'exit').mockImplementation(() => { });
+  });
 
   beforeEach(() => {
     global.console.log.mockReset();
     global.console.error.mockReset();
     mockCloneService.cloneProject.mockReset();
+    mockAuthUtils.checkAuth.mockReset();
+    mockAuthUtils.checkAuth.mockResolvedValue(true);
+    process.exit.mockClear();
+  });
+
+  it('exits with a login hint when no API key is found', async () => {
+    mockAuthUtils.checkAuth.mockResolvedValue(false);
+
+    await clone({}, createCloneDeps());
+
+    expect(global.console.error).toHaveBeenCalledWith(
+      expect.stringContaining('npx @localheroai/cli login')
+    );
+    expect(process.exit).toHaveBeenCalledWith(1);
+    expect(mockCloneService.cloneProject).not.toHaveBeenCalled();
   });
 
   it('clones project with default settings', async () => {

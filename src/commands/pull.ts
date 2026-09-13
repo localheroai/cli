@@ -2,6 +2,7 @@ import { syncService as defaultSyncService } from '../utils/sync-service.js';
 import { configService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { isGitAvailable, getChangedKeysForProject } from '../utils/git-changes.js';
+import { checkAuth as defaultCheckAuth } from '../utils/auth.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from '../utils/po-utils.js';
 import chalk from 'chalk';
 import type { Updates } from '../utils/sync-service.js';
@@ -37,6 +38,7 @@ interface PullDependencies {
   configUtils?: {
     getValidProjectConfig: () => Promise<ProjectConfig>;
   };
+  authUtils?: { checkAuth: typeof defaultCheckAuth };
   fileUtils?: {
     findTranslationFiles: (
       config: ProjectConfig,
@@ -102,8 +104,16 @@ export async function pull(
     syncService,
     gitUtils = { isGitAvailable, getChangedKeysForProject },
     configUtils = configService,
+    authUtils = { checkAuth: defaultCheckAuth },
     fileUtils = { findTranslationFiles }
   } = deps;
+
+  const isAuthenticated = await authUtils.checkAuth();
+  if (!isAuthenticated) {
+    console.error(chalk.red('\n✖ No API key found. Set LOCALHERO_API_KEY or run `npx @localheroai/cli login` first.\n'));
+    process.exit(1);
+    return;
+  }
 
   // Validate git availability for --changed-only
   if (changedOnly && !gitUtils.isGitAvailable()) {
