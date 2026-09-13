@@ -242,7 +242,7 @@ describe('push command', () => {
       expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('old.key.two'));
       expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('(context: menu)'));
       expect(mockPrompt.confirm).toHaveBeenCalledWith({
-        message: 'Prune these keys? This cannot be undone.',
+        message: 'Prune these keys? They are removed from the dashboard, and come back if the source string returns.',
         default: false
       });
     });
