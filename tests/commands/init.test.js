@@ -926,6 +926,66 @@ describe('init command', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('refuses to run the extraction when a configured locale carries shell metacharacters', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing',
+      sourceLocale: 'sv',
+      outputLocales: ['en', 'pl; touch /tmp/pwned'],
+      translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}', workflow: 'django' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(true)
+    };
+    promptService.confirm.mockResolvedValue(true);
+    importUtils.importTranslations.mockResolvedValue(missingSource);
+    const execSync = jest.fn();
+
+    await init(createInitDeps({ githubUtils, execUtils: { execSync } }));
+
+    const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
+    expect(promptService.confirm).toHaveBeenCalledTimes(1);
+    expect(execSync).not.toHaveBeenCalled();
+    expect(allConsoleOutput).toContain('will not be passed to a shell');
+    expect(allConsoleOutput).toContain('makemessages --keep-pot');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('uses the detected runner on an existing config even when a workflow already exists', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing',
+      sourceLocale: 'sv',
+      outputLocales: ['en', 'pl'],
+      translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}', workflow: 'django' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(true)
+    };
+    promptService.confirm.mockResolvedValue(true);
+    importUtils.importTranslations
+      .mockResolvedValueOnce(missingSource)
+      .mockResolvedValueOnce(imported);
+    const execSync = jest.fn();
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) =>
+      path === 'uv.lock' ? Promise.resolve({ isFile: () => true }) : originalStat(path)
+    );
+    try {
+      await init(createInitDeps({ githubUtils, execUtils: { execSync } }));
+    } finally {
+      fs.promises.stat = originalStat;
+    }
+
+    expect(execSync.mock.calls[0][0]).toBe('uv run python manage.py makemessages --keep-pot -l en -l pl');
+  });
+
   it('configures Django workflow for Django projects', async () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
@@ -1003,6 +1063,149 @@ describe('init command', () => {
 
     const allConsoleOutput = mockConsole.log.mock.calls.map(call => call[0]).join('\n');
     expect(allConsoleOutput).toContain('makemessages --keep-pot -l en -l pl');
+    expect(process.exitCode).toBe(1);
+  });
+
+  async function runGettextInit({
+    confirms,
+    importResults,
+    execSync = jest.fn(),
+    options,
+    statFiles = ['manage.py'],
+    translationPath = 'translations/',
+    ignore = '**/sources/**'
+  }) {
+    configUtils.getProjectConfig.mockResolvedValue(null);
+    authUtils.checkAuth.mockResolvedValue(true);
+    projectApi.listProjects.mockResolvedValue([]);
+    projectApi.createProject.mockResolvedValue({ id: 'proj_1', name: 'project' });
+    promptService.selectProject.mockResolvedValue({ choice: 'new' });
+    promptService.input
+      .mockResolvedValueOnce('sv')
+      .mockResolvedValueOnce('en,pl')
+      .mockResolvedValueOnce('project')
+      .mockResolvedValueOnce(translationPath)
+      .mockResolvedValueOnce(ignore);
+    confirms.forEach(answer => promptService.confirm.mockResolvedValueOnce(answer));
+    importResults.forEach(result => importUtils.importTranslations.mockResolvedValueOnce(result));
+
+    const fs = await import('fs');
+    const originalStat = fs.promises.stat;
+    fs.promises.stat = jest.fn().mockImplementation((path) =>
+      statFiles.includes(path) ? Promise.resolve({ isFile: () => true }) : originalStat(path)
+    );
+    try {
+      await init(createInitDeps({ execUtils: { execSync }, ...(options ? { options } : {}) }));
+    } finally {
+      fs.promises.stat = originalStat;
+    }
+    return { execSync, output: mockConsole.log.mock.calls.map(call => call[0]).join('\n') };
+  }
+
+  const missingSource = { status: 'failed', errorCode: 'missing_source', error: 'No source language files found for locale sv.' };
+  const imported = { status: 'completed', statistics: { total_keys: 1, languages: [] } };
+
+  it('offers to run makemessages when a Django project has no source catalog, then retries the import', async () => {
+    const { execSync, output } = await runGettextInit({
+      confirms: [false, true, true],
+      importResults: [missingSource, imported]
+    });
+
+    expect(promptService.confirm).toHaveBeenLastCalledWith(
+      expect.objectContaining({ message: expect.stringContaining('makemessages --keep-pot'), default: false })
+    );
+    expect(execSync).toHaveBeenCalledWith(
+      'python manage.py makemessages --keep-pot -l en -l pl',
+      { cwd: process.cwd(), stdio: 'inherit' }
+    );
+    expect(importUtils.importTranslations).toHaveBeenCalledTimes(2);
+    expect(output).toContain('Successfully imported');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('does not attempt a third import when the retry also fails', async () => {
+    const { execSync } = await runGettextInit({
+      confirms: [false, true, true],
+      importResults: [missingSource, missingSource]
+    });
+
+    expect(execSync).toHaveBeenCalledTimes(1);
+    expect(importUtils.importTranslations).toHaveBeenCalledTimes(2);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('treats a Django project with no catalogs at all the same way', async () => {
+    const { execSync } = await runGettextInit({
+      confirms: [false, true, true],
+      importResults: [{ status: 'no_files' }, imported]
+    });
+
+    expect(execSync).toHaveBeenCalledTimes(1);
+    expect(importUtils.importTranslations).toHaveBeenCalledTimes(2);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('runs the extraction through the detected Python runner', async () => {
+    const { execSync } = await runGettextInit({
+      confirms: [false, true, true],
+      importResults: [missingSource, imported],
+      statFiles: ['manage.py', 'uv.lock']
+    });
+
+    expect(execSync.mock.calls[0][0]).toBe('uv run python manage.py makemessages --keep-pot -l en -l pl');
+  });
+
+  it('prints the command and fails when the extraction is declined', async () => {
+    const { execSync, output } = await runGettextInit({
+      confirms: [false, true, false],
+      importResults: [missingSource]
+    });
+
+    expect(execSync).not.toHaveBeenCalled();
+    expect(importUtils.importTranslations).toHaveBeenCalledTimes(1);
+    expect(output).toContain('makemessages --keep-pot -l en -l pl');
+    expect(output).not.toContain('Setup complete');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('never runs the extraction in --yes mode, and prints the command instead', async () => {
+    const { execSync, output } = await runGettextInit({
+      confirms: [],
+      importResults: [missingSource],
+      options: { yes: true, projectName: 'project', sourceLocale: 'sv', targetLocales: 'en,pl', path: 'translations/' }
+    });
+
+    expect(promptService.confirm).not.toHaveBeenCalled();
+    expect(execSync).not.toHaveBeenCalled();
+    expect(output).toContain('makemessages --keep-pot -l en -l pl');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('falls back to the printed command when makemessages fails', async () => {
+    const execSync = jest.fn(() => { throw new Error('No module named django'); });
+    const { output } = await runGettextInit({
+      confirms: [false, true, true],
+      importResults: [missingSource],
+      execSync
+    });
+
+    expect(importUtils.importTranslations).toHaveBeenCalledTimes(1);
+    expect(output).toContain('No module named django');
+    expect(output).toContain('makemessages --keep-pot -l en -l pl');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('does not offer extraction to a non-Django project', async () => {
+    const { execSync } = await runGettextInit({
+      confirms: [false, true],
+      importResults: [missingSource],
+      statFiles: ['Gemfile', 'config/application.rb'],
+      translationPath: 'config/locales/',
+      ignore: ''
+    });
+
+    expect(promptService.confirm).toHaveBeenCalledTimes(2);
+    expect(execSync).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
   });
 
