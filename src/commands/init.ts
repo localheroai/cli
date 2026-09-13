@@ -632,7 +632,7 @@ async function offerDjangoExtraction(
 
   const command = buildMakemessagesCommand(config.outputLocales, pythonInstall);
   const run = await promptService.confirm({
-    message: `No Django source catalog found. Run \`${command}\` now? This runs your Django project and may update existing .po files.`,
+    message: `No source catalog found. Django writes your source strings to a .pot and then deletes it, and that file is how Localhero knows what to translate. Run \`${command}\` now to keep it? This runs your Django project and may update existing .po files.`,
     default: false
   });
   if (!run) return false;
