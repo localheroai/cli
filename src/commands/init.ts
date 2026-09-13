@@ -602,9 +602,9 @@ async function handleImportProcess(
 }
 
 // Locale codes reach a shell via -l flags. On the existing-config path they come from
-// a committed localhero.json, so anything beyond letters, - and _ is refused rather
-// than executed.
-const SHELL_SAFE_LOCALE = /^[a-zA-Z]+(?:[-_][a-zA-Z]+)*$/;
+// a committed localhero.json, so anything beyond letters, digits, - and _ is refused
+// rather than executed. Digits cover BCP-47 regions like es-419.
+const SHELL_SAFE_LOCALE = /^[a-zA-Z0-9]+(?:[-_][a-zA-Z0-9]+)*$/;
 
 // Django keeps source strings in a .pot that makemessages deletes, so a stock app has
 // no source file until the extraction runs with --keep-pot.

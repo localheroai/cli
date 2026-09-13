@@ -953,6 +953,30 @@ describe('init command', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('lets a numeric BCP-47 region through the shell guard', async () => {
+    configUtils.getProjectConfig.mockResolvedValue({
+      schemaVersion: '1.0',
+      projectId: 'proj_existing',
+      sourceLocale: 'en',
+      outputLocales: ['es-419', 'pl'],
+      translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}', workflow: 'django' }
+    });
+    authUtils.checkAuth.mockResolvedValue(true);
+    const githubUtils = {
+      createGitHubActionFile: jest.fn().mockResolvedValue('.github/workflows/localhero-translate.yml'),
+      workflowExists: jest.fn().mockReturnValue(true)
+    };
+    promptService.confirm.mockResolvedValue(true);
+    importUtils.importTranslations
+      .mockResolvedValueOnce(missingSource)
+      .mockResolvedValueOnce(imported);
+    const execSync = jest.fn();
+
+    await init(createInitDeps({ githubUtils, execUtils: { execSync } }));
+
+    expect(execSync.mock.calls[0][0]).toBe('python manage.py makemessages --keep-pot -l es_419 -l pl');
+  });
+
   it('uses the detected runner on an existing config even when a workflow already exists', async () => {
     configUtils.getProjectConfig.mockResolvedValue({
       schemaVersion: '1.0',
