@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { execSync } from 'child_process';
 import path from 'path';
 import chalk from 'chalk';
 import { createPromptService, ProjectSelectionResult, ProjectSetup, SelectOptions, InputOptions, ConfirmOptions } from '../utils/prompt-service.js';
@@ -7,8 +8,8 @@ import { configService } from '../utils/config.js';
 import { checkAuth } from '../utils/auth.js';
 import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
-import { createGitHubActionFile, workflowExists, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
-import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, DirectoryContents } from '../utils/files.js';
+import { createGitHubActionFile, workflowExists, buildMakemessagesCommand, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
+import { directoryExists, findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, isValidLocale, stripPotCreationDate, DirectoryContents } from '../utils/files.js';
 import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
@@ -133,6 +134,7 @@ interface InitDependencies {
     workflowExists: typeof workflowExists;
   };
   login?: typeof login;
+  execUtils?: { execSync: (command: string, options?: any) => Buffer | string };
   options?: InitOptions;
 }
 
@@ -165,7 +167,9 @@ const PROJECT_TYPES: ProjectTypes = {
     directIndicators: ['manage.py'],
     defaults: {
       translationPath: 'translations/',
-      filePattern: '**/*.po',
+      // Django deletes its .pot unless makemessages runs with --keep-pot, and a stock
+      // Django app has no source-locale catalog, so the kept .pot is the source file.
+      filePattern: '**/*.{po,pot}',
       ignorePaths: ['**/sources/**'],
       workflow: 'django',
       extractor: 'django',
@@ -496,21 +500,42 @@ async function validateExistingConfig(config: BaseProjectConfig): Promise<Valida
   };
 }
 
+interface ExtractionDeps {
+  promptService: IPromptService;
+  nonInteractive: boolean;
+  pythonInstall?: string;
+  execUtils: { execSync: (command: string, options?: any) => Buffer | string };
+}
+
 async function handleImportProcess(
   config: BaseProjectConfig,
   basePath: string,
   importUtils: typeof importService,
   console: Console,
-  configUtils: typeof configService
+  configUtils: typeof configService,
+  extraction?: ExtractionDeps
 ): Promise<ImportProcessResult> {
   const spinner = new Spinner('Importing translations...');
   spinner.start();
 
   try {
-    const importResult = await importUtils.importTranslations(config, basePath) as TypedImportResult;
+    let importResult = await importUtils.importTranslations(config, basePath) as TypedImportResult;
     spinner.stop();
 
+    if (extraction && needsDjangoExtraction(config, importResult)) {
+      const extracted = await offerDjangoExtraction(config, basePath, extraction, console);
+      if (extracted) {
+        spinner.start();
+        importResult = await importUtils.importTranslations(config, basePath) as TypedImportResult;
+        spinner.stop();
+      }
+    }
+
     if (importResult.status === 'no_files') {
+      if (needsDjangoExtraction(config, importResult)) {
+        printDjangoExtractionRemedy(config, extraction?.pythonInstall, console);
+        return { success: false, hasWarnings: false };
+      }
       console.log(chalk.yellow('No translation files found.'));
       return { success: true, hasWarnings: true };
     }
@@ -560,6 +585,9 @@ async function handleImportProcess(
     if (importResult.status === 'failed' || importResult.status === 'error') {
       console.log(chalk.red('✗ Failed to import translations'));
       console.log(chalk.red(`Error: ${importResult.error || 'Import failed'}`));
+      if (needsDjangoExtraction(config, importResult)) {
+        printDjangoExtractionRemedy(config, extraction?.pythonInstall, console);
+      }
       return { success: false, hasWarnings: false };
     }
 
@@ -570,6 +598,53 @@ async function handleImportProcess(
     console.log(chalk.red('✗ Failed to import translations'));
     console.log(chalk.red(`Error: ${errorMessage}`));
     return { success: false, hasWarnings: false };
+  }
+}
+
+// Locale codes reach a shell via -l flags. On the existing-config path they come from
+// a committed localhero.json, so anything beyond letters, digits, - and _ is refused
+// rather than executed. Digits cover BCP-47 regions like es-419.
+const SHELL_SAFE_LOCALE = /^[a-zA-Z0-9]+(?:[-_][a-zA-Z0-9]+)*$/;
+
+// Django keeps source strings in a .pot that makemessages deletes, so a stock app has
+// no source file until the extraction runs with --keep-pot.
+function needsDjangoExtraction(config: BaseProjectConfig, result: TypedImportResult): boolean {
+  return config.translationFiles?.workflow === 'django'
+    && (result.status === 'no_files' || result.errorCode === 'missing_source');
+}
+
+function printDjangoExtractionRemedy(config: BaseProjectConfig, pythonInstall: string | undefined, console: Console): void {
+  console.log(chalk.yellow('Django writes the source strings to a .pot and deletes it. Keep it and re-run init:'));
+  console.log(chalk.yellow(`  ${buildMakemessagesCommand(config.outputLocales, pythonInstall)}`));
+}
+
+async function offerDjangoExtraction(
+  config: BaseProjectConfig,
+  basePath: string,
+  { promptService, nonInteractive, pythonInstall, execUtils }: ExtractionDeps,
+  console: Console
+): Promise<boolean> {
+  if (nonInteractive) return false;
+  if (!config.outputLocales.every(locale => SHELL_SAFE_LOCALE.test(locale))) {
+    console.log(chalk.yellow('A locale code contains characters that will not be passed to a shell. Run the extraction yourself:'));
+    return false;
+  }
+
+  const command = buildMakemessagesCommand(config.outputLocales, pythonInstall);
+  const run = await promptService.confirm({
+    message: `No source catalog found. Django writes your source strings to a .pot and then deletes it, and that file is how Localhero knows what to translate. Run \`${command}\` now to keep it? This runs your Django project and may update existing .po files.`,
+    default: false
+  });
+  if (!run) return false;
+
+  try {
+    execUtils.execSync(command, { cwd: basePath, stdio: 'inherit' });
+    await stripPotCreationDate(config.translationFiles?.paths || []);
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.log(chalk.red(`✗ makemessages failed: ${message}`));
+    return false;
   }
 }
 
@@ -785,9 +860,9 @@ async function handleExistingConfiguration(
   existingConfig: BaseProjectConfig,
   options: InitOptions,
   nonInteractive: boolean,
-  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login'>>
+  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login' | 'execUtils'>>
 ): Promise<void> {
-  const { console, basePath, promptService, authUtils, projectApi, importUtils, configUtils, githubUtils } = deps;
+  const { console, basePath, promptService, authUtils, projectApi, importUtils, configUtils, githubUtils, execUtils } = deps;
 
   let workflowCreated = false;
   console.log(chalk.green('✓ Configuration found! Let\'s verify and set up your API access.\n'));
@@ -827,6 +902,19 @@ async function handleExistingConfiguration(
     }
   }
 
+  // The extractor is derived from the project type rather than persisted, so it has
+  // to be re-detected. Detection is filesystem-relative and can miss (init run from a
+  // subdirectory, manage.py not at the root), so a persisted django workflow is
+  // trusted as evidence when it does.
+  const detectedDefaults = githubUtils.workflowExists(basePath)
+    ? undefined
+    : (await detectProjectType()).defaults;
+  const workflowDefaults = await resolveWorkflowDefaults(detectedDefaults, existingConfig);
+
+  const isDjango = existingConfig.translationFiles?.workflow === 'django' || workflowDefaults?.extractor === 'django';
+  const existingPythonInstall = isDjango ? await detectPythonInstall() : undefined;
+
+  let hasErrors = false;
   if (existingConfig.lastSyncedAt) {
     console.log(chalk.green('✓ Translation files previously imported'));
   } else {
@@ -841,22 +929,13 @@ async function handleExistingConfiguration(
     }
 
     if (shouldImport) {
-      await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils);
+      const importResult = await handleImportProcess(existingConfig, basePath, importUtils, console, configUtils, {
+        promptService, nonInteractive, pythonInstall: existingPythonInstall, execUtils
+      });
+      hasErrors = !importResult.success;
     }
   }
 
-  // The extractor is derived from the project type rather than persisted, so it has
-  // to be re-detected. Detection is filesystem-relative and can miss (init run from a
-  // subdirectory, manage.py not at the root), so a persisted django workflow is
-  // trusted as evidence when it does.
-  const detectedDefaults = githubUtils.workflowExists(basePath)
-    ? undefined
-    : (await detectProjectType()).defaults;
-  const workflowDefaults = await resolveWorkflowDefaults(detectedDefaults, existingConfig);
-
-  const existingPythonInstall = workflowDefaults?.extractor === 'django'
-    ? await detectPythonInstall()
-    : undefined;
   const workflowResult = await handleGitHubWorkflowSetup({
     basePath,
     translationPaths: existingConfig.translationFiles?.paths || [''],
@@ -878,15 +957,16 @@ async function handleExistingConfiguration(
     printExtractorNotice(workflowDefaults?.extractor, console, existingPythonInstall);
   }
 
-  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), false, console);
+  displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), hasErrors, console);
+  if (hasErrors) process.exitCode = 1;
 }
 
 async function handleNewProjectSetup(
   options: InitOptions,
   nonInteractive: boolean,
-  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login'>>
+  deps: Required<Pick<InitDependencies, 'console' | 'basePath' | 'promptService' | 'configUtils' | 'authUtils' | 'importUtils' | 'projectApi' | 'githubUtils' | 'login' | 'execUtils'>>
 ): Promise<void> {
-  const { console, basePath, promptService, projectApi, importUtils, configUtils, githubUtils } = deps;
+  const { console, basePath, promptService, projectApi, importUtils, configUtils, githubUtils, execUtils } = deps;
 
   await ensureAuthenticated(nonInteractive, options, deps);
 
@@ -957,11 +1037,14 @@ async function handleNewProjectSetup(
     console.log('\nSearching for translation files in:');
     console.log(`${config.translationFiles.paths.join(', ')}`);
 
-    const importResult = await handleImportProcess(config, basePath, importUtils, console, configUtils);
+    const importResult = await handleImportProcess(config, basePath, importUtils, console, configUtils, {
+      promptService, nonInteractive, pythonInstall, execUtils
+    });
     hasErrors = !importResult.success;
   }
 
   displayFinalInstructions(workflowCreated, githubUtils.workflowExists(basePath), hasErrors, console);
+  if (hasErrors) process.exitCode = 1;
 }
 
 function normalizeTrailingSlash(p: string): string {
@@ -1276,6 +1359,7 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     projectApi = { createProject, listProjects },
     githubUtils = { createGitHubActionFile, workflowExists },
     login: loginFn = login,
+    execUtils = { execSync },
     options = {}
   } = deps;
 
@@ -1290,7 +1374,8 @@ export async function init(deps: InitDependencies = {}): Promise<void> {
     importUtils,
     projectApi,
     githubUtils,
-    login: loginFn
+    login: loginFn,
+    execUtils
   };
 
   const existingConfig = await configUtils.getProjectConfig(basePath);

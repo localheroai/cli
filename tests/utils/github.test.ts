@@ -147,7 +147,12 @@ describe('githubService', () => {
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
       expect(fileContent).toContain('uses: actions/setup-python@v5');
       expect(fileContent).toContain('sudo apt-get install -y -qq gettext');
-      expect(fileContent).toContain('python manage.py makemessages -l sv -l de');
+      expect(fileContent).toContain('python manage.py makemessages --keep-pot -l sv -l de');
+      // NUL-delimited so catalog paths with spaces, quotes or a leading dash survive
+      // the pipe; the trailing -- stops sed reading a leading-dash path as an option.
+      expect(fileContent).toContain(`git ls-files --modified --others --exclude-standard -z -- '*.po' '*.pot'`);
+      expect(fileContent).toContain(`xargs -0 -r sed -i '/^"POT-Creation-Date: /d' --`);
+      expect(fileContent.indexOf('makemessages')).toBeLessThan(fileContent.indexOf('POT-Creation-Date'));
       expect(fileContent).not.toContain('--no-obsolete');
       expect(fileContent.indexOf('makemessages')).toBeLessThan(
         fileContent.indexOf('uses: localheroai/localhero-action@v1')
@@ -161,14 +166,14 @@ describe('githubService', () => {
       });
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
-      expect(fileContent).toContain('makemessages -l pt_BR -l de_AT -l en');
+      expect(fileContent).toContain('makemessages --keep-pot -l pt_BR -l de_AT -l en');
     });
 
     it('falls back to --all when no locales are known', async () => {
       await createGitHubActionFile('/project', ['locale/**'], undefined, { extractor: 'django' });
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
-      expect(fileContent).toContain('python manage.py makemessages --all');
+      expect(fileContent).toContain('python manage.py makemessages --keep-pot --all');
     });
 
     it('skips extraction on sync and dispatch runs', async () => {
@@ -190,7 +195,7 @@ describe('githubService', () => {
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
       expect(fileContent).toContain('uv sync --frozen');
-      expect(fileContent).toContain('uv run python manage.py makemessages -l sv');
+      expect(fileContent).toContain('uv run python manage.py makemessages --keep-pot -l sv');
       expect(fileContent).not.toContain('pip install');
     });
 
@@ -224,8 +229,16 @@ describe('githubService', () => {
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
       expect(fileContent).toContain('pip install -r requirements.txt');
-      expect(fileContent).toContain('python manage.py makemessages -l sv');
+      expect(fileContent).toContain('python manage.py makemessages --keep-pot -l sv');
       expect(fileContent).not.toContain('uv run');
+    });
+
+    it('keeps the django-only POT handling out of the phoenix extract step', async () => {
+      await createGitHubActionFile('/project', ['priv/gettext/**'], undefined, { extractor: 'phoenix' });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      expect(fileContent).not.toContain('--keep-pot');
+      expect(fileContent).not.toContain('POT-Creation-Date');
     });
 
     it('adds a gettext extract step for phoenix projects', async () => {

@@ -25,6 +25,7 @@ export type FileFormat = 'json' | 'yaml' | 'po' | 'pot' | null;
 export interface ImportResult {
   status: string;
   error?: string;
+  errorCode?: string;
   statistics?: {
     created_translations: number;
     updated_translations: number;
@@ -355,7 +356,8 @@ export const importService = {
     if (!sourceFiles.length) {
       return {
         status: 'failed',
-        error: 'No source language files found. Source language files must be included in the first import.',
+        errorCode: 'missing_source',
+        error: `No source language files found for locale ${config.sourceLocale}. Source language files must be included in the first import.`,
         files: importedFiles
       };
     }

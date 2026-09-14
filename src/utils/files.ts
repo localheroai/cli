@@ -565,6 +565,32 @@ export async function findTranslationFiles(
   };
 }
 
+// makemessages rewrites POT-Creation-Date on every run, so a committed catalog would
+// churn with no string changes. The generated CI workflow strips it too; doing it here
+// keeps the first Action commit from deleting a line out of every file.
+export async function stripPotCreationDate(paths: string[], fsModule = fs): Promise<void> {
+  for (const dir of paths) {
+    let matches: string[] = [];
+    try {
+      matches = await glob(`${dir.replace(/\/$/, '')}/**/*.{po,pot}`);
+    } catch {
+      continue;
+    }
+
+    for (const file of matches) {
+      try {
+        const contents = await fsModule.readFile(file, 'utf8') as unknown as string;
+        const stripped = contents.split('\n').filter(line => !line.startsWith('"POT-Creation-Date: ')).join('\n');
+        if (stripped !== contents) {
+          await fsModule.writeFile(file, stripped, 'utf8');
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+}
+
 /**
  * Check if a directory exists
  */

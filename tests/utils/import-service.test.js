@@ -254,6 +254,67 @@ describe('importService', () => {
       expect(result.error).toMatch(/No source language files found/);
     });
 
+    it('reports a missing source with its locale and a stable error code', async () => {
+      const djangoConfig = {
+        projectId: 'test-project',
+        sourceLocale: 'sv',
+        outputLocales: ['en', 'pl'],
+        translationFiles: { paths: ['translations/'], workflow: 'django' }
+      };
+      mockGlob.mockResolvedValue([
+        path.join(TEST_BASE_PATH, 'translations/en.json'),
+        path.join(TEST_BASE_PATH, 'translations/pl.json')
+      ]);
+
+      const result = await importService.importTranslations(djangoConfig, TEST_BASE_PATH);
+
+      expect(result.status).toBe('failed');
+      expect(result.errorCode).toBe('missing_source');
+      expect(result.error).toContain('for locale sv');
+    });
+
+    it('sends both a .pot and a source-locale .po when they coexist, leaving precedence to the backend', async () => {
+      const config = {
+        projectId: 'test-project',
+        sourceLocale: 'sv',
+        outputLocales: ['pl'],
+        translationFiles: { paths: ['translations/'], pattern: '**/*.{po,pot}', workflow: 'django' }
+      };
+      const po = (msgstr) => `msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\nmsgid "Hej"\nmsgstr "${msgstr}"\n`;
+      const discovered = (rel, locale, format) => ({
+        path: path.join(TEST_BASE_PATH, rel), locale, format, namespace: '', hasLanguageWrapper: false
+      });
+
+      const filesModule = await import('../../src/utils/files.js');
+      filesModule.findTranslationFiles.mockResolvedValueOnce([
+        discovered('translations/django.pot', 'sv', 'pot'),
+        discovered('translations/sv/LC_MESSAGES/django.po', 'sv', 'po'),
+        discovered('translations/pl/LC_MESSAGES/django.po', 'pl', 'po')
+      ]);
+      mockFs.promises.readFile.mockImplementation((filePath) => {
+        if (filePath.endsWith('pl/LC_MESSAGES/django.po')) return Promise.resolve(po('Cześć'));
+        return Promise.resolve(po(''));
+      });
+      mockImportsApi.createImport.mockResolvedValue({
+        import: { status: 'completed', id: 'import-1', statistics: {}, warnings: [], translations_url: '' }
+      });
+
+      const result = await importService.importTranslations(config, TEST_BASE_PATH);
+
+      expect(result.status).toBe('completed');
+      expect(result.files.source.map(f => f.path).sort()).toEqual([
+        'translations/django.pot',
+        'translations/sv/LC_MESSAGES/django.po'
+      ]);
+      expect(result.files.source.every(f => f.language === 'sv')).toBe(true);
+
+      const sent = mockImportsApi.createImport.mock.calls[0][0].translations;
+      expect(sent).toEqual(expect.arrayContaining([
+        expect.objectContaining({ filename: 'translations/django.pot', language: 'sv', format: 'po' }),
+        expect.objectContaining({ filename: 'translations/sv/LC_MESSAGES/django.po', language: 'sv', format: 'po' })
+      ]));
+    });
+
     it('handles empty file list', async () => {
       mockGlob.mockResolvedValue([]);
 
