@@ -87,6 +87,15 @@ function commentsFromMetadata(metadata: TranslationWithMetadata['metadata']): Po
   return Object.keys(comments).length > 0 ? comments : undefined;
 }
 
+function withoutFuzzy(comments: PoEntry['comments']): PoEntry['comments'] {
+  if (!comments?.flag) return comments;
+
+  const { flag, ...rest } = comments;
+  const kept = flag.split(',').map(item => item.trim()).filter(item => item && item !== 'fuzzy');
+  const next = kept.length > 0 ? { ...rest, flag: kept.join(', ') } : rest;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 function referencesByKey(
   metadataByKey: Map<string, TranslationWithMetadata['metadata']>
 ): Record<string, string[]> {
@@ -234,6 +243,13 @@ export async function updatePoFile(
         }
         entry.comments ||= commentsFromMetadata(metadata);
         entriesByKey.set(baseKey, entry);
+      }
+
+      // After all forms are in, so order cannot matter.
+      for (const entry of entriesByKey.values()) {
+        if (entry.msgstr.some(form => form !== '')) {
+          entry.comments = withoutFuzzy(entry.comments);
+        }
       }
 
       const entries = Array.from(entriesByKey.values());
