@@ -129,7 +129,7 @@ export function normalizeReferences(reference: string | string[]): string[] {
 
 // gettext allows flags on one `#,` line or spread across several, and
 // gettext-parser joins the latter with a newline rather than a comma.
-function parsePoFlags(flag: string | undefined): string[] | undefined {
+export function parsePoFlags(flag: string | undefined): string[] | undefined {
   if (!flag) return undefined;
   const flags = flag.split(/[,\n]\s*/).map(f => f.trim()).filter(Boolean);
   return flags.length > 0 ? flags : undefined;
@@ -217,6 +217,19 @@ export function poEntriesToApiFormat(
     const poFlags = parsePoFlags(entry.comments?.flag);
     const isSourceLanguage = options?.sourceLanguage && options?.currentLanguage &&
       options.sourceLanguage === options.currentLanguage;
+
+    // A fuzzy msgstr is gettext's guess from a different msgid, and msgfmt leaves
+    // it out of the compiled catalog. Uploading it would record a translation the
+    // app never shows, so the entry is left out and reported missing instead.
+    // Only when both locales are known and differ: callers that omit them (change
+    // detection, flag inspection) still need every entry.
+    const isKnownTargetLanguage = Boolean(
+      options?.sourceLanguage && options?.currentLanguage &&
+      options.sourceLanguage !== options.currentLanguage
+    );
+    if (isKnownTargetLanguage && poFlags?.includes('fuzzy')) {
+      return;
+    }
 
     if (entry.msgid_plural) {
       for (let i = 0; i < nplurals; i++) {
@@ -361,9 +374,19 @@ export function findMissingPoTranslations(
 
     const hasMetadata = Object.keys(metadata).length > 0;
 
+    // gettext marks an entry `fuzzy` when msgmerge guessed a translation from a
+    // similar msgid — usually after a source string was reworded. msgfmt excludes
+    // fuzzy entries from the compiled .mo, so the app renders the SOURCE string:
+    // the key looks translated in the file while being untranslated to the user.
+    // Treat it as missing so the guess is replaced, matching how Weblate,
+    // Transifex, Lokalise and Phrase all import fuzzy as needs-review, not done.
+    // Read from the TARGET entry: `poFlags` above belongs to the source entry.
+    const targetIsFuzzy = parsePoFlags(targetEntry?.comments?.flag)?.includes('fuzzy') ?? false;
+
     if (entry.msgid_plural) {
       for (let i = 0; i < targetNplurals; i++) {
-        const isEmpty = !targetEntry ||
+        const isEmpty = targetIsFuzzy ||
+          !targetEntry ||
           !targetEntry.msgstr ||
           !targetEntry.msgstr[i] ||
           targetEntry.msgstr[i].trim() === '';
@@ -384,7 +407,8 @@ export function findMissingPoTranslations(
       }
     } else {
       // Handle regular (non-plural) entries
-      const isEmpty = !targetEntry ||
+      const isEmpty = targetIsFuzzy ||
+        !targetEntry ||
         !targetEntry.msgstr ||
         !targetEntry.msgstr[0] ||
         targetEntry.msgstr[0].trim() === '';
