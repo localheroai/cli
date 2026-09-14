@@ -127,9 +127,11 @@ export function normalizeReferences(reference: string | string[]): string[] {
   return normalized;
 }
 
+// gettext allows flags on one `#,` line or spread across several, and
+// gettext-parser joins the latter with a newline rather than a comma.
 function parsePoFlags(flag: string | undefined): string[] | undefined {
   if (!flag) return undefined;
-  const flags = flag.split(/,\s*/).map(f => f.trim()).filter(Boolean);
+  const flags = flag.split(/[,\n]\s*/).map(f => f.trim()).filter(Boolean);
   return flags.length > 0 ? flags : undefined;
 }
 
