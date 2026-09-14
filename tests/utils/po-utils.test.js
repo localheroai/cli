@@ -453,6 +453,32 @@ msgstr[1] "%(count)d items"
       expect(result['Copyright notice'].metadata.source_references).toEqual(['src/components/Footer.tsx:9']);
     });
 
+    // gettext allows flags on separate `#,` lines and gettext-parser joins them
+    // with a newline. Splitting on commas alone produced one bogus flag,
+    // "fuzzy\npython-format". Parsed from real PO text rather than a hand-built
+    // entry, so this guards the gettext-parser integration and not just the split.
+    it('should split flags spread across several #, lines', () => {
+      const content = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+#, python-format
+msgid "Welcome %(name)s"
+msgstr "Bienvenue %(name)s"
+
+#, fuzzy, c-format
+msgid "Goodbye %(name)s"
+msgstr "Au revoir %(name)s"
+`;
+
+      const result = poEntriesToApiFormat(parsePoFile(content));
+
+      expect(result['Welcome %(name)s'].metadata.po_flags).toEqual(['fuzzy', 'python-format']);
+      // the single-line form must keep working
+      expect(result['Goodbye %(name)s'].metadata.po_flags).toEqual(['fuzzy', 'c-format']);
+    });
+
     it('should preserve fuzzy flag in plural forms', () => {
       const entries = [
         {
