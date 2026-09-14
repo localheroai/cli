@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.67] - 2026-09-14
+
+### Added
+- `init` now works on a stock Django project. Django writes the source strings to a `.pot` and deletes it, so nothing on disk held the source locale and the first import failed every time. The `.pot` is now part of Django's file pattern, `makemessages` runs with `--keep-pot`, and when no source is found `init` offers to run the extraction and re-imports if it succeeds.
+
+### Fixed
+- A failed import exits non-zero. `init` could import nothing and still exit 0, so a broken first run looked successful.
+- `translate` prints the `makemessages --keep-pot` command on a Django project instead of three generic guesses about locale patterns and YAML syntax.
+- `POT-Creation-Date` is stripped after the local extraction, so the first Action commit contains translations rather than a date change in every catalog.
+- `push`, `pull` and `clone` say so when no API key is set, instead of failing less obviously further in.
+- The prune prompt no longer claims the delete is permanent.
+
 ## [0.0.66] - 2026-09-10
 
 ### Fixed
