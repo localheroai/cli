@@ -756,8 +756,7 @@ function printDjangoWorkflowNotice(console: Console, pythonInstall?: string): vo
   console.log('so adjust that if your project does it differently.');
   console.log('\nIf you wrap extraction in your own command or make target, point the step');
   console.log('at that instead. Extra flags like --ignore or --add-location belong there too.');
-  console.log('\nTranslated .po files still need `compilemessages` to take effect,');
-  console.log('usually already part of your build or deploy rather than CI.\n');
+  console.log('\nTranslated .po files still need `compilemessages` to take effect.\n');
 }
 
 function displayFinalInstructions(
