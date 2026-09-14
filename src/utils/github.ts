@@ -280,7 +280,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           ref: \${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}
           fetch-depth: 0
