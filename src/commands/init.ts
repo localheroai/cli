@@ -560,7 +560,7 @@ async function handleImportProcess(
           const validLanguages = stats.languages.filter(lang => lang.code);
           console.log(`- Languages: ${validLanguages.length}`);
           validLanguages.forEach((lang) => {
-            console.log(`  - ${lang.code}: ${lang.translated || 0} keys (${lang.missing || 0} missing)`);
+            console.log(`  - ${lang.code}: ${lang.translated || 0} keys`);
           });
         }
       }
