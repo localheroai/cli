@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.69] - 2026-09-15
+
+### Fixed
+- Installing no longer prints a deprecation warning. `glob` is on v13, which also clears two high-severity advisories in its dependencies.
+- The import summary no longer prints a "missing" count per language. It was counted against the whole project's key space, so a language with fewer plural forms than the others was reported as missing forms it cannot have.
+
 ## [0.0.68] - 2026-09-15
 
 ### Fixed
