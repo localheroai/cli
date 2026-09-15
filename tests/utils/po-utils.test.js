@@ -479,6 +479,48 @@ msgstr "Au revoir %(name)s"
       expect(result['Goodbye %(name)s'].metadata.po_flags).toEqual(['fuzzy', 'c-format']);
     });
 
+    it('omits fuzzy entries from a target-language upload', () => {
+      const content = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "Save"
+msgstr "Spara"
+
+#, fuzzy
+msgid "Cancel"
+msgstr "Guessed"
+
+#, fuzzy, python-format
+msgid "%(n)d item"
+msgid_plural "%(n)d items"
+msgstr[0] "guess one"
+msgstr[1] "guess many"
+`;
+      const result = poEntriesToApiFormat(parsePoFile(content), { sourceLanguage: 'en', currentLanguage: 'sv' });
+
+      expect(result['Save'].value).toBe('Spara');
+      expect(result['Cancel']).toBeUndefined();
+      expect(result['%(n)d item']).toBeUndefined();
+      expect(result['%(n)d item__plural_1']).toBeUndefined();
+    });
+
+    it('keeps fuzzy entries when the file is the source language', () => {
+      const content = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid "Cancel"
+msgstr ""
+`;
+      const result = poEntriesToApiFormat(parsePoFile(content), { sourceLanguage: 'en', currentLanguage: 'en' });
+
+      expect(result['Cancel'].value).toBe('Cancel');
+      expect(result['Cancel'].metadata.po_flags).toEqual(['fuzzy']);
+    });
+
     it('should preserve fuzzy flag in plural forms', () => {
       const entries = [
         {
@@ -903,6 +945,83 @@ msgstr ""
         isPlural: false,
         pluralForm: undefined
       });
+    });
+
+    // gettext marks an entry fuzzy when msgmerge guessed the translation from a
+    // similar msgid. msgfmt excludes fuzzy entries from the compiled .mo, so the
+    // app renders the source string — the key reads as translated in the file but
+    // is untranslated to the user. It must count as missing.
+    it('should treat a fuzzy target entry as missing even when msgstr is filled', () => {
+      const sourceContent = `msgid ""
+msgstr ""
+
+msgid "Task overview"
+msgstr "Task overview"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+
+#, fuzzy
+msgid "Task overview"
+msgstr "Uppgiftstavla"
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].key).toBe('Task overview');
+      expect(result[0].value).toBe('Task overview');
+      expect(result[0].isPlural).toBe(false);
+    });
+
+    it('should not treat an ordinary filled target entry as missing', () => {
+      const sourceContent = `msgid ""
+msgstr ""
+
+msgid "Task overview"
+msgstr "Task overview"
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+
+msgid "Task overview"
+msgstr "Uppgiftstavla"
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(0);
+    });
+
+    it('should treat every slot of a fuzzy plural entry as missing', () => {
+      const sourceContent = `msgid ""
+msgstr ""
+
+msgid "%(count)d task archived"
+msgid_plural "%(count)d tasks archived"
+msgstr[0] ""
+msgstr[1] ""
+`;
+
+      const targetContent = `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#, fuzzy
+msgid "%(count)d task archived"
+msgid_plural "%(count)d tasks archived"
+msgstr[0] "%(count)d uppgift i kolumnen"
+msgstr[1] "%(count)d uppgifter i kolumnen"
+`;
+
+      const result = findMissingPoTranslations(sourceContent, targetContent);
+
+      expect(result).toHaveLength(2);
+      expect(result.every(r => r.isPlural)).toBe(true);
+      expect(result[0].key).toBe('%(count)d task archived');
+      expect(result[1].key).toBe('%(count)d task archived__plural_1');
     });
 
     it('should detect missing plural forms based on target language nplurals', () => {

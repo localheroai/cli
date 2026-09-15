@@ -642,6 +642,92 @@ describe('translation-utils', () => {
       expect(batch.localeEntries).toContain('es:locales/en.json');
     });
 
+    it('does not group plural-looking keys in non-PO formats, and honours the batch cap', () => {
+      // A JSON project may legitimately have a key named foo__plural_1 that has
+      // nothing to do with gettext plurals.
+      const keys = {};
+      for (let i = 0; i < 199; i++) keys[`k_${String(i).padStart(4,'0')}`] = `V ${i}`;
+      keys['foo'] = 'Foo';
+      keys['foo__plural_1'] = 'Foo one';
+      keys['foo__plural_2'] = 'Foo two';
+
+      const { batches, errors } = batchKeysWithMissing(
+        [{ path: 'locales/en.json', format: 'json' }],
+        { 'sv:locales/en.json': { locale: 'sv', path: 'locales/en.json', targetPath: 'locales/sv.json', keys } }
+      );
+      expect(errors).toEqual([]);
+
+      const sizes = batches.map(b =>
+        Object.keys(JSON.parse(Buffer.from(b.sourceFile.content, 'base64').toString()).keys).length
+      );
+      // JSON keys are chunked plainly: no group is held together past the cap.
+      expect(sizes[0]).toBe(200);
+      expect(Math.max(...sizes)).toBeLessThanOrEqual(200);
+    });
+
+    it('keeps plural forms together even when locales interleave them', () => {
+      // Two locales contribute the same plural family; merging can interleave the
+      // forms so they are no longer adjacent in insertion order.
+      const keysA = {};
+      const keysB = {};
+      for (let i = 0; i < 150; i++) keysA[`a_${String(i).padStart(4,'0')}`] = `A ${i}`;
+      keysA['item'] = 'item';
+      for (let i = 0; i < 150; i++) keysB[`b_${String(i).padStart(4,'0')}`] = `B ${i}`;
+      keysB['item__plural_1'] = 'items';
+
+      const sourceFiles = [{ path: 'locales/en.po', format: 'po' }];
+      const missingByLocale = {
+        'sv:locales/en.po': { locale: 'sv', path: 'locales/en.po', targetPath: 'locales/sv.po', keys: keysA },
+        'nb:locales/en.po': { locale: 'nb', path: 'locales/en.po', targetPath: 'locales/nb.po', keys: keysB }
+      };
+
+      const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale);
+      expect(errors).toEqual([]);
+
+      const batchOf = (key) => batches.findIndex(b => {
+        const content = JSON.parse(Buffer.from(b.sourceFile.content, 'base64').toString());
+        return Object.prototype.hasOwnProperty.call(content.keys, key);
+      });
+
+      const base = batchOf('item');
+      expect(base).toBeGreaterThanOrEqual(0);
+      expect(batchOf('item__plural_1')).toBe(base);
+    });
+
+    it('keeps plural forms of one key in the same batch', () => {
+      // batchKeysWithMissing chunks at a fixed 200; put the plural group across
+      // that boundary so a plain slice would separate its forms.
+      const keys = {};
+      for (let i = 0; i < 199; i++) keys[`filler_${i}`] = `Filler ${i}`;
+      keys['item'] = 'item';
+      keys['item__plural_1'] = 'items';
+      keys['item__plural_2'] = 'items2';
+
+      const sourceFiles = [{ path: 'locales/en.po', format: 'po' }];
+      const missingByLocale = {
+        'sv:locales/en.po': {
+          locale: 'sv',
+          path: 'locales/en.po',
+          targetPath: 'locales/sv.po',
+          keys
+        }
+      };
+
+      const { batches, errors } = batchKeysWithMissing(sourceFiles, missingByLocale);
+      expect(errors).toEqual([]);
+      expect(batches.length).toBeGreaterThan(1);
+
+      const batchOf = (key) => batches.findIndex(b => {
+        const content = JSON.parse(Buffer.from(b.sourceFile.content, 'base64').toString());
+        return Object.prototype.hasOwnProperty.call(content.keys, key);
+      });
+
+      const base = batchOf('item');
+      expect(base).toBeGreaterThanOrEqual(0);
+      expect(batchOf('item__plural_1')).toBe(base);
+      expect(batchOf('item__plural_2')).toBe(base);
+    });
+
     it('should handle missing source files', () => {
       const sourceFiles = [
         {

@@ -890,6 +890,65 @@ describe('translation-processor', () => {
     });
   });
 
+  describe('retry exhaustion is reported as a failure (#651)', () => {
+    it('records the language as failed when a job never starts', async () => {
+      const testJobId = 'job-never-starts';
+      const batches = [{
+        sourceFilePath: 'locales/en.json',
+        sourceFile: {
+          path: 'locales/en.json',
+          format: 'json',
+          content: Buffer.from(JSON.stringify({ keys: { stuck: { value: 'Stuck' } } })).toString('base64')
+        },
+        localeEntries: ['fr:locales/en.json'],
+        locales: ['fr']
+      }];
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { stuck: { value: 'Stuck' } },
+          keyCount: 1
+        }
+      };
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: testJobId, language: { code: 'fr' } }]
+      });
+      // The job is accepted but never progresses, so every poll returns pending
+      // until the retry budget is spent.
+      mockTranslationUtils.checkJobStatus.mockImplementation(async (jobId) => (
+        jobId === testJobId
+          ? { status: 'pending', job_id: jobId, progress: { completed_keys: 0, total_keys: 1 } }
+          : { status: 'completed', translations: { data: {} }, language: { code: 'other' }, job_id: jobId }
+      ));
+
+      jest.useFakeTimers();
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = jest.fn((callback) => {
+        if (typeof callback === 'function') callback();
+        return 1;
+      });
+
+      try {
+        const result = await processTranslationBatches(
+          batches,
+          missingByLocale,
+          { projectId: 'test-project-651' },
+          false,
+          { console: mockConsole, translationUtils: mockTranslationUtils }
+        );
+
+        expect(result.uniqueKeysTranslated.size).toBe(0);
+        expect(result.failedLanguages).toContain('fr');
+      } finally {
+        global.setTimeout = originalSetTimeout;
+        jest.useRealTimers();
+      }
+    });
+  });
+
   describe('a source file split into several batches (#609)', () => {
     const config = { projectId: 'test-project' };
     const sourcePath = 'locales/en.json';
