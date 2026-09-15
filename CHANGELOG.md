@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.68] - 2026-09-15
+
+### Fixed
+- Entries gettext marked `fuzzy` are translated instead of being treated as done. `msgmerge` writes a guess copied from a similar string and flags it; `msgfmt` then leaves the entry out of the compiled catalog, so the app shows the source text while the file looks translated. Reword a string, run `makemessages`, and the old translation stayed in place and never reached your users. Those entries are now sent for translation, and the flag is cleared once every plural form the catalog declares has a real value. It stays put when only some forms come back, when the value is whitespace, and when the translation breaks the newline agreement gettext requires, so a half-written entry is never marked done.
+- A run where every job fails no longer reports success. A job that ran out of status checks was dropped without recording the language, so the summary printed "Translations complete" for a run that wrote nothing, and `ci` inherited it: a GitHub Action step could pass having translated nothing.
+- New Action workflows are generated with `actions/checkout@v7`. Existing workflows are untouched; re-run `init` or edit the line to pick it up.
+
 ## [0.0.67] - 2026-09-14
 
 ### Added
