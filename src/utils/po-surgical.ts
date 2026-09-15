@@ -1,5 +1,5 @@
 import { po } from 'gettext-parser';
-import { createUniqueKey, normalizeStringValue, parseUniqueKey, parsePoFile, PLURAL_PREFIX, extractNPlurals, MAX_PLURAL_FORMS } from './po-utils.js';
+import { createUniqueKey, normalizeStringValue, parseUniqueKey, parsePoFile, parsePoFlags, PLURAL_PREFIX, extractNPlurals, MAX_PLURAL_FORMS } from './po-utils.js';
 
 /**
  * Surgical update of .po file - only modify lines that actually changed
@@ -32,6 +32,7 @@ export function surgicalUpdatePoFile(
   // Quick check, if all translations match normalized content exactly,
   // return original unchanged to preserve formatting
   const parsed = po.parse(originalContent);
+  const nplurals = extractNPlurals(parsed.headers || {});
   let allIdentical = true;
 
   Object.entries(parsed.translations).forEach(([context, entries]) => {
@@ -41,6 +42,10 @@ export function surgicalUpdatePoFile(
 
         const contextValue = context !== '' ? context : undefined;
         const uniqueKey = createUniqueKey(msgid, contextValue);
+
+        if (fuzzyEntryIsFullyTranslated(entry, uniqueKey, translations, nplurals, options?.keyMappings?.[uniqueKey])) {
+          allIdentical = false;
+        }
 
         if (translations[uniqueKey]) {
           const newValue = translations[uniqueKey];
@@ -98,6 +103,57 @@ export function surgicalUpdatePoFile(
     return originalContent;
   }
   return processLineByLine(originalContent, translations, options);
+}
+
+// A fuzzy entry needs rewriting even when the translation matches the guess
+// gettext made, because the flag itself is what keeps it out of the compiled
+// catalog. Every existing form must be covered: clearing the flag while one
+// form still holds a guess would publish that guess.
+function fuzzyEntryIsFullyTranslated(
+  entry: any,
+  uniqueKey: string,
+  translations: Record<string, string>,
+  nplurals: number,
+  mappedKey?: string
+): boolean {
+  if (!parsePoFlags(entry.comments?.flag)?.includes('fuzzy')) return false;
+
+  // Whitespace-only counts as empty everywhere else here, so it must not be
+  // enough to clear the flag either. gettext also requires msgid and msgstr to
+  // agree on a leading and trailing newline; a translation that breaks that
+  // makes the whole catalog fail to compile, so it cannot count as done.
+  const agreesOnEdges = (value: string, msgid: string) =>
+    value.startsWith('\n') === msgid.startsWith('\n') &&
+    value.endsWith('\n') === msgid.endsWith('\n');
+  const filled = (key: string, msgid: string) => {
+    const value = translations[key];
+    if (value === undefined) return false;
+    return normalizeStringValue(value) !== '' && agreesOnEdges(value, msgid);
+  };
+  // Versioning re-keys the payload to the new msgid, so accept either shape.
+  const keyed = (suffix: string, msgid: string) =>
+    filled(uniqueKey + suffix, msgid) || Boolean(mappedKey && filled(mappedKey + suffix, msgid));
+
+  if (!entry.msgid_plural) return keyed('', entry.msgid);
+
+  const { context } = parseUniqueKey(uniqueKey);
+  // Form 1 can also arrive under the msgid_plural text itself, the shape the
+  // detection pass below accepts for catalogs written before __plural_N keys.
+  const msgidPluralKey = createUniqueKey(entry.msgid_plural, context);
+
+  // Count against the header, not the slots the file happens to carry: the
+  // writer only fills existing slots, so a file short of its declared forms
+  // would otherwise lose the rest while looking fully translated.
+  const formCount = Math.max(entry.msgstr.length, nplurals);
+  for (let i = 0; i < formCount; i++) {
+    if (i >= entry.msgstr.length) return false;
+    const formMsgid = i === 0 ? entry.msgid : entry.msgid_plural;
+    if (i === 0 && keyed('', formMsgid)) continue;
+    if (keyed(`${PLURAL_PREFIX}${i}`, formMsgid)) continue;
+    if (i === 1 && entry.msgid_plural !== entry.msgid && filled(msgidPluralKey, formMsgid)) continue;
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -289,6 +345,7 @@ function processLineByLine(
   const lines = content.split('\n');
   const result: string[] = [];
   const parsed = po.parse(content);
+  const entryNplurals = extractNPlurals(parsed.headers || {});
   const changesToMake = new Map<string, string>();
   const translatedEntries = new Set<string>(); // Entries receiving a non-empty translation, by their own uniqueKey
   const msgidChanges = new Map<string, string>(); // Map old msgid → new msgid (for versioning)
@@ -327,6 +384,17 @@ function processLineByLine(
           return;
         }
 
+        // A source-language write echoes the msgid back, leaves the entry alone,
+        // and must leave its flag alone too: clearing it would publish the guess
+        // still sitting in msgstr.
+        const isSourceLanguageEcho = translations[actualNewKey] === msgid &&
+          options?.sourceLanguage === options?.targetLanguage;
+
+        if (!isSourceLanguageEcho &&
+            fuzzyEntryIsFullyTranslated(entry, uniqueKey, translations, entryNplurals, actualNewKey)) {
+          translatedEntries.add(uniqueKey);
+        }
+
         if (translations[actualNewKey]) {
           const newValue = translations[actualNewKey];
 
@@ -343,7 +411,6 @@ function processLineByLine(
 
           if (currentValue !== normalizedNewValue || foundViaMapping) {
             changesToMake.set(uniqueKey, newValue);
-            translatedEntries.add(uniqueKey);
             // Also track the new key so addNewEntries doesn't add it as a duplicate
             if (foundViaMapping && actualNewKey !== uniqueKey) {
               changesToMake.set(actualNewKey, newValue);
@@ -367,7 +434,6 @@ function processLineByLine(
 
               if (currentPluralValue !== normalizedNewPluralValue || foundViaMapping) {
                 changesToMake.set(oldPluralKey, newPluralValue);
-                translatedEntries.add(uniqueKey);
                 // Also track the new plural key so addNewEntries doesn't add it as a duplicate
                 if (foundViaMapping && newPluralKey !== oldPluralKey) {
                   changesToMake.set(newPluralKey, newPluralValue);
@@ -383,7 +449,6 @@ function processLineByLine(
 
             if (currentPluralValue !== normalizedNewPluralValue) {
               changesToMake.set(pluralKey, translations[pluralKey]);
-              translatedEntries.add(uniqueKey);
             }
           }
         }
@@ -391,7 +456,7 @@ function processLineByLine(
     }
   });
 
-  if (changesToMake.size === 0 && entriesToRemove.size === 0) {
+  if (changesToMake.size === 0 && entriesToRemove.size === 0 && translatedEntries.size === 0) {
     // Still need to add new entries even if no existing entries need changes
     const newEntries = addNewEntries(translations, parsed, changesToMake, options);
     if (newEntries.length > 0) {

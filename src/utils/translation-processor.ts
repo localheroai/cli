@@ -485,6 +485,14 @@ async function processBatch(
           console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`));
         }
 
+        // However it ran out of retries, the job has not delivered its
+        // translations. Record it, or the summary reports success for a run
+        // that wrote nothing.
+        const exhaustedLocale = jobSourceMapping[jobId]?.locale;
+        if (exhaustedLocale) {
+          stats.failedLanguages.add(exhaustedLocale);
+        }
+
         pendingJobs.delete(jobId);
         return { jobId, status: 'failed' };
       }

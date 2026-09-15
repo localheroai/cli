@@ -5,7 +5,7 @@ import {
   ProjectConfig,
 } from '../types/index.js';
 import { TranslationBatch } from './translation-processor.js';
-import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX } from './po-utils.js';
+import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX, PLURAL_SUFFIX_REGEX } from './po-utils.js';
 import { filterKeys, RemovedKey } from './ignore-keys.js';
 
 const POT_EXTENSION = '.pot';
@@ -425,8 +425,49 @@ export function batchKeysWithMissing(
     const allKeys = Object.entries(data.keys);
     const chunkedKeys: Array<Array<[string, Record<string, TranslationValue>]>> = [];
 
-    for (let i = 0; i < allKeys.length; i += MAX_BATCH_SIZE) {
-      chunkedKeys.push(allKeys.slice(i, i + MAX_BATCH_SIZE));
+    // Chunk on plural-group boundaries. A form that lands in a different batch
+    // than its siblings arrives as a partial payload, which leaves the entry
+    // half-written and, for a fuzzy entry, never clears its flag.
+    // Only gettext catalogs use the __plural_N suffix to mean "another form of
+    // the same entry"; elsewhere it is an ordinary key name. Grouped by base key
+    // rather than adjacency, since merging several locales can interleave a
+    // family's forms. A family larger than the cap is still split: the cap is a
+    // request-size limit, not something to bypass.
+    const isPoFormat = ['po', 'pot'].includes(sourceFile.format.toLowerCase());
+    const groups: Array<Array<[string, Record<string, TranslationValue>]>> = [];
+
+    if (isPoFormat) {
+      const groupsByBase = new Map<string, Array<[string, Record<string, TranslationValue>]>>();
+      for (const entry of allKeys) {
+        const base = entry[0].replace(PLURAL_SUFFIX_REGEX, '');
+        const group = groupsByBase.get(base);
+        if (group) {
+          group.push(entry);
+        } else {
+          groupsByBase.set(base, [entry]);
+        }
+      }
+      for (const group of groupsByBase.values()) {
+        for (let i = 0; i < group.length; i += MAX_BATCH_SIZE) {
+          groups.push(group.slice(i, i + MAX_BATCH_SIZE));
+        }
+      }
+    } else {
+      for (const entry of allKeys) {
+        groups.push([entry]);
+      }
+    }
+
+    let chunk: Array<[string, Record<string, TranslationValue>]> = [];
+    for (const group of groups) {
+      if (chunk.length > 0 && chunk.length + group.length > MAX_BATCH_SIZE) {
+        chunkedKeys.push(chunk);
+        chunk = [];
+      }
+      chunk.push(...group);
+    }
+    if (chunk.length > 0) {
+      chunkedKeys.push(chunk);
     }
 
     for (const keyChunk of chunkedKeys) {

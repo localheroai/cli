@@ -79,6 +79,161 @@ msgstr "Hallo %(name)s"
       expect(result).toMatch(/#, python-format\nmsgid "Hello %\(name\)s"/);
     });
 
+    test('clears fuzzy even when the returned translation is identical to the guess', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid "Cancel"
+msgstr "Avbryt"
+`;
+      const result = surgicalUpdatePoFile(original, { 'Cancel': 'Avbryt' });
+
+      expect(result).toContain('msgstr "Avbryt"');
+      expect(result).not.toContain('fuzzy');
+    });
+
+    test('clears fuzzy on a plural when every form is returned, even if identical', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#, fuzzy
+msgid "item"
+msgid_plural "items"
+msgstr[0] "sak"
+msgstr[1] "saker"
+`;
+      const result = surgicalUpdatePoFile(original, { 'item': 'sak', 'item__plural_1': 'saker' });
+
+      expect(result).not.toContain('fuzzy');
+    });
+
+    test('does not clear fuzzy while dropping forms the header requires', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=4; plural=(n==1 ? 0 : n==2 ? 1 : n==3 ? 2 : 3);\\n"
+
+#, fuzzy
+msgid "item"
+msgid_plural "items"
+msgstr[0] "guess one"
+msgstr[1] "guess many"
+`;
+      const result = surgicalUpdatePoFile(original, {
+        'item': 'sak',
+        'item__plural_1': 'saker',
+        'item__plural_2': 'sakerna',
+        'item__plural_3': 'sakerna4'
+      });
+
+      // Either every form the header requires is written, or the flag stays put.
+      // Clearing it while forms 2-3 are missing publishes an incomplete entry.
+      const wroteAllForms = /msgstr\[2\]/.test(result) && /msgstr\[3\]/.test(result);
+      const keptFuzzy = /^#,.*fuzzy/m.test(result);
+      expect(wroteAllForms || keptFuzzy).toBe(true);
+    });
+
+    test('clears fuzzy on a versioned entry keyed by its new msgid', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid "Old wording"
+msgstr "Gammal gissning"
+`;
+      const result = surgicalUpdatePoFile(
+        original,
+        { 'New wording': 'Ny text' },
+        { keyMappings: { 'Old wording': 'New wording' } }
+      );
+
+      expect(result).toContain('msgid "New wording"');
+      expect(result).toContain('msgstr "Ny text"');
+      expect(result).not.toContain('fuzzy');
+    });
+
+    test('does not clear fuzzy on a source-language entry it skips', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid "Hello"
+msgstr "Old guess"
+`;
+      // Source-language write: msgid === msgstr, so the entry is skipped and the
+      // stale guess stays. The flag must stay with it.
+      const result = surgicalUpdatePoFile(
+        original,
+        { 'Hello': 'Hello' },
+        { sourceLanguage: 'en', targetLanguage: 'en' }
+      );
+
+      expect(result).toContain('#, fuzzy');
+    });
+
+    test('does not clear fuzzy when the translation breaks msgid newline agreement', () => {
+      // gettext requires msgid and msgstr to agree on a leading newline. An LLM
+      // occasionally drops it; clearing the flag would leave an entry that looks
+      // done and makes the whole catalog fail to compile.
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid ""
+"\\n"
+"        Archived this week\\n"
+"      "
+msgstr ""
+"\\n"
+"        Gammal gissning\\n"
+"      "
+`;
+      const result = surgicalUpdatePoFile(original, {
+        '\n        Archived this week\n      ': 'Arkiverad denna vecka\n      '
+      });
+
+      expect(result).toContain('#, fuzzy');
+    });
+
+    test('does not clear fuzzy for a whitespace-only translation', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, fuzzy
+msgid "Cancel"
+msgstr "Avbryt"
+`;
+      const result = surgicalUpdatePoFile(original, { 'Cancel': '   ' });
+
+      expect(result).toContain('#, fuzzy');
+    });
+
+    test('keeps fuzzy on a plural when only some forms are returned', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#, fuzzy
+msgid "item"
+msgid_plural "items"
+msgstr[0] "guess one"
+msgstr[1] "guess many"
+`;
+      const result = surgicalUpdatePoFile(original, { 'item': 'sak' });
+
+      expect(result).toContain('msgstr[0] "sak"');
+      expect(result).toContain('#, fuzzy');
+    });
+
     test('clears fuzzy on the owning entry when translated via a __plural_N key', () => {
       const original = `msgid ""
 msgstr ""
@@ -91,7 +246,7 @@ msgid_plural "foos"
 msgstr[0] "guessed one"
 msgstr[1] "guessed many"
 `;
-      const result = surgicalUpdatePoFile(original, { 'foo__plural_1': 'saker' });
+      const result = surgicalUpdatePoFile(original, { 'foo': 'sak', 'foo__plural_1': 'saker' });
 
       expect(result).toContain('msgstr[1] "saker"');
       expect(result).not.toContain('fuzzy');
@@ -109,7 +264,7 @@ msgid_plural "items"
 msgstr[0] "guessed one"
 msgstr[1] "guessed many"
 `;
-      const result = surgicalUpdatePoFile(original, { 'items': 'saker' });
+      const result = surgicalUpdatePoFile(original, { 'item': 'sak', 'items': 'saker' });
 
       expect(result).toContain('msgstr[1] "saker"');
       expect(result).not.toContain('fuzzy');
