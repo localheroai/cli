@@ -233,6 +233,25 @@ function hasNewEntriesToAdd(
   return false; // No new entries to add
 }
 
+// msgfmt drops fuzzy entries from the compiled catalog, so a stale flag hides the
+// translation we just wrote. Walks backwards so a splice cannot shift an unvisited line.
+function clearFuzzyFlag(result: string[], entryContentStartIndex: number): void {
+  for (let i = result.length - 1; i >= entryContentStartIndex; i--) {
+    const line = result[i];
+    if (!line.startsWith('#,')) continue;
+
+    const flags = line.slice(2).split(',').map(flag => flag.trim()).filter(Boolean);
+    const remaining = flags.filter(flag => flag !== 'fuzzy');
+    if (remaining.length === flags.length) continue;
+
+    if (remaining.length > 0) {
+      result[i] = `#, ${remaining.join(', ')}`;
+    } else {
+      result.splice(i, 1);
+    }
+  }
+}
+
 enum State {
   IDLE,
   IN_MSGCTXT,
@@ -271,6 +290,7 @@ function processLineByLine(
   const result: string[] = [];
   const parsed = po.parse(content);
   const changesToMake = new Map<string, string>();
+  const translatedEntries = new Set<string>(); // Entries receiving a non-empty translation, by their own uniqueKey
   const msgidChanges = new Map<string, string>(); // Map old msgid → new msgid (for versioning)
   const entriesToRemove = new Set<string>(); // Entries to remove when target msgid already exists (merge case)
 
@@ -323,6 +343,7 @@ function processLineByLine(
 
           if (currentValue !== normalizedNewValue || foundViaMapping) {
             changesToMake.set(uniqueKey, newValue);
+            translatedEntries.add(uniqueKey);
             // Also track the new key so addNewEntries doesn't add it as a duplicate
             if (foundViaMapping && actualNewKey !== uniqueKey) {
               changesToMake.set(actualNewKey, newValue);
@@ -346,6 +367,7 @@ function processLineByLine(
 
               if (currentPluralValue !== normalizedNewPluralValue || foundViaMapping) {
                 changesToMake.set(oldPluralKey, newPluralValue);
+                translatedEntries.add(uniqueKey);
                 // Also track the new plural key so addNewEntries doesn't add it as a duplicate
                 if (foundViaMapping && newPluralKey !== oldPluralKey) {
                   changesToMake.set(newPluralKey, newPluralValue);
@@ -361,6 +383,7 @@ function processLineByLine(
 
             if (currentPluralValue !== normalizedNewPluralValue) {
               changesToMake.set(pluralKey, translations[pluralKey]);
+              translatedEntries.add(uniqueKey);
             }
           }
         }
@@ -465,6 +488,10 @@ function processLineByLine(
         skippingEntry = true;
         i = nextIndex;
         continue;
+      }
+
+      if (translatedEntries.has(uniqueKey)) {
+        clearFuzzyFlag(result, entryContentStartIndex);
       }
 
       const newMsgid = msgidChanges.get(uniqueKey);

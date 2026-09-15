@@ -27,6 +27,66 @@ describe('po-handler', () => {
   });
 
   describe('updatePoFile', () => {
+    it('plural forms keep the first form\'s comments when later forms carry none', async () => {
+      const targetFilePath = path.join(tempDir, 'target.po');
+      const translations = [
+        {
+          key: 'item',
+          value: 'sak',
+          metadata: { po_plural: true, plural_index: 0, msgid_plural: 'items', source_references: ['app/views.py:10'] }
+        },
+        {
+          key: 'item__plural_1',
+          value: 'saker',
+          metadata: { po_plural: true, plural_index: 1, msgid: 'item' }
+        }
+      ];
+
+      await updatePoFile(targetFilePath, translations, 'sv');
+
+      const written = await fs.readFile(targetFilePath, 'utf-8');
+      assertValidPo(written);
+      expect(written).toContain('#: app/views.py:10');
+    });
+
+    it('clears fuzzy on a plural entry when a translated form precedes an empty one', async () => {
+      const targetFilePath = path.join(tempDir, 'target.po');
+      const translations = [
+        { key: 'item', value: 'sak', metadata: { po_plural: true, plural_index: 0, msgid_plural: 'items', po_flags: ['fuzzy'] } },
+        { key: 'item__plural_1', value: '', metadata: { po_plural: true, plural_index: 1, msgid: 'item', po_flags: ['fuzzy'] } }
+      ];
+
+      await updatePoFile(targetFilePath, translations, 'sv');
+
+      const written = await fs.readFile(targetFilePath, 'utf-8');
+      assertValidPo(written);
+      expect(written).toContain('msgstr[0] "sak"');
+      expect(written).not.toContain('fuzzy');
+    });
+
+    it('does not stamp fuzzy onto a translation it just wrote, and keeps it on an empty one', async () => {
+      const targetFilePath = path.join(tempDir, 'target.po');
+      const translations = [
+        {
+          key: 'Copyright notice',
+          value: 'Upphovsrattsmeddelande',
+          metadata: { po_flags: ['fuzzy', 'python-format'] }
+        },
+        {
+          key: 'Untouched',
+          value: '',
+          metadata: { po_flags: ['fuzzy'] }
+        }
+      ];
+
+      await updatePoFile(targetFilePath, translations, 'sv');
+
+      const written = await fs.readFile(targetFilePath, 'utf-8');
+      assertValidPo(written);
+      expect(written).toMatch(/#, python-format\nmsgid "Copyright notice"\nmsgstr "Upphovsrattsmeddelande"/);
+      expect(written).toMatch(/#, fuzzy\nmsgid "Untouched"\nmsgstr ""/);
+    });
+
     it('preserves Language header from source file', async () => {
       const sourceFilePath = path.join(tempDir, 'source.po');
       const sourceContent = `msgid ""

@@ -48,6 +48,74 @@ describe('po-surgical', () => {
     });
   });
 
+  describe('Fuzzy flags', () => {
+    test('clears fuzzy when a real translation is written', () => {
+      const original = loadFixture('lingui-messages');
+      expect(original).toContain('#, fuzzy');
+
+      const result = surgicalUpdatePoFile(original, {
+        'Copyright notice': 'Upphovsrattsmeddelande'
+      });
+
+      expect(result).toContain('msgstr "Upphovsrattsmeddelande"');
+      expect(result).not.toContain('#, fuzzy');
+    });
+
+    test('clears fuzzy from every #, line of the entry', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+#, python-format
+#, fuzzy
+#, fuzzy
+msgid "Hello %(name)s"
+msgstr "Hallo %(name)s"
+`;
+      const result = surgicalUpdatePoFile(original, { 'Hello %(name)s': 'Hej %(name)s' });
+
+      expect(result).toContain('msgstr "Hej %(name)s"');
+      expect(result).not.toContain('fuzzy');
+      expect(result).toMatch(/#, python-format\nmsgid "Hello %\(name\)s"/);
+    });
+
+    test('clears fuzzy on the owning entry when translated via a __plural_N key', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#, fuzzy
+msgid "foo"
+msgid_plural "foos"
+msgstr[0] "guessed one"
+msgstr[1] "guessed many"
+`;
+      const result = surgicalUpdatePoFile(original, { 'foo__plural_1': 'saker' });
+
+      expect(result).toContain('msgstr[1] "saker"');
+      expect(result).not.toContain('fuzzy');
+    });
+
+    test('clears fuzzy on the owning entry when translated via its msgid_plural key', () => {
+      const original = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+#, fuzzy
+msgid "item"
+msgid_plural "items"
+msgstr[0] "guessed one"
+msgstr[1] "guessed many"
+`;
+      const result = surgicalUpdatePoFile(original, { 'items': 'saker' });
+
+      expect(result).toContain('msgstr[1] "saker"');
+      expect(result).not.toContain('fuzzy');
+    });
+  });
+
   describe('Simple Translation Updates', () => {
     test('should update single translation without affecting others', () => {
       const original = loadFixture('simple');
