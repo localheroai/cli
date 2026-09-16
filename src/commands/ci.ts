@@ -110,7 +110,7 @@ async function runSyncMode(
   const { console, configUtils, githubUtils, syncApi, updateTranslationFile } = deps;
   const verbose = options?.verbose || false;
 
-  console.log(chalk.blue('🔄 Syncing translations from LocalHero...\n'));
+  console.log(chalk.blue('🔄 Syncing translations from Localhero...\n'));
 
   const allFiles: SyncFile[] = [];
   let currentPage = 1;

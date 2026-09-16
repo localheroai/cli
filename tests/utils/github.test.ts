@@ -607,7 +607,7 @@ describe('githubService', () => {
       );
     });
 
-    it('silently falls back to GITHUB_TOKEN when GitHub App not installed', async () => {
+    it('warns when falling back to GITHUB_TOKEN because the GitHub App is not installed', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockEnv.GITHUB_TOKEN = 'github-token';
@@ -639,7 +639,9 @@ describe('githubService', () => {
         'git remote set-url origin https://x-access-token:github-token@github.com/owner/repo.git',
         { stdio: 'pipe' }
       );
-      expect(mockConsole.warn).not.toHaveBeenCalled();
+      expect(mockConsole.warn).toHaveBeenCalledWith(
+        '⚠️  Warning: The Localhero GitHub App is not installed for this project. Using GITHUB_TOKEN instead, so checks on this commit will not run. Install the app to enable them.'
+      );
     });
 
     it('retries push on failure and succeeds on second attempt', async () => {

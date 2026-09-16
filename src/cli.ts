@@ -62,29 +62,29 @@ function wrapCommandAction<T extends (...args: any[]) => Promise<any>>(action: T
 
 program
   .name('localhero')
-  .description('CLI tool for automatic I18n translations with LocalHero.ai, more info at https://localhero.ai.')
+  .description('CLI tool for automatic I18n translations with Localhero.ai, more info at https://localhero.ai.')
   .version(getVersion())
   .option('--debug', 'Show debug information when errors occur')
   .action(() => {
-    console.log('LocalHero.ai is an automatic I18n translation service that easily integrates with your dev workflow.');
+    console.log('Localhero.ai is an automatic I18n translation service that easily integrates with your dev workflow.');
     console.log(`\nVersion: ${getVersion()}`);
     console.log('\n👏 Set up your project with `npx @localheroai/cli init`');
     console.log('💡 Use --help to see available commands');
     console.log('🔗 Visit https://localhero.ai for more information');
-    console.log('\nWe´re LocalHero.ai, a small, bootstrapped company working to make');
+    console.log("\nWe're Localhero.ai, a small, bootstrapped company working to make");
     console.log('i18n simpler for developers like you. If you have any questions or');
     console.log('feedback, just reach out to us at hi@localhero.ai. Thanks 🙌');
   });
 
 program
   .command('login')
-  .description('Authenticate with LocalHero.ai using an API key')
+  .description('Authenticate with Localhero.ai using an API key')
   .option('--api-key <key>', 'API key for non-interactive authentication')
   .action(wrapCommandAction((options: { apiKey?: string }) => login({ apiKey: options.apiKey })));
 
 program
   .command('init')
-  .description('Initialize a new LocalHero.ai project')
+  .description('Initialize a new Localhero.ai project')
   .option('-y, --yes', 'Non-interactive mode: use flag values and never prompt')
   .option('--project-id <id>', 'Use an existing project (skips creation)')
   .option('--project-name <name>', 'Name for a new project (defaults to current directory name)')
@@ -115,14 +115,14 @@ program
 
 program
   .command('pull')
-  .description('Pull updates from LocalHero.ai to your local files')
+  .description('Pull updates from Localhero.ai to your local files')
   .option('-v, --verbose', 'Show detailed progress information')
   .option('--changed-only', 'Only pull translations for keys changed in current branch')
   .action(wrapCommandAction((options: { verbose?: boolean; changedOnly?: boolean }) => pull(options)));
 
 program
   .command('push')
-  .description('Push updates from your local files to LocalHero.ai')
+  .description('Push updates from your local files to Localhero.ai')
   .option('-v, --verbose', 'Show detailed progress information')
   .option('-y, --yes', 'Skip confirmation prompt')
   .option('-f, --force', 'Push all files regardless of git changes')
@@ -134,7 +134,7 @@ program
 
 program
   .command('clone')
-  .description('Clone all translations from LocalHero.ai to your local files')
+  .description('Clone all translations from Localhero.ai to your local files')
   .option('-v, --verbose', 'Show detailed progress information')
   .option('-f, --force', 'Force, override existing files')
   .action(wrapCommandAction((options: { verbose?: boolean; force?: boolean }) => clone(options)));

@@ -103,7 +103,7 @@ export async function push(
   } else if (!yes) {
     const message = prune
       ? 'This will push your local translations and identify stale keys to prune.\nContinue?'
-      : 'This will push your local translations to LocalHero.ai.\nYour changes will be versioned in the API for easy tracking.\nContinue?';
+      : 'This will push your local translations to Localhero.ai.\nYour changes will be versioned in the API for easy tracking.\nContinue?';
 
     const confirmed = await prompt.confirm({
       message,

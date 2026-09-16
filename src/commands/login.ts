@@ -39,7 +39,7 @@ export async function login(deps: LoginDependencies = {}): Promise<void> {
 
   const apiKey = providedApiKey || process.env.LOCALHERO_API_KEY || (
     console.log('\n→ Get your API key from: https://localhero.ai/api-keys'),
-    console.log('→ New to LocalHero? Sign up at: https://localhero.ai/signup'),
+    console.log('→ New to Localhero? Sign up at: https://localhero.ai/signup'),
     console.log('\nThe API key will be saved to .localhero_key, and automatically added to your .gitignore file.\n'),
     await promptService.getApiKey()
   );
