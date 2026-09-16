@@ -148,6 +148,9 @@ ${buildPythonToolSetup(pythonInstall)}      - name: Extract messages
           sudo apt-get install -y -qq gettext
           ${pythonInstall}
           ${buildMakemessagesCommand(locales, pythonInstall)}
+
+          # Optional: makemessages rewrites the creation-date header on every run,
+          # so without this line every CI run shows a one-line diff in every catalog.
           ${STRIP_POT_DATE}
 
 `;
@@ -450,12 +453,15 @@ ${buildExtractStep(options)}      - name: Translate
 
     if (appToken) {
       log.log('✓ Using GitHub App token');
+    } else if (errorCode === 'invalid_api_key') {
+      log.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
+    } else if (errorCode === 'github_app_not_installed') {
+      // A push authenticated with GITHUB_TOKEN never triggers downstream
+      // workflows, so required checks on this commit are left waiting with
+      // nothing to report. Staying silent here leaves that PR unexplained.
+      log.warn('⚠️  Warning: The Localhero GitHub App is not installed for this project. Using GITHUB_TOKEN instead, so checks on this commit will not run. Install the app to enable them.');
     } else {
-      if (errorCode === 'invalid_api_key') {
-        log.warn('⚠️  Warning: API authentication failed. Using GITHUB_TOKEN instead (workflows will not trigger).');
-      } else if (errorCode !== 'github_app_not_installed') {
-        log.warn('⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).');
-      }
+      log.warn('⚠️  Warning: Failed to fetch GitHub App token. Using GITHUB_TOKEN instead (workflows will not trigger).');
     }
 
     return finalToken;

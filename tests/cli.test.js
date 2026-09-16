@@ -14,7 +14,7 @@ describe('CLI basics', () => {
 
   it('displays info when no command is provided', () => {
     const output = execSync('node dist/cli.js').toString();
-    expect(output).toContain('LocalHero.ai');
+    expect(output).toContain('Localhero.ai');
     expect(output).toContain('Visit https://localhero.ai for more information');
   });
 
@@ -22,12 +22,12 @@ describe('CLI basics', () => {
   describe('command help texts', () => {
     it('login command help', () => {
       const output = execSync('node dist/cli.js login --help').toString();
-      expect(output).toContain('Authenticate with LocalHero.ai');
+      expect(output).toContain('Authenticate with Localhero.ai');
     });
 
     it('init command help', () => {
       const output = execSync('node dist/cli.js init --help').toString();
-      expect(output).toContain('Initialize a new LocalHero.ai project');
+      expect(output).toContain('Initialize a new Localhero.ai project');
     });
 
     it('translate command help', () => {
@@ -37,7 +37,7 @@ describe('CLI basics', () => {
 
     it('sync command help', () => {
       const output = execSync('node dist/cli.js sync --help').toString();
-      expect(output).toContain('Pull updates from LocalHero.ai');
+      expect(output).toContain('Pull updates from Localhero.ai');
     });
   });
 });
