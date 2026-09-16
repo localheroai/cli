@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.70] - 2026-09-16
+
+### Fixed
+- Pushing without the Localhero GitHub App installed now says so. Without the app the push falls back to the workflow's `GITHUB_TOKEN`, which GitHub never triggers downstream workflows from, so required checks on that commit wait forever with nothing to report. That fallback was the one path that stayed silent, leaving the stalled pull request unexplained.
+- The generated workflow explains the `POT-Creation-Date` line it writes, so it reads as the optional tidying it is rather than a step you must not touch.
+- Brand spelling and an apostrophe in the CLI's own output.
+
 ## [0.0.69] - 2026-09-15
 
 ### Fixed
