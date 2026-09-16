@@ -148,6 +148,9 @@ ${buildPythonToolSetup(pythonInstall)}      - name: Extract messages
           sudo apt-get install -y -qq gettext
           ${pythonInstall}
           ${buildMakemessagesCommand(locales, pythonInstall)}
+
+          # Optional: makemessages rewrites the creation-date header on every run,
+          # so without this line every CI run shows a one-line diff in every catalog.
           ${STRIP_POT_DATE}
 
 `;
