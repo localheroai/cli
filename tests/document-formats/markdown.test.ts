@@ -309,6 +309,17 @@ describe('MarkdownDocumentAdapter', () => {
     }))).toBe('# Hello\n\nToujours sans saut final');
   });
 
+  it('builds compact heading context when a document starts below H1', () => {
+    const source = '## Setup\n\nIntro.\n\n### Install\n\nRun it.\n';
+    const extraction = extract(source);
+    const paragraphs = extraction.manifest.units.filter(unit => unit.role === 'paragraph');
+
+    expect(paragraphs.map(unit => unit.context.headingPath)).toEqual([
+      ['Setup'],
+      ['Setup', 'Install']
+    ]);
+  });
+
   it('tokenizes adjacent placeholders separately when no text sits between them', () => {
     const source = 'Status **`check`** and **bold** here.\n';
     const extraction = extract(source);

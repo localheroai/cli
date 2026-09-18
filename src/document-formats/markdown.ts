@@ -425,7 +425,7 @@ function frontmatterDrafts(
 
 function markdownDrafts(source: string, parsed: ParsedMarkdown, unitOffset: number): DraftUnit[] {
   const drafts: DraftUnit[] = [];
-  const headingPath: string[] = [];
+  const headingStack: Array<{ depth: number; title: string }> = [];
 
   for (const node of collectSemanticNodes(parsed.root, parsed.offsetBase)) {
     const range = childContentRange(node, parsed.offsetBase);
@@ -439,7 +439,7 @@ function markdownDrafts(source: string, parsed: ParsedMarkdown, unitOffset: numb
         role,
         range,
         source: templated.template,
-        context: { headingPath: [...headingPath] },
+        context: { headingPath: headingStack.map(heading => heading.title) },
         placeholders: templated.placeholders,
         protectedFragments: templated.fragments,
         serialization: 'markdown'
@@ -448,8 +448,9 @@ function markdownDrafts(source: string, parsed: ParsedMarkdown, unitOffset: numb
 
     if (node.type === 'heading' && node.depth) {
       const title = plainText(node);
-      headingPath.length = Math.max(0, node.depth - 1);
-      headingPath[node.depth - 1] = title;
+      const depth = node.depth;
+      while (headingStack.length > 0 && headingStack.at(-1)!.depth >= depth) headingStack.pop();
+      headingStack.push({ depth, title });
     }
   }
 
