@@ -309,6 +309,24 @@ describe('MarkdownDocumentAdapter', () => {
     }))).toBe('# Hello\n\nToujours sans saut final');
   });
 
+  it('tokenizes adjacent placeholders separately when no text sits between them', () => {
+    const source = 'Status **`check`** and **bold** here.\n';
+    const extraction = extract(source);
+    const unit = extraction.manifest.units[0];
+
+    expect(unit.placeholders.map(placeholder => placeholder.kind)).toEqual([
+      'strong-open',
+      'inlineCode',
+      'strong-close',
+      'strong-open',
+      'strong-close'
+    ]);
+    for (const placeholder of unit.placeholders) {
+      expect(unit.source).toContain(placeholder.token);
+    }
+    expect(adapter.apply(source, extraction, identityTranslations(extraction))).toBe(source);
+  });
+
   it('keeps image paths, autolinks, reference destinations, and raw HTML opaque', () => {
     const source = [
       'See <https://example.com>, [reference][docs], and ![logo](./logo.svg).',

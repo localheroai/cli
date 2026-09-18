@@ -19,7 +19,7 @@ import {
 const FORMAT = 'markdown';
 const FORMAT_VERSION = 1;
 const RESERVED_PLACEHOLDER_PREFIX = '__LOCALHERO_MD_';
-const RESERVED_PLACEHOLDER_PATTERN = /__LOCALHERO_MD_[A-Z0-9_]+__/g;
+const RESERVED_PLACEHOLDER_PATTERN = /__LOCALHERO_MD_U\d{4}_P\d{4}_[0-9A-F]{8}__/g;
 
 export interface MarkdownExtractOptions {
   translateFrontmatterFields?: readonly string[];
