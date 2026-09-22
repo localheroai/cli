@@ -11,6 +11,7 @@ import {
   findPlaceholderMismatches,
   findStructureMismatches,
   findPluralShapeMismatches,
+  findMissingPluralCategories,
   findEmptyAndIdentical,
   toStringValue,
   type FlatMap,
@@ -18,6 +19,7 @@ import {
   type PlaceholderMismatch,
   type StructureMismatch,
   type PluralShapeMismatch,
+  type MissingPluralCategories,
   type EmptyFinding,
   type IdenticalFinding
 } from '../utils/check-utils.js';
@@ -83,6 +85,7 @@ interface LocaleReport {
   orphans: (OrphanFinding & { path: string })[];
   structureMismatches: (StructureMismatch & { path: string })[];
   pluralShapeMismatches: (PluralShapeMismatch & { path: string })[];
+  missingPluralCategories: (MissingPluralCategories & { path: string })[];
 }
 
 function decode(file: TranslationFile): Record<string, any> {
@@ -179,6 +182,7 @@ export async function runCheck(
       identical: [],
       placeholderMismatches: [],
       placeholderHints: [],
+      missingPluralCategories: [],
       orphans: [],
       structureMismatches: [],
       pluralShapeMismatches: []
@@ -201,6 +205,9 @@ export async function runCheck(
       );
       report.pluralShapeMismatches.push(
         ...findPluralShapeMismatches(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath }))
+      );
+      report.missingPluralCategories.push(
+        ...findMissingPluralCategories(targetKeys, locale).map((f) => ({ ...f, path: targetPath }))
       );
     }
 
@@ -229,7 +236,8 @@ function shouldFail(reports: LocaleReport[], failOn: FailOn): boolean {
   // a file the tool did not load, or a framework's bundled translations, as it
   // is a leftover, so it cannot be trusted enough to break someone's CI.
   const structureCount = reports.reduce(
-    (sum, r) => sum + r.structureMismatches.length + r.pluralShapeMismatches.length,
+    (sum, r) =>
+      sum + r.structureMismatches.length + r.pluralShapeMismatches.length + r.missingPluralCategories.length,
     0
   );
   return missingCount > 0 || placeholderCount > 0 || structureCount > 0;
@@ -312,6 +320,13 @@ function printHumanReport(
     printList(con, 'Plural shape mismatches', r.pluralShapeMismatches, (m) => `${m.key}`, all);
     printList(
       con,
+      'Missing plural categories (falls back to `other`)',
+      r.missingPluralCategories,
+      (m) => `${m.key}: needs ${m.missing.join(', ')}`,
+      all
+    );
+    printList(
+      con,
       'Identical to source (hint)',
       r.identical,
       (m) => `${m.key}: "${truncate(m.value)}"`,
@@ -333,6 +348,9 @@ function printGithubAnnotations(con: CheckDependencies['console'], reports: Loca
     }
     for (const m of r.placeholderMismatches) {
       con.log(`::error file=${m.path}::Placeholder mismatch for "${m.key}" (locale ${r.locale})`);
+    }
+    for (const m of r.missingPluralCategories) {
+      con.log(`::error file=${m.path}::"${m.key}" lacks plural forms ${m.missing.join(', ')} (locale ${r.locale})`);
     }
     for (const m of r.placeholderHints) {
       con.log(`::notice file=${m.path}::Plural form omits ${m.missingInTarget.join(', ')} for "${m.key}" (locale ${r.locale})`);
@@ -367,6 +385,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
           identical: r.identical,
           placeholderMismatches: r.placeholderMismatches,
           placeholderHints: r.placeholderHints,
+          missingPluralCategories: r.missingPluralCategories,
           orphans: r.orphans,
           structureMismatches: r.structureMismatches,
           pluralShapeMismatches: r.pluralShapeMismatches
