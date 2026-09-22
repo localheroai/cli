@@ -77,3 +77,22 @@ describe('ICU complex arguments', () => {
     expect(reduceIcuComplexArguments('{count, plural, one {# item} other {# items}}')).toBe('{count}');
   });
 });
+
+describe('printf directives', () => {
+  it('treats a renumbered positional argument as the same placeholder', () => {
+    expect(tokens('%i from %s:%i via %s')).toEqual(tokens('%1$i via %4$s from %2$s:%3$i'));
+  });
+
+  it('still distinguishes conversion types', () => {
+    expect(tokens('%d')).not.toEqual(tokens('%1$s'));
+  });
+
+  it('reads a directive immediately followed by a word', () => {
+    expect(tokens('%g %sbyte(s)')).toEqual(tokens('%g %sbytes'));
+  });
+
+  it('ignores an escaped percent', () => {
+    expect(tokens('100%% sure')).toEqual([]);
+    expect(tokens('50% off')).toEqual([]);
+  });
+});
