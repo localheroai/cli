@@ -259,6 +259,47 @@ export function findMissingTranslations(
     }
   }
 
+  // Request the plural categories this locale needs that the SOURCE group does
+  // not have (#636). English writes one/other; Polish also renders few and many,
+  // and the loop above can only iterate keys the source already contains. Without
+  // this the backend generates the categories but the Action never asks for them,
+  // so pl.yml keeps two forms and Rails falls back to `other`.
+  //
+  // Only fires when the settings endpoint supplied localeCategories: a JSON
+  // source gets `undefined` and behaves exactly as before.
+  if (localeCategories) {
+    const seenBases = new Set<string>();
+
+    for (const key of Object.keys(sourceKeys)) {
+      const parsed = splitPluralKey(key);
+      if (!parsed || !isPluralForm(key, sourceKeys)) continue;
+      if (seenBases.has(parsed.base)) continue;
+      seenBases.add(parsed.base);
+
+      const otherKey = `${parsed.base}.other`;
+      const otherDetails = sourceKeys[otherKey];
+      if (otherDetails === undefined) continue;
+
+      const otherValue =
+        typeof otherDetails === 'object' && otherDetails !== null && 'value' in otherDetails
+          ? otherDetails.value
+          : otherDetails;
+      if (typeof otherValue !== 'string' || otherValue.trim() === '') continue;
+
+      for (const category of localeCategories) {
+        const synthesised = `${parsed.base}.${category}`;
+        if (synthesised in sourceKeys) continue;
+        if (synthesised in missingKeys || synthesised in skippedKeys) continue;
+        if (hasValue(targetKeys[synthesised])) continue;
+
+        missingKeys[synthesised] = {
+          value: otherValue,
+          sourceKey: otherKey
+        };
+      }
+    }
+  }
+
   return { missingKeys, skippedKeys };
 }
 

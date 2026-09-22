@@ -321,6 +321,56 @@ describe('translation-utils', () => {
         expect(result.missingKeys['errors.other']).toBeDefined();
       });
     });
+
+    describe('target-only plural categories (#636)', () => {
+      const source = {
+        'overdue.one': { value: '1 task overdue' },
+        'overdue.other': { value: '%{count} tasks overdue' }
+      };
+      const polish = ['one', 'few', 'many', 'other'];
+
+      it('requests the categories the locale needs that the source lacks', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(Object.keys(result.missingKeys).sort()).toEqual(
+          ['overdue.few', 'overdue.many', 'overdue.one', 'overdue.other']
+        );
+      });
+
+      it("sends .other's text and points sourceKey at .other", () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.few']).toEqual({
+          value: '%{count} tasks overdue',
+          sourceKey: 'overdue.other'
+        });
+      });
+
+      it('points sourceKey at the key itself for keys the source has', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.one'].sourceKey).toBe('overdue.one');
+      });
+
+      it('does not request a category the target already has', () => {
+        const target = { 'overdue.few': { value: '%{count} zadania' } };
+        const result = findMissingTranslations(source, target, polish);
+        expect(result.missingKeys['overdue.few']).toBeUndefined();
+        expect(result.missingKeys['overdue.many']).toBeDefined();
+      });
+
+      it('requests nothing extra without locale categories', () => {
+        const result = findMissingTranslations(source, {});
+        expect(Object.keys(result.missingKeys).sort()).toEqual(['overdue.one', 'overdue.other']);
+      });
+
+      it('requests nothing extra for a locale with fewer categories', () => {
+        const result = findMissingTranslations(source, {}, ['one', 'other']);
+        expect(Object.keys(result.missingKeys).sort()).toEqual(['overdue.one', 'overdue.other']);
+      });
+
+      it('does not synthesise siblings for a non-plural .other key', () => {
+        const result = findMissingTranslations({ 'errors.other': { value: 'Other error' } }, {}, polish);
+        expect(Object.keys(result.missingKeys)).toEqual(['errors.other']);
+      });
+    });
   });
 
   describe('findMissingTranslationsByLocale', () => {
