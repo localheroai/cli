@@ -209,6 +209,42 @@ Both modes automatically commit changes to your repository when running in GitHu
 npx @localheroai/cli ci --verbose
 ```
 
+### Check
+
+```bash
+npx @localheroai/cli check
+```
+
+Audits your translation files without calling the LocalHero.ai API: no API key, no network access, no credits used. Runs entirely on the files already on disk, using the same file discovery as `translate`. Good for CI (see [#518](https://github.com/localheroai/localhero-ai/issues/518)) when you run with `--auto-translate` off and want a failing check as the signal that a PR still needs human-reviewed translations, and just as useful as a one-off health check on your own repo.
+
+It reports, per target locale:
+
+- **Missing keys** — present in the source locale but absent, `null`, or an empty string in the target.
+- **Placeholder mismatches** — interpolation placeholders in the source string that are missing from the target, or added in the target but absent from the source. Covers Rails `%{name}` / `%<name>s`, printf `%s %d %1$s`, i18next/Vue/Angular `{{name}}`, ICU/React-intl `{name}`, and Python `%(name)s`. `{{name}}` is never also counted as `{name}`, and a literal `%` is never treated as a printf directive.
+- **Orphan keys** — present in a target locale but no longer in the source, i.e. left behind after a source key was deleted.
+- **Structure and plural-shape mismatches** — a leaf that is a string on one side and a map or array on the other, or a source key with plural sub-keys (Rails `one`/`other`, i18next `_one`/`_plural`) where the target has no plural forms at all.
+- **Empty and identical-to-source values** — an empty target string is reported as a real gap; a target that is byte-identical to the source is reported separately, as a *hint*, since short words and proper nouns are legitimately identical across languages.
+
+#### Options
+
+**`--source <locale>`**: Override the detected source locale.
+
+**`--locales <codes>`**: Comma-separated target locales to check, instead of every configured output locale.
+
+**`--json`**: Print a machine-readable report on stdout (and nothing else). Stable key names, safe to aggregate across many repos.
+
+**`--all`**: Print every finding instead of capping each category at 10 with a "... and N more" line.
+
+**`--fail-on <mode>`**: Controls the exit code. `missing` (default) exits 1 when there are missing or empty keys; `placeholders` exits 1 on placeholder mismatches; `any` exits 1 on any of missing/empty/placeholders/orphans/structure; `none` always exits 0. Identical-to-source hints never affect the exit code.
+
+**`--format github`**: Emit GitHub Actions annotation lines (`::error file=...::message`) instead of the human report. Locale files aren't parsed with line tracking, so annotations are file-level, not line-level — that's a known limitation, not a rounding error.
+
+```bash
+npx @localheroai/cli check --locales sv,de --fail-on any
+npx @localheroai/cli check --json > report.json
+npx @localheroai/cli check --format github
+```
+
 ### Pull / push
 
 ```bash
