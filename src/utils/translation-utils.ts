@@ -125,6 +125,40 @@ function isPluralForm(key: string, sourceKeys: Record<string, any>): boolean {
   );
 }
 
+// Bases whose direct children in the source are all CLDR categories, at least
+// two of them, and nothing nested: the rule the backend importer uses to stamp a
+// Rails plural group (CldrPlurals.plural_group?).
+function yamlPluralGroupBases(sourceKeys: Record<string, any>): Set<string> {
+  const categoriesByBase = new Map<string, string[]>();
+  const disqualified = new Set<string>();
+
+  for (const key of Object.keys(sourceKeys)) {
+    const parts = key.split('.');
+    for (let depth = 1; depth < parts.length - 1; depth++) {
+      disqualified.add(parts.slice(0, depth).join('.'));
+    }
+    if (parts.length < 2) continue;
+
+    const base = parts.slice(0, -1).join('.');
+    const child = parts[parts.length - 1];
+    if (!CLDR_CATEGORIES.includes(child)) {
+      disqualified.add(base);
+      continue;
+    }
+    categoriesByBase.set(base, [...(categoriesByBase.get(base) ?? []), child]);
+  }
+
+  const bases = new Set<string>();
+  for (const [base, categories] of categoriesByBase) {
+    if (!disqualified.has(base) && categories.length >= 2) bases.add(base);
+  }
+  return bases;
+}
+
+function yamlPluralMetadata(base: string, category: string) {
+  return { plural: true, plural_format: 'yaml', plural_category: category, plural_base: base };
+}
+
 export function findMissingTranslations(
   sourceKeys: Record<string, any>,
   targetKeys: Record<string, any>,
@@ -268,11 +302,23 @@ export function findMissingTranslations(
   // Only fires when the settings endpoint supplied localeCategories: a JSON
   // source gets `undefined` and behaves exactly as before.
   if (localeCategories) {
+    const pluralBases = yamlPluralGroupBases(sourceKeys);
+
+    // Stamp real plural forms the way the importer does, so a group that first
+    // reaches the backend through translate (a new group in a PR) is recognised
+    // as one and its target-only categories can be generated.
+    for (const [key, entry] of Object.entries(missingKeys)) {
+      const parsed = splitPluralKey(key);
+      if (!parsed || !pluralBases.has(parsed.base)) continue;
+
+      entry.metadata = { ...(entry.metadata ?? {}), ...yamlPluralMetadata(parsed.base, parsed.category) };
+    }
+
     const seenBases = new Set<string>();
 
     for (const key of Object.keys(sourceKeys)) {
       const parsed = splitPluralKey(key);
-      if (!parsed || !isPluralForm(key, sourceKeys)) continue;
+      if (!parsed || !pluralBases.has(parsed.base)) continue;
       if (seenBases.has(parsed.base)) continue;
       seenBases.add(parsed.base);
 

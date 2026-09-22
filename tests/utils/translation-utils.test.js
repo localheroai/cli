@@ -366,6 +366,29 @@ describe('translation-utils', () => {
         expect(Object.keys(result.missingKeys).sort()).toEqual(['overdue.one', 'overdue.other']);
       });
 
+      it('stamps real plural forms with the metadata the importer uses', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.one'].metadata).toEqual({
+          plural: true, plural_format: 'yaml', plural_category: 'one', plural_base: 'overdue'
+        });
+      });
+
+      it('does not stamp a namespace that mixes categories with other keys', () => {
+        const mixed = {
+          'home_type.duplex': { value: 'Duplex' },
+          'home_type.one': { value: 'One' },
+          'home_type.other': { value: 'Other' }
+        };
+        const result = findMissingTranslations(mixed, {}, polish);
+        expect(result.missingKeys['home_type.other'].metadata).toBeUndefined();
+        expect(result.missingKeys['home_type.few']).toBeUndefined();
+      });
+
+      it('does not stamp without locale categories', () => {
+        const result = findMissingTranslations(source, {});
+        expect(result.missingKeys['overdue.one'].metadata).toBeUndefined();
+      });
+
       it('does not synthesise siblings for a non-plural .other key', () => {
         const result = findMissingTranslations({ 'errors.other': { value: 'Other error' } }, {}, polish);
         expect(Object.keys(result.missingKeys)).toEqual(['errors.other']);
