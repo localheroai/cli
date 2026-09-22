@@ -26,9 +26,11 @@ describe('extractPlaceholders', () => {
       { kind: 'printf', name: 's' },
       { kind: 'printf', name: 'd' }
     ]);
+    // A positional directive carries its conversion type, not its index: the
+    // index is what a translator is allowed to change.
     expect(extractPlaceholders('%1$s of %2$s')).toEqual([
-      { kind: 'positional', name: '1' },
-      { kind: 'positional', name: '2' }
+      { kind: 'positional', name: 's' },
+      { kind: 'positional', name: 's' }
     ]);
   });
 

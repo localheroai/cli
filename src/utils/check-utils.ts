@@ -37,8 +37,12 @@ export interface OrphanFinding {
 /** Keys present in the target but no longer present in the source. */
 export function findOrphanKeys(sourceKeys: FlatMap, targetKeys: FlatMap): OrphanFinding[] {
   const orphans: OrphanFinding[] = [];
+  const sourcePluralBases = gettextPluralBases(Object.keys(sourceKeys));
   for (const key of Object.keys(targetKeys)) {
-    if (!(key in sourceKeys)) {
+    // Arabic has six plural forms where English has two; the extra ones are not leftovers.
+    const extraPluralForm =
+      GETTEXT_PLURAL_SUFFIX.test(key) && sourcePluralBases.has(key.replace(GETTEXT_PLURAL_SUFFIX, ''));
+    if (!(key in sourceKeys) && !extraPluralForm) {
       orphans.push({ key, target: toStringValue(targetKeys[key]) });
     }
   }
@@ -46,6 +50,8 @@ export function findOrphanKeys(sourceKeys: FlatMap, targetKeys: FlatMap): Orphan
 }
 
 export interface PlaceholderMismatch {
+  /** True when the only difference is a placeholder the plural form omits. */
+  hint?: boolean;
   key: string;
   source: string;
   target: string;
@@ -57,9 +63,16 @@ export interface PlaceholderMismatch {
  * Compares interpolation placeholders in the source string against the
  * target string. Only scalar leaves with an actual value on both sides are
  * checked; a missing target is reported separately by `findMissingKeys`.
+ *
+ * A plural form is allowed to omit a placeholder the source uses. Rails only
+ * renders `one` when the count is 1, so "1 språk" for "%{count} language" is
+ * correct, and Arabic's `zero` form legitimately contains no number at all.
+ * Those are reported as hints. A placeholder the translation *adds*, or any
+ * difference outside a plural form, stays a mismatch.
  */
 export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): PlaceholderMismatch[] {
   const mismatches: PlaceholderMismatch[] = [];
+  const pluralBases = gettextPluralBases([...Object.keys(sourceKeys), ...Object.keys(targetKeys)]);
   for (const key of Object.keys(sourceKeys)) {
     const source = toStringValue(sourceKeys[key]);
     if (source === null || source === '') continue;
@@ -80,9 +93,18 @@ export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatM
       if ((sourceCounts.get(token) ?? 0) < count) unexpectedInTarget.push(token);
     }
 
-    if (missingInTarget.length > 0 || unexpectedInTarget.length > 0) {
-      mismatches.push({ key, source, target, missingInTarget, unexpectedInTarget });
-    }
+    if (missingInTarget.length === 0 && unexpectedInTarget.length === 0) continue;
+
+    const omissionInPluralForm =
+      unexpectedInTarget.length === 0 && (isPluralForm(key) || pluralBases.has(key));
+    mismatches.push({
+      key,
+      source,
+      target,
+      missingInTarget,
+      unexpectedInTarget,
+      ...(omissionInPluralForm ? { hint: true } : {})
+    });
   }
   return mismatches;
 }
@@ -110,6 +132,34 @@ export function findStructureMismatches(sourceKeys: FlatMap, targetKeys: FlatMap
     }
   }
   return mismatches;
+}
+
+/**
+ * gettext catalogues flatten plural forms to `key__plural_N` (see
+ * po-utils.ts's PLURAL_PREFIX). Matched here rather than imported so this
+ * module stays free of parser dependencies.
+ */
+const GETTEXT_PLURAL_SUFFIX = /__plural_\d+$/;
+
+/** `count.one`, `count_one`, `count_plural` and `item__plural_2`. */
+function isPluralForm(key: string): boolean {
+  if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
+  const leaf = key.slice(key.lastIndexOf('.') + 1);
+  return RAILS_PLURAL_LEAVES.has(leaf) || I18NEXT_PLURAL_SUFFIXES.some((suffix) => leaf.endsWith(suffix));
+}
+
+/**
+ * Base keys of gettext plural entries, e.g. `item` for `item__plural_1`. The
+ * singular of a plural entry is compared against whichever form the target
+ * language happens to put first, so it gets the same latitude as the other
+ * forms.
+ */
+function gettextPluralBases(keys: string[]): Set<string> {
+  const bases = new Set<string>();
+  for (const key of keys) {
+    if (GETTEXT_PLURAL_SUFFIX.test(key)) bases.add(key.replace(GETTEXT_PLURAL_SUFFIX, ''));
+  }
+  return bases;
 }
 
 const RAILS_PLURAL_LEAVES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);

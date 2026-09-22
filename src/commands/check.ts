@@ -78,6 +78,8 @@ interface LocaleReport {
   empty: (EmptyFinding & { path: string })[];
   identical: (IdenticalFinding & { path: string })[];
   placeholderMismatches: (PlaceholderMismatch & { path: string })[];
+  /** Omissions a plural form is allowed to make, e.g. "1 språk" for "%{count} language". */
+  placeholderHints: (PlaceholderMismatch & { path: string })[];
   orphans: (OrphanFinding & { path: string })[];
   structureMismatches: (StructureMismatch & { path: string })[];
   pluralShapeMismatches: (PluralShapeMismatch & { path: string })[];
@@ -176,6 +178,7 @@ export async function runCheck(
       empty: [],
       identical: [],
       placeholderMismatches: [],
+      placeholderHints: [],
       orphans: [],
       structureMismatches: [],
       pluralShapeMismatches: []
@@ -188,9 +191,10 @@ export async function runCheck(
       const { empty, identical } = findEmptyAndIdentical(sourceKeys, targetKeys);
       report.empty.push(...empty.map((f) => ({ ...f, path: targetPath })));
       report.identical.push(...identical.map((f) => ({ ...f, path: targetPath })));
-      report.placeholderMismatches.push(
-        ...findPlaceholderMismatches(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath }))
-      );
+      for (const finding of findPlaceholderMismatches(sourceKeys, targetKeys)) {
+        const located = { ...finding, path: targetPath };
+        (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(located);
+      }
       report.orphans.push(...findOrphanKeys(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath })));
       report.structureMismatches.push(
         ...findStructureMismatches(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath }))
@@ -221,12 +225,14 @@ function shouldFail(reports: LocaleReport[], failOn: FailOn): boolean {
   const placeholderCount = reports.reduce((sum, r) => sum + r.placeholderMismatches.length, 0);
   if (failOn === 'missing') return missingCount > 0;
   if (failOn === 'placeholders') return placeholderCount > 0;
-  const orphanCount = reports.reduce((sum, r) => sum + r.orphans.length, 0);
+  // Orphans never fail a run. A key present only in a translation is as often
+  // a file the tool did not load, or a framework's bundled translations, as it
+  // is a leftover, so it cannot be trusted enough to break someone's CI.
   const structureCount = reports.reduce(
     (sum, r) => sum + r.structureMismatches.length + r.pluralShapeMismatches.length,
     0
   );
-  return missingCount > 0 || placeholderCount > 0 || orphanCount > 0 || structureCount > 0;
+  return missingCount > 0 || placeholderCount > 0 || structureCount > 0;
 }
 
 function truncate(text: string, max = 60): string {
@@ -288,6 +294,13 @@ function printHumanReport(
         (m.unexpectedInTarget.length ? ` [unexpected: ${m.unexpectedInTarget.join(', ')}]` : ''),
       all
     );
+    printList(
+      con,
+      'Placeholder hints (a plural form may leave out a placeholder)',
+      r.placeholderHints,
+      (m) => `${m.key}: "${truncate(m.source)}" -> "${truncate(m.target)}" [omits: ${m.missingInTarget.join(', ')}]`,
+      all
+    );
     printList(con, 'Orphan keys', r.orphans, (m) => `${m.key}: "${truncate(m.target ?? '')}"`, all);
     printList(
       con,
@@ -321,6 +334,9 @@ function printGithubAnnotations(con: CheckDependencies['console'], reports: Loca
     for (const m of r.placeholderMismatches) {
       con.log(`::error file=${m.path}::Placeholder mismatch for "${m.key}" (locale ${r.locale})`);
     }
+    for (const m of r.placeholderHints) {
+      con.log(`::notice file=${m.path}::Plural form omits ${m.missingInTarget.join(', ')} for "${m.key}" (locale ${r.locale})`);
+    }
     for (const m of r.orphans) {
       con.log(`::warning file=${m.path}::Orphan key "${m.key}" (locale ${r.locale}) no longer in source`);
     }
@@ -350,6 +366,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
           empty: r.empty,
           identical: r.identical,
           placeholderMismatches: r.placeholderMismatches,
+          placeholderHints: r.placeholderHints,
           orphans: r.orphans,
           structureMismatches: r.structureMismatches,
           pluralShapeMismatches: r.pluralShapeMismatches
