@@ -4,7 +4,8 @@ import {
   findPlaceholderMismatches,
   findStructureMismatches,
   findPluralShapeMismatches,
-  findEmptyAndIdentical
+  findEmptyAndIdentical,
+  findMissingPluralCategories
 } from '../../src/utils/check-utils.js';
 
 describe('findOrphanKeys', () => {
@@ -167,5 +168,21 @@ describe('plural forms', () => {
       { item: 'a', item__plural_1: 'b', item__plural_2: 'c', item__plural_5: 'd', stale: 'e' }
     );
     expect(orphans.map((o) => o.key)).toEqual(['stale']);
+  });
+});
+
+describe('findMissingPluralCategories', () => {
+  it('flags Polish plural groups that only carry the English categories (#636)', () => {
+    const target = { 'archived_count.one': '%{count} zadanie', 'archived_count.other': '%{count} zadania' };
+    expect(findMissingPluralCategories(target, 'pl')).toEqual([{ key: 'archived_count', missing: ['few', 'many'] }]);
+  });
+
+  it('accepts a complete group and ignores a lone `other` that is not a plural', () => {
+    const target = { 'n.one': 'a', 'n.other': 'b', 'status.other': 'Annat' };
+    expect(findMissingPluralCategories(target, 'sv')).toEqual([]);
+  });
+
+  it('does not demand the Spanish `many` that only applies to millions', () => {
+    expect(findMissingPluralCategories({ 'n.one': 'a', 'n.other': 'b' }, 'es')).toEqual([]);
   });
 });

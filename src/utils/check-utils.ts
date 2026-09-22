@@ -259,3 +259,42 @@ export function findEmptyAndIdentical(
 
   return { empty, identical };
 }
+
+export interface MissingPluralCategories {
+  key: string;
+  missing: string[];
+}
+
+/**
+ * Rails plural groups (`key.one`, `key.other`) in the target that lack
+ * categories the target language needs, e.g. Polish without `few`/`many`.
+ * Rails then silently falls back to `other`, rendering fluent but wrong text.
+ */
+export function findMissingPluralCategories(targetKeys: FlatMap, locale: string): MissingPluralCategories[] {
+  let required: string[];
+  try {
+    const rules = new Intl.PluralRules(locale);
+    // Only categories everyday counts reach: CLDR gives es/fr/it/pt a `many`
+    // for 1,000,000 that rails-i18n does not implement and no one writes.
+    const reached = new Set(Array.from({ length: 1001 }, (_, n) => rules.select(n)));
+    required = rules.resolvedOptions().pluralCategories.filter((category) => reached.has(category));
+  } catch {
+    return [];
+  }
+  const groups = new Map<string, Set<string>>();
+  for (const key of Object.keys(targetKeys)) {
+    const dot = key.lastIndexOf('.');
+    const leaf = key.slice(dot + 1);
+    if (dot < 0 || !RAILS_PLURAL_LEAVES.has(leaf)) continue;
+    const parent = key.slice(0, dot);
+    if (!groups.has(parent)) groups.set(parent, new Set());
+    groups.get(parent)!.add(leaf);
+  }
+  const findings: MissingPluralCategories[] = [];
+  for (const [key, present] of groups) {
+    if (!present.has('other') || present.size < 2) continue;
+    const missing = required.filter((category) => !present.has(category));
+    if (missing.length) findings.push({ key, missing });
+  }
+  return findings;
+}
