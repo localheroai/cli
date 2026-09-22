@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { extractPlaceholders, placeholderMultiset } from '../../src/utils/placeholders.js';
+import { extractPlaceholders, placeholderMultiset, reduceIcuComplexArguments } from '../../src/utils/placeholders.js';
 
 describe('extractPlaceholders', () => {
   it('extracts i18next/Vue/Angular double-brace placeholders', () => {
@@ -50,5 +50,30 @@ describe('placeholderMultiset', () => {
   it('counts repeated placeholders', () => {
     const counts = placeholderMultiset('%{name} and %{name} again');
     expect(counts.get('rails:name')).toBe(2);
+  });
+});
+
+const tokens = (text: string) => [...placeholderMultiset(text).keys()].sort();
+
+describe('ICU complex arguments', () => {
+  it('ignores literal branch text in select messages', () => {
+    const source = '{gender, select, male {He} female {She} other {They}}';
+    const target = '{gender, select, male {Han} female {Hon} other {De}}';
+    expect(tokens(source)).toEqual(tokens(target));
+    expect(tokens(source)).toEqual(['icu:gender']);
+  });
+
+  it('still sees a renamed plural argument', () => {
+    expect(tokens('{count, plural, one {# item} other {# items}}')).toEqual(['icu:count']);
+    expect(tokens('{antal, plural, one {# vara} other {# varor}}')).toEqual(['icu:antal']);
+  });
+
+  it('still sees a placeholder outside the plural', () => {
+    expect(tokens('%{user}: {count, plural, other {# items}}')).toEqual(['icu:count', 'rails:user']);
+    expect(tokens('{count, plural, other {# varor}}')).toEqual(['icu:count']);
+  });
+
+  it('reduces a complex argument to its bare name', () => {
+    expect(reduceIcuComplexArguments('{count, plural, one {# item} other {# items}}')).toBe('{count}');
   });
 });
