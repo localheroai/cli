@@ -129,3 +129,43 @@ describe('findEmptyAndIdentical', () => {
     expect(result.identical).toEqual([{ key: 'brand', value: 'Localhero' }]);
   });
 });
+
+describe('plural forms', () => {
+  it('reports a placeholder a Rails `one` form leaves out as a hint, not a mismatch', () => {
+    const [finding] = findPlaceholderMismatches(
+      { 'languages_count.one': '%{count} language' },
+      { 'languages_count.one': '1 språk' }
+    );
+    expect(finding.hint).toBe(true);
+  });
+
+  it('reports the gettext zero form leaving out the number as a hint', () => {
+    const [finding] = findPlaceholderMismatches(
+      { item: '%(count)d item', item__plural_1: '%(count)d items' },
+      { item: 'لا عناصر', item__plural_1: 'عنصر واحد', item__plural_2: '%(count)d عنصران' }
+    );
+    expect(finding.key).toBe('item');
+    expect(finding.hint).toBe(true);
+  });
+
+  it('keeps a placeholder a plural form ADDS as a real mismatch', () => {
+    const [finding] = findPlaceholderMismatches(
+      { 'items.one': 'One item' },
+      { 'items.one': '%{count} vara' }
+    );
+    expect(finding.hint).toBeUndefined();
+  });
+
+  it('keeps an omission outside a plural form as a real mismatch', () => {
+    const [finding] = findPlaceholderMismatches({ greeting: 'Hi %{name}' }, { greeting: 'Hej' });
+    expect(finding.hint).toBeUndefined();
+  });
+
+  it('does not report the extra plural forms of a language as orphans', () => {
+    const orphans = findOrphanKeys(
+      { item: 'item', item__plural_1: 'items' },
+      { item: 'a', item__plural_1: 'b', item__plural_2: 'c', item__plural_5: 'd', stale: 'e' }
+    );
+    expect(orphans.map((o) => o.key)).toEqual(['stale']);
+  });
+});
