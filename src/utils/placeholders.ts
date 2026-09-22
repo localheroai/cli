@@ -3,12 +3,13 @@
  * strings can be compared for structural equivalence, independent of the
  * words around them.
  *
- * Order in the alternation matters: `{{name}}` must be tried before
- * `{name}`, and `%<name>s` before a bare `%s`, or the shorter pattern would
- * eat part of the longer one and silently miscount both.
+ * Order in the alternation matters: `%%` must be consumed before anything
+ * else so an escaped percent cannot start a directive, `{{name}}` must be
+ * tried before `{name}`, and `%<name>s` before a bare `%s`, or the shorter
+ * pattern would eat part of the longer one and silently miscount both.
  */
 const PLACEHOLDER_PATTERN =
-  /\{\{\s*([\w.]+)\s*\}\}|%<([\w.]+)>[sdf]|%\{([\w.]+)\}|%\(([\w.]+)\)[sdf]|%(\d+)\$[sdf]|%([sdf])(?![\w%])|\{([\w.]+)\}/g;
+  /(%%)|\{\{\s*([\w.]+)\s*\}\}|%<([\w.]+)>[sdf]|%\{([\w.]+)\}|%\(([\w.]+)\)[sdf]|%(\d+)\$([sdfiugx])|%([sdfiugx])|\{([\w.]+)\}/g;
 
 export type PlaceholderKind =
   | 'i18next' // {{name}}
@@ -62,8 +63,9 @@ export function extractPlaceholders(text: string): Placeholder[] {
   if (typeof text !== 'string') return [];
   const found: Placeholder[] = [];
   for (const match of reduceIcuComplexArguments(text).matchAll(PLACEHOLDER_PATTERN)) {
-    const [full, i18next, railsTyped, rails, python, positional, printf, icu] = match;
-    const name = i18next ?? railsTyped ?? rails ?? python ?? positional ?? printf ?? icu;
+    const [full, escaped, i18next, railsTyped, rails, python, , positionalType, printf, icu] = match;
+    if (escaped) continue;
+    const name = i18next ?? railsTyped ?? rails ?? python ?? positionalType ?? printf ?? icu;
     found.push({ kind: classify(full), name });
   }
   return found;
@@ -79,7 +81,14 @@ function classify(full: string): PlaceholderKind {
   return 'printf';
 }
 
+/**
+ * gettext lets a translator renumber printf arguments to fit the grammar of
+ * the target language: "%s: %s" can legitimately become "%2$s: %1$s". The
+ * conversion is what has to match, not the position, so a positional
+ * directive is compared as an ordinary printf one of the same type.
+ */
 function token(placeholder: Placeholder): string {
+  if (placeholder.kind === 'positional') return `printf:${placeholder.name}`;
   return `${placeholder.kind}:${placeholder.name}`;
 }
 
