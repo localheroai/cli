@@ -6,14 +6,17 @@ import {
   findTargetFile,
   processTargetContent
 } from '../utils/translation-utils.js';
+import { createIgnoreMatcher, filterKeys } from '../utils/ignore-keys.js';
 import {
   findOrphanKeys,
   findPlaceholderMismatches,
   findStructureMismatches,
   findPluralShapeMismatches,
+  findPluralizedFlatKeys,
   findMissingPluralCategories,
-  isUnneededPluralLeaf,
+  usedPluralCategories,
   findEmptyAndIdentical,
+  findConflictingKeys,
   toStringValue,
   type FlatMap,
   type OrphanFinding,
@@ -22,16 +25,20 @@ import {
   type PluralShapeMismatch,
   type MissingPluralCategories,
   type EmptyFinding,
-  type IdenticalFinding
+  type IdenticalFinding,
+  type ConflictingKey
 } from '../utils/check-utils.js';
 import type {
   TranslationConfig,
+  TranslationFile,
   TranslationFileOptions,
-  TranslationFile as OriginalTranslationFile,
-  TranslationFilesResult as OriginalTranslationFilesResult
+  TranslationFilesResult
 } from '../types/index.js';
 
-export type FailOn = 'missing' | 'placeholders' | 'any' | 'none';
+const FAIL_ON_MODES = ['missing', 'placeholders', 'any', 'none'] as const;
+const FORMATS = ['github'] as const;
+
+export type FailOn = (typeof FAIL_ON_MODES)[number];
 
 export interface CheckOptions {
   source?: string;
@@ -39,18 +46,7 @@ export interface CheckOptions {
   json?: boolean;
   all?: boolean;
   failOn?: FailOn;
-  format?: 'github';
-  [key: string]: any;
-}
-
-interface TranslationFile extends OriginalTranslationFile {
-  [key: string]: any;
-}
-
-interface TranslationFilesResult extends OriginalTranslationFilesResult {
-  sourceFiles: TranslationFile[];
-  targetFilesByLocale: Record<string, TranslationFile[]>;
-  allFiles: TranslationFile[];
+  format?: (typeof FORMATS)[number];
 }
 
 interface CheckDependencies {
@@ -63,7 +59,7 @@ interface CheckDependencies {
     findTranslationFiles: (
       config: TranslationConfig,
       options?: TranslationFileOptions
-    ) => Promise<OriginalTranslationFile[] | OriginalTranslationFilesResult>;
+    ) => Promise<TranslationFile[] | TranslationFilesResult>;
   };
 }
 
@@ -75,30 +71,35 @@ const defaultDeps: CheckDependencies = {
 
 interface LocaleReport {
   locale: string;
+  files: string[];
   keyCount: number;
   missing: { key: string; path: string; targetPath: string }[];
   empty: (EmptyFinding & { path: string })[];
   identical: (IdenticalFinding & { path: string })[];
   placeholderMismatches: (PlaceholderMismatch & { path: string })[];
-  /** Omissions a plural form is allowed to make, e.g. "1 språk" for "%{count} language". */
   placeholderHints: (PlaceholderMismatch & { path: string })[];
   orphans: (OrphanFinding & { path: string })[];
   structureMismatches: (StructureMismatch & { path: string })[];
   pluralShapeMismatches: (PluralShapeMismatch & { path: string })[];
   missingPluralCategories: (MissingPluralCategories & { path: string })[];
+  conflictingKeys: ConflictingKey[];
 }
 
-function decode(file: TranslationFile): Record<string, any> {
+function decode(file: TranslationFile, sourceLocale: string): Record<string, any> {
   if (!file.content) return {};
   const raw = Buffer.from(file.content, 'base64').toString('utf8');
-  return parseFile(raw, file.format, file.path, { sourceLanguage: file.locale });
+  return parseFile(raw, file.format, file.path, { sourceLanguage: sourceLocale, currentLanguage: file.locale });
 }
 
 function sourceKeysFor(sourceFile: TranslationFile, sourceLocale: string): FlatMap {
-  const parsed = decode(sourceFile);
+  const parsed = decode(sourceFile, sourceLocale);
   const wrapper = parsed[sourceLocale];
   const tree = wrapper && typeof wrapper === 'object' && !Array.isArray(wrapper) ? wrapper : parsed;
   return flattenTranslations(tree, '', sourceFile.format);
+}
+
+function isYaml(file: TranslationFile): boolean {
+  return file.format === 'yml' || file.format === 'yaml';
 }
 
 function targetKeysFor(
@@ -109,24 +110,80 @@ function targetKeysFor(
 ): { keys: FlatMap; path: string } {
   const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
   if (!targetFile) return { keys: {}, path: '' };
-  const parsed = decode(targetFile);
-  return { keys: processTargetContent(parsed, targetLocale, targetFile.format), path: targetFile.path };
+  return { keys: keysOf(targetFile, targetLocale, sourceLocale), path: targetFile.path };
+}
+
+function keysOf(targetFile: TranslationFile, targetLocale: string, sourceLocale: string): FlatMap {
+  return processTargetContent(decode(targetFile, sourceLocale), targetLocale, targetFile.format);
+}
+
+interface CheckResult {
+  aborted: boolean;
+  exitCode: number;
+  reports: LocaleReport[];
+  sourceLocale: string;
+  sourceFiles: string[];
+  keyCount: number;
+  parseFailures: TranslationFilesResult['parseFailures'];
+}
+
+function failedResult(sourceLocale = ''): CheckResult {
+  return { aborted: true, exitCode: 1, reports: [], sourceLocale, sourceFiles: [], keyCount: 0, parseFailures: [] };
+}
+
+function invalidOption(options: CheckOptions): string | null {
+  if (options.failOn && !(FAIL_ON_MODES as readonly string[]).includes(options.failOn)) {
+    return `Invalid --fail-on "${options.failOn}". Use one of: ${FAIL_ON_MODES.join(', ')}.`;
+  }
+  if (options.format && !(FORMATS as readonly string[]).includes(options.format)) {
+    return `Invalid --format "${options.format}". Use one of: ${FORMATS.join(', ')}.`;
+  }
+  return null;
+}
+
+function withPath<T>(findings: T[], path: string): (T & { path: string })[] {
+  return findings.map((finding) => ({ ...finding, path }));
+}
+
+function missingCount(report: LocaleReport): number {
+  return report.missing.length + report.empty.length;
+}
+
+function isAtOrUnder(key: string, parents: Set<string>): boolean {
+  for (let end = key.length; end !== -1; end = key.lastIndexOf('.', end - 1)) {
+    if (parents.has(key.slice(0, end))) return true;
+  }
+  return false;
+}
+
+function reshapedKeysBetween(sourceKeys: FlatMap, targetKeys: FlatMap): string[] {
+  return [
+    ...findStructureMismatches(sourceKeys, targetKeys).map((f) => f.key),
+    ...findPluralShapeMismatches(sourceKeys, targetKeys).map((f) => f.key),
+    ...findPluralizedFlatKeys(sourceKeys, targetKeys)
+  ];
 }
 
 export async function runCheck(
   options: CheckOptions = {},
   deps: CheckDependencies = defaultDeps
-): Promise<{ exitCode: number; reports: LocaleReport[]; sourceLocale: string; sourceFiles: string[]; keyCount: number }> {
+): Promise<CheckResult> {
   const { console, configUtils, fileUtils } = deps;
+
+  const optionError = invalidOption(options);
+  if (optionError) {
+    console.error(chalk.red(`\n✖ ${optionError}\n`));
+    return failedResult();
+  }
 
   const config = await configUtils.getProjectConfig();
   if (!config) {
     console.error(chalk.red('\n✖ No configuration found. Please run `npx @localheroai/cli init` first.\n'));
-    return { exitCode: 1, reports: [], sourceLocale: '', sourceFiles: [], keyCount: 0 };
+    return failedResult();
   }
   if (!config.translationFiles?.paths) {
     console.error(chalk.red('\n✖ Invalid configuration: missing translationFiles.paths. Please run `npx @localheroai/cli init` to set up your configuration.\n'));
-    return { exitCode: 1, reports: [], sourceLocale: '', sourceFiles: [], keyCount: 0 };
+    return failedResult();
   }
 
   const sourceLocale = options.source || config.sourceLocale;
@@ -137,13 +194,18 @@ export async function runCheck(
   const result = await fileUtils.findTranslationFiles(config as TranslationConfig, {
     returnFullResult: true,
     sourceLocale,
-    targetLocales
+    targetLocales,
+    ...(options.json ? { logger: { log: console.error } } : {})
   });
   const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [] } = result as TranslationFilesResult;
+  const filesFor = (locale: string) => (targetFilesByLocale[locale] || []).map((f) => f.path);
 
   if (!options.json && !options.format) {
     console.log(chalk.blue(`ℹ Source locale: ${sourceLocale} (${sourceFiles.map((f) => f.path).join(', ') || 'no source files found'})`));
-    console.log(chalk.blue(`ℹ Target locales: ${targetLocales.join(', ') || 'none configured'}`));
+    if (targetLocales.length === 0) console.log(chalk.blue('ℹ Target locales: none configured'));
+    for (const locale of targetLocales) {
+      console.log(chalk.blue(`ℹ ${locale}: ${filesFor(locale).join(', ') || 'no files found'}`));
+    }
   }
 
   if (parseFailures.length > 0 && !options.json) {
@@ -155,29 +217,41 @@ export async function runCheck(
 
   if (!allFiles || allFiles.length === 0) {
     console.error(chalk.red('\n✖ No translation files found in the specified paths.\n'));
-    return { exitCode: 1, reports: [], sourceLocale, sourceFiles: [], keyCount: 0 };
+    return failedResult(sourceLocale);
+  }
+
+  const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
+  const withoutIgnored = (keys: FlatMap): FlatMap => filterKeys(keys, ignoreMatcher).kept;
+  const localePluralCategories: Record<string, string[]> = {};
+  for (const locale of targetLocales) {
+    const categories = usedPluralCategories(locale);
+    if (categories) localePluralCategories[locale] = categories;
   }
 
   const { missing } = findMissingTranslationsByLocale(
     sourceFiles,
     targetFilesByLocale,
-    { sourceLocale, outputLocales: targetLocales },
-    false
+    { sourceLocale, outputLocales: targetLocales, localePluralCategories },
+    false,
+    console,
+    { ignoreMatcher }
   );
 
-  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: sourceKeysFor(file, sourceLocale) }));
+  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: withoutIgnored(sourceKeysFor(file, sourceLocale)) }));
   const totalSourceKeys = new Set<string>();
   for (const { keys } of sourceKeyMaps) {
     for (const [key, value] of Object.entries(keys)) {
-      if (toStringValue(value) !== '' && toStringValue(value) !== null) totalSourceKeys.add(key);
+      const text = toStringValue(value);
+      if (Array.isArray(value) || (text !== null && text !== '')) totalSourceKeys.add(key);
     }
   }
-
-  const allSourceKeys = Object.assign({}, ...sourceKeyMaps.map(({ keys }) => keys));
+  const allSourceKeys: FlatMap = Object.assign({}, ...sourceKeyMaps.map(({ keys }) => keys));
 
   const reports: LocaleReport[] = targetLocales.map((locale) => {
+    const reshapedKeys = new Set<string>();
     const report: LocaleReport = {
       locale,
+      files: filesFor(locale),
       keyCount: totalSourceKeys.size,
       missing: [],
       empty: [],
@@ -187,36 +261,51 @@ export async function runCheck(
       missingPluralCategories: [],
       orphans: [],
       structureMismatches: [],
-      pluralShapeMismatches: []
+      pluralShapeMismatches: [],
+      conflictingKeys: []
     };
 
+    const targetFiles = targetFilesByLocale[locale] || [];
+    const pairedTargetKeys = new Map<string, FlatMap>();
     for (const { file: sourceFile, keys: sourceKeys } of sourceKeyMaps) {
-      const targetFiles = targetFilesByLocale[locale] || [];
-      const { keys: targetKeys, path: targetPath } = targetKeysFor(targetFiles, locale, sourceFile, sourceLocale);
+      const { keys: allTargetKeys, path: targetPath } = targetKeysFor(targetFiles, locale, sourceFile, sourceLocale);
+      const targetKeys = withoutIgnored(allTargetKeys);
 
       const { empty, identical } = findEmptyAndIdentical(sourceKeys, targetKeys);
-      report.empty.push(...empty.map((f) => ({ ...f, path: targetPath })));
-      report.identical.push(...identical.map((f) => ({ ...f, path: targetPath })));
-      for (const finding of findPlaceholderMismatches(sourceKeys, targetKeys)) {
-        const located = { ...finding, path: targetPath };
-        (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(located);
+      report.empty.push(...withPath(empty, targetPath));
+      report.identical.push(...withPath(identical, targetPath));
+      for (const finding of withPath(findPlaceholderMismatches(sourceKeys, targetKeys), targetPath)) {
+        (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(finding);
       }
-      report.orphans.push(...findOrphanKeys(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath })));
-      report.structureMismatches.push(
-        ...findStructureMismatches(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath }))
-      );
-      report.pluralShapeMismatches.push(
-        ...findPluralShapeMismatches(sourceKeys, targetKeys).map((f) => ({ ...f, path: targetPath }))
-      );
-      report.missingPluralCategories.push(
-        ...findMissingPluralCategories(targetKeys, locale).map((f) => ({ ...f, path: targetPath }))
-      );
+      const structureMismatches = findStructureMismatches(sourceKeys, targetKeys);
+      const pluralShapeMismatches = findPluralShapeMismatches(sourceKeys, targetKeys);
+      report.structureMismatches.push(...withPath(structureMismatches, targetPath));
+      report.pluralShapeMismatches.push(...withPath(pluralShapeMismatches, targetPath));
+      for (const { key } of [...structureMismatches, ...pluralShapeMismatches]) reshapedKeys.add(key);
+      for (const key of findPluralizedFlatKeys(sourceKeys, targetKeys)) reshapedKeys.add(key);
+
+      if (targetPath) pairedTargetKeys.set(targetPath, targetKeys);
+      report.missingPluralCategories.push(...withPath(findMissingPluralCategories(targetKeys, locale), targetPath));
     }
 
+    // Rails merges every file of a locale, so a target key is an orphan only when no source file has it.
+    for (const [targetPath, targetKeys] of pairedTargetKeys) {
+      const reshaped = new Set([...reshapedKeys, ...reshapedKeysBetween(allSourceKeys, targetKeys)]);
+      const orphans = findOrphanKeys(allSourceKeys, targetKeys).filter((f) => !isAtOrUnder(f.key, reshaped));
+      report.orphans.push(...withPath(orphans, targetPath));
+    }
+
+    // Only single-language YAML shares one namespace per locale: gettext domains, i18next namespaces
+    // and multi-language files (often scoped to one view) are separate.
+    report.conflictingKeys = findConflictingKeys(
+      targetFiles.filter((file) => isYaml(file) && !file.multiLanguage).map((file) => ({ path: file.path, keys: withoutIgnored(keysOf(file, locale, sourceLocale)) }))
+    );
+
+    const reportedElsewhere = new Set([...reshapedKeys, ...report.empty.map((f) => f.key)]);
     for (const entry of Object.values(missing)) {
       if (entry.locale !== locale) continue;
       for (const key of Object.keys(entry.keys)) {
-        if (isUnneededPluralLeaf(key, allSourceKeys, locale)) continue;
+        if (ignoreMatcher(key) || isAtOrUnder(key, reportedElsewhere)) continue;
         report.missing.push({ key, path: entry.path, targetPath: entry.targetPath });
       }
     }
@@ -224,26 +313,38 @@ export async function runCheck(
     return report;
   });
 
-  const exitCode = shouldFail(reports, options.failOn || 'missing') ? 1 : 0;
+  const failOn = options.failOn || 'missing';
+  const exitCode = shouldFail(reports, failOn) || (parseFailures.length > 0 && failOn !== 'none') ? 1 : 0;
 
-  return { exitCode, reports, sourceLocale, sourceFiles: sourceFiles.map((f) => f.path), keyCount: totalSourceKeys.size };
+  return {
+    aborted: false,
+    exitCode,
+    reports,
+    sourceLocale,
+    sourceFiles: sourceFiles.map((f) => f.path),
+    keyCount: totalSourceKeys.size,
+    parseFailures
+  };
 }
 
 function shouldFail(reports: LocaleReport[], failOn: FailOn): boolean {
   if (failOn === 'none') return false;
-  const missingCount = reports.reduce((sum, r) => sum + r.missing.length + r.empty.length, 0);
+  const totalMissing = reports.reduce((sum, r) => sum + missingCount(r), 0);
   const placeholderCount = reports.reduce((sum, r) => sum + r.placeholderMismatches.length, 0);
-  if (failOn === 'missing') return missingCount > 0;
+  if (failOn === 'missing') return totalMissing > 0;
   if (failOn === 'placeholders') return placeholderCount > 0;
-  // Orphans never fail a run. A key present only in a translation is as often
-  // a file the tool did not load, or a framework's bundled translations, as it
-  // is a leftover, so it cannot be trusted enough to break someone's CI.
+  // Orphans never fail a run: a target-only key is as often an unloaded file or a
+  // framework's bundled translations as a real leftover, too unreliable to break CI.
   const structureCount = reports.reduce(
     (sum, r) =>
-      sum + r.structureMismatches.length + r.pluralShapeMismatches.length + r.missingPluralCategories.length,
+      sum +
+      r.structureMismatches.length +
+      r.pluralShapeMismatches.length +
+      r.missingPluralCategories.length +
+      r.conflictingKeys.length,
     0
   );
-  return missingCount > 0 || placeholderCount > 0 || structureCount > 0;
+  return totalMissing > 0 || placeholderCount > 0 || structureCount > 0;
 }
 
 function truncate(text: string, max = 60): string {
@@ -258,7 +359,7 @@ function printList<T>(
   render: (item: T) => string,
   all: boolean,
   cap = 10
-) {
+): void {
   if (items.length === 0) return;
   con.log(chalk.bold(`\n${title} (${items.length}):`));
   const shown = all ? items : items.slice(0, cap);
@@ -274,15 +375,16 @@ function printHumanReport(
 ): void {
   con.log(chalk.bold('\nLocale        Keys   Missing  Placeholders  Orphans  Complete'));
   for (const r of reports) {
-    const complete = keyCount === 0 ? 100 : Math.round(((keyCount - r.missing.length - r.empty.length) / keyCount) * 100);
+    const missing = missingCount(r);
+    const complete = keyCount === 0 ? 100 : Math.round(((keyCount - missing) / keyCount) * 100);
     con.log(
-      `${r.locale.padEnd(14)}${String(keyCount).padEnd(7)}${String(r.missing.length + r.empty.length).padEnd(9)}${String(r.placeholderMismatches.length).padEnd(14)}${String(r.orphans.length).padEnd(9)}${complete}%`
+      `${r.locale.padEnd(14)}${String(keyCount).padEnd(7)}${String(missing).padEnd(9)}${String(r.placeholderMismatches.length).padEnd(14)}${String(r.orphans.length).padEnd(9)}${complete}%`
     );
   }
 
   const totalPlaceholders = reports.reduce((sum, r) => sum + r.placeholderMismatches.length, 0);
   const totalOrphans = reports.reduce((sum, r) => sum + r.orphans.length, 0);
-  const totalMissing = reports.reduce((sum, r) => sum + r.missing.length + r.empty.length, 0);
+  const totalMissing = reports.reduce((sum, r) => sum + missingCount(r), 0);
   const totalPossible = keyCount * reports.length;
   const overallComplete = totalPossible === 0 ? 100 : Math.round(((totalPossible - totalMissing) / totalPossible) * 100);
   con.log(
@@ -293,7 +395,7 @@ function printHumanReport(
 
   for (const r of reports) {
     con.log(chalk.bold(`\n== ${r.locale} ==`));
-    printList(con, 'Missing keys', r.missing, (m) => `${m.key}`, all);
+    printList(con, 'Missing keys', r.missing, (m) => m.key, all);
     printList(con, 'Empty values', r.empty, (m) => `${m.key}: "${truncate(m.source)}" -> ""`, all);
     printList(
       con,
@@ -320,7 +422,7 @@ function printHumanReport(
       (m) => `${m.key}: source is ${m.sourceShape}, target is ${m.targetShape}`,
       all
     );
-    printList(con, 'Plural shape mismatches', r.pluralShapeMismatches, (m) => `${m.key}`, all);
+    printList(con, 'Plural shape mismatches', r.pluralShapeMismatches, (m) => m.key, all);
     printList(
       con,
       'Missing plural categories (falls back to `other`)',
@@ -330,49 +432,64 @@ function printHumanReport(
     );
     printList(
       con,
-      'Identical to source (hint)',
-      r.identical,
-      (m) => `${m.key}: "${truncate(m.value)}"`,
+      'Conflicting values (defined differently in several files)',
+      r.conflictingKeys,
+      (m) => `${m.key}: ${m.files.join(', ')}`,
       all
     );
+    printList(con, 'Identical to source (hint)', r.identical, (m) => `${m.key}: "${truncate(m.value)}"`, all);
   }
 }
 
+function escapeAnnotationData(text: string): string {
+  return text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+function escapeAnnotationProperty(text: string): string {
+  return escapeAnnotationData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
+}
+
 function printGithubAnnotations(con: CheckDependencies['console'], reports: LocaleReport[]): void {
-  // Locale files parsed here are not tracked with line numbers, so
-  // annotations are file-level rather than line-level. That is honest
-  // about what this command can locate, not a guess.
+  const annotate = (level: 'error' | 'warning' | 'notice', file: string, message: string) =>
+    con.log(`::${level} file=${escapeAnnotationProperty(file)}::${escapeAnnotationData(message)}`);
+
+  // Parsed locale files carry no line numbers, so annotations are file-level.
   for (const r of reports) {
     for (const m of r.missing) {
-      con.log(`::error file=${m.targetPath}::Missing translation for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.targetPath, `Missing translation for "${m.key}" (locale ${r.locale})`);
     }
     for (const m of r.empty) {
-      con.log(`::error file=${m.path}::Empty translation for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Empty translation for "${m.key}" (locale ${r.locale})`);
     }
     for (const m of r.placeholderMismatches) {
-      con.log(`::error file=${m.path}::Placeholder mismatch for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Placeholder mismatch for "${m.key}" (locale ${r.locale})`);
     }
     for (const m of r.missingPluralCategories) {
-      con.log(`::error file=${m.path}::"${m.key}" lacks plural forms ${m.missing.join(', ')} (locale ${r.locale})`);
+      annotate('error', m.path, `"${m.key}" lacks plural forms ${m.missing.join(', ')} (locale ${r.locale})`);
     }
     for (const m of r.placeholderHints) {
-      con.log(`::notice file=${m.path}::Plural form omits ${m.missingInTarget.join(', ')} for "${m.key}" (locale ${r.locale})`);
+      annotate('notice', m.path, `Plural form omits ${m.missingInTarget.join(', ')} for "${m.key}" (locale ${r.locale})`);
     }
     for (const m of r.orphans) {
-      con.log(`::warning file=${m.path}::Orphan key "${m.key}" (locale ${r.locale}) no longer in source`);
+      annotate('warning', m.path, `Orphan key "${m.key}" (locale ${r.locale}) no longer in source`);
     }
     for (const m of r.structureMismatches) {
-      con.log(`::error file=${m.path}::Structure mismatch for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Structure mismatch for "${m.key}" (locale ${r.locale})`);
     }
     for (const m of r.pluralShapeMismatches) {
-      con.log(`::error file=${m.path}::Plural shape mismatch for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Plural shape mismatch for "${m.key}" (locale ${r.locale})`);
+    }
+    for (const m of r.conflictingKeys) {
+      annotate('error', m.files[0], `"${m.key}" has different values in ${m.files.join(', ')} (locale ${r.locale})`);
     }
   }
 }
 
 export async function check(options: CheckOptions = {}, deps: CheckDependencies = defaultDeps): Promise<void> {
-  const con = deps.console ?? console;
-  const { exitCode, reports, sourceLocale, sourceFiles, keyCount } = await runCheck(options, deps);
+  const con = deps.console;
+  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures } = await runCheck(options, deps);
+  process.exitCode = exitCode;
+  if (aborted) return;
 
   if (options.json) {
     con.log(
@@ -380,8 +497,10 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
         sourceLocale,
         sourceFiles,
         keyCount,
+        parseFailures,
         locales: reports.map((r) => ({
           locale: r.locale,
+          files: r.files,
           keyCount: r.keyCount,
           missing: r.missing,
           empty: r.empty,
@@ -391,7 +510,8 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
           missingPluralCategories: r.missingPluralCategories,
           orphans: r.orphans,
           structureMismatches: r.structureMismatches,
-          pluralShapeMismatches: r.pluralShapeMismatches
+          pluralShapeMismatches: r.pluralShapeMismatches,
+          conflictingKeys: r.conflictingKeys
         }))
       })
     );
@@ -400,6 +520,4 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   } else {
     printHumanReport(con, reports, keyCount, Boolean(options.all));
   }
-
-  process.exitCode = exitCode;
 }

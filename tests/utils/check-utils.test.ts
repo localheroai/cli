@@ -6,7 +6,7 @@ import {
   findPluralShapeMismatches,
   findEmptyAndIdentical,
   findMissingPluralCategories,
-  isUnneededPluralLeaf
+  findConflictingKeys
 } from '../../src/utils/check-utils.js';
 
 describe('findOrphanKeys', () => {
@@ -81,6 +81,20 @@ describe('findStructureMismatches', () => {
     ]);
   });
 
+  it('flags a flattened string source whose target became a map', () => {
+    const source = { example: '{ "a": 1 }', title: 'T' };
+    const target = { 'example.a': 1, title: 'T' };
+    expect(findStructureMismatches(source, target)).toEqual([
+      { key: 'example', sourceShape: 'string', targetShape: 'map' }
+    ]);
+  });
+
+  it('does not flag a target that pluralizes a flat source string', () => {
+    const source = { items: '%{count} items' };
+    const target = { 'items.one': '%{count} rzecz', 'items.few': '%{count} rzeczy', 'items.other': '%{count} rzeczy' };
+    expect(findStructureMismatches(source, target)).toEqual([]);
+  });
+
   it('does not flag a missing target value as a structure mismatch', () => {
     const source = { title: { nested: 'Hello' } };
     const target = {};
@@ -150,6 +164,19 @@ describe('plural forms', () => {
     expect(finding.hint).toBe(true);
   });
 
+  it('keeps a count dropped from a Rails `other` or `few` form as a real mismatch', () => {
+    const found = findPlaceholderMismatches(
+      { 'items.other': '%{count} items', 'items.few': '%{count} items' },
+      { 'items.other': 'objekt', 'items.few': 'rzeczy' }
+    );
+    expect(found.map((f) => f.hint)).toEqual([undefined, undefined]);
+  });
+
+  it('keeps a count dropped from an i18next `_other` form as a real mismatch', () => {
+    const [finding] = findPlaceholderMismatches({ msg_other: '{{count}} messages' }, { msg_other: 'meddelanden' });
+    expect(finding.hint).toBeUndefined();
+  });
+
   it('keeps a placeholder a plural form ADDS as a real mismatch', () => {
     const [finding] = findPlaceholderMismatches(
       { 'items.one': 'One item' },
@@ -189,24 +216,80 @@ describe('findMissingPluralCategories', () => {
 });
 
 describe('plural groups with categories only some languages use (#636 workaround)', () => {
-  const source = {
-    'archived.one': '%{count} task',
-    'archived.few': '%{count} tasks',
-    'archived.many': '%{count} tasks',
-    'archived.other': '%{count} tasks'
-  };
-
-  it('does not count Swedish as missing `few`/`many` it never uses', () => {
-    expect(isUnneededPluralLeaf('archived.few', source, 'sv')).toBe(true);
-    expect(isUnneededPluralLeaf('archived.few', source, 'pl')).toBe(false);
-    expect(isUnneededPluralLeaf('archived.other', source, 'sv')).toBe(false);
-  });
-
   it('does not report Polish `few`/`many` under an English `one`/`other` group as orphans', () => {
     const orphans = findOrphanKeys(
       { 'n.one': 'a', 'n.other': 'b' },
       { 'n.one': 'a', 'n.few': 'c', 'n.many': 'd', 'n.other': 'b', 'old.few': 'e' }
     );
     expect(orphans.map((o) => o.key)).toEqual(['old.few']);
+  });
+});
+
+describe('findConflictingKeys', () => {
+  it('reports a key two files define with different values', () => {
+    const found = findConflictingKeys([
+      { path: 'config/locales/app/sv.yml', keys: { 'app.title': 'Ny titel', 'app.ok': 'OK' } },
+      { path: 'config/locales/pages/sv.yml', keys: { 'app.title': 'Gammal titel', 'app.ok': 'OK' } }
+    ]);
+    expect(found).toEqual([
+      {
+        key: 'app.title',
+        files: ['config/locales/app/sv.yml', 'config/locales/pages/sv.yml'],
+        values: ['Ny titel', 'Gammal titel']
+      }
+    ]);
+  });
+
+  it('does not report a key defined with the same value in several files', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { title: 'Titel', days: ['Mån', 'Tis'] } },
+      { path: 'b/sv.yml', keys: { title: 'Titel', days: ['Mån', 'Tis'] } }
+    ]);
+    expect(found).toEqual([]);
+  });
+
+  it('lists every file defining a conflicting key, including ones that agree', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { title: 'Titel' } },
+      { path: 'b/sv.yml', keys: { title: 'Titel' } },
+      { path: 'c/sv.yml', keys: { title: 'Rubrik' } }
+    ]);
+    expect(found).toEqual([
+      { key: 'title', files: ['a/sv.yml', 'b/sv.yml', 'c/sv.yml'], values: ['Titel', 'Titel', 'Rubrik'] }
+    ]);
+  });
+
+  it('compares arrays by content', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { days: ['Mån', 'Tis'] } },
+      { path: 'b/sv.yml', keys: { days: ['Mån', 'Ons'] } }
+    ]);
+    expect(found).toEqual([
+      { key: 'days', files: ['a/sv.yml', 'b/sv.yml'], values: ['["Mån","Tis"]', '["Mån","Ons"]'] }
+    ]);
+  });
+
+  it('ignores a key left without a value in one file', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { title: 'Titel' } },
+      { path: 'b/sv.yml', keys: { title: null } }
+    ]);
+    expect(found).toEqual([]);
+  });
+
+  it('treats an empty string as a value that conflicts with text', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { title: 'Titel' } },
+      { path: 'b/sv.yml', keys: { title: '' } }
+    ]);
+    expect(found.map((f) => f.key)).toEqual(['title']);
+  });
+
+  it('reports false and 0 as values', () => {
+    const found = findConflictingKeys([
+      { path: 'a/sv.yml', keys: { enabled: true, precision: 2 } },
+      { path: 'b/sv.yml', keys: { enabled: false, precision: 0 } }
+    ]);
+    expect(found.map((f) => f.key)).toEqual(['enabled', 'precision']);
   });
 });

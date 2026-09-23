@@ -1,12 +1,5 @@
 import { placeholderMultiset } from './placeholders.js';
 
-/**
- * Pure, dependency-free checks over flattened key->value maps (the same
- * shape `flattenTranslations` produces). Each function takes a source map
- * and a target map and returns a plain list of findings; none of them read
- * files, call the network, or know about the CLI's config or reporting.
- */
-
 export type FlatValue = unknown;
 export type FlatMap = Record<string, FlatValue>;
 
@@ -16,16 +9,14 @@ export function toStringValue(entry: FlatValue): string | null {
   if (typeof entry === 'string') return entry;
   if (typeof entry === 'number' || typeof entry === 'boolean') return String(entry);
   if (Array.isArray(entry)) return null;
-  if (typeof entry === 'object' && 'value' in (entry as Record<string, unknown>)) {
-    return toStringValue((entry as Record<string, unknown>).value);
-  }
+  if (typeof entry === 'object' && 'value' in entry) return toStringValue(entry.value);
   return null;
 }
 
 function shapeOf(entry: FlatValue): 'string' | 'array' | 'map' | 'empty' {
   if (entry === null || entry === undefined) return 'empty';
   if (Array.isArray(entry)) return 'array';
-  if (typeof entry === 'object' && !('value' in (entry as Record<string, unknown>))) return 'map';
+  if (typeof entry === 'object' && !('value' in entry)) return 'map';
   return 'string';
 }
 
@@ -34,7 +25,6 @@ export interface OrphanFinding {
   target: string | null;
 }
 
-/** Keys present in the target but no longer present in the source. */
 export function findOrphanKeys(sourceKeys: FlatMap, targetKeys: FlatMap): OrphanFinding[] {
   const orphans: OrphanFinding[] = [];
   const sourcePluralBases = gettextPluralBases(Object.keys(sourceKeys));
@@ -53,7 +43,6 @@ export function findOrphanKeys(sourceKeys: FlatMap, targetKeys: FlatMap): Orphan
 }
 
 export interface PlaceholderMismatch {
-  /** True when the only difference is a placeholder the plural form omits. */
   hint?: boolean;
   key: string;
   source: string;
@@ -63,15 +52,8 @@ export interface PlaceholderMismatch {
 }
 
 /**
- * Compares interpolation placeholders in the source string against the
- * target string. Only scalar leaves with an actual value on both sides are
- * checked; a missing target is reported separately by `findMissingKeys`.
- *
- * A plural form is allowed to omit a placeholder the source uses. Rails only
- * renders `one` when the count is 1, so "1 språk" for "%{count} language" is
- * correct, and Arabic's `zero` form legitimately contains no number at all.
- * Those are reported as hints. A placeholder the translation *adds*, or any
- * difference outside a plural form, stays a mismatch.
+ * A `zero`/`one`/`two` form may omit a placeholder ("1 språk" for "%{count} language"), as may any
+ * numbered gettext form. Such omissions are hints; anything else, including an added placeholder, is a mismatch.
  */
 export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): PlaceholderMismatch[] {
   const mismatches: PlaceholderMismatch[] = [];
@@ -98,8 +80,9 @@ export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatM
 
     if (missingInTarget.length === 0 && unexpectedInTarget.length === 0) continue;
 
+    // A gettext singular is compared against whichever form the target language puts first.
     const omissionInPluralForm =
-      unexpectedInTarget.length === 0 && (isPluralForm(key) || pluralBases.has(key));
+      unexpectedInTarget.length === 0 && (mayOmitPlaceholder(key) || pluralBases.has(key));
     mismatches.push({
       key,
       source,
@@ -119,15 +102,21 @@ export interface StructureMismatch {
 }
 
 /**
- * Flags a leaf whose shape differs between source and target: a string in
- * one and a map or array in the other. Both sides being 'empty' (null) is
- * not a mismatch — that is a missing-value finding, not a shape problem.
+ * Flattening turns a target map into child keys, so a source string that is only a parent in the
+ * target became a map. A target that pluralizes a flat string is allowed, as Rails supports that.
  */
 export function findStructureMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): StructureMismatch[] {
   const mismatches: StructureMismatch[] = [];
+  const targetChildren = childLeavesByParent(Object.keys(targetKeys));
   for (const key of Object.keys(sourceKeys)) {
-    if (!(key in targetKeys)) continue;
     const sourceShape = shapeOf(sourceKeys[key]);
+    if (!(key in targetKeys)) {
+      const children = targetChildren.get(key);
+      if (sourceShape === 'string' && children && !isPluralLeafSet(children)) {
+        mismatches.push({ key, sourceShape, targetShape: 'map' });
+      }
+      continue;
+    }
     const targetShape = shapeOf(targetKeys[key]);
     if (sourceShape === 'empty' || targetShape === 'empty') continue;
     if (sourceShape !== targetShape) {
@@ -137,26 +126,45 @@ export function findStructureMismatches(sourceKeys: FlatMap, targetKeys: FlatMap
   return mismatches;
 }
 
-/**
- * gettext catalogues flatten plural forms to `key__plural_N` (see
- * po-utils.ts's PLURAL_PREFIX). Matched here rather than imported so this
- * module stays free of parser dependencies.
- */
-const GETTEXT_PLURAL_SUFFIX = /__plural_\d+$/;
-
-/** `count.one`, `count_one`, `count_plural` and `item__plural_2`. */
-function isPluralForm(key: string): boolean {
-  if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
-  const leaf = key.slice(key.lastIndexOf('.') + 1);
-  return RAILS_PLURAL_LEAVES.has(leaf) || I18NEXT_PLURAL_SUFFIXES.some((suffix) => leaf.endsWith(suffix));
+export function findPluralizedFlatKeys(sourceKeys: FlatMap, targetKeys: FlatMap): string[] {
+  const targetChildren = childLeavesByParent(Object.keys(targetKeys));
+  return Object.keys(sourceKeys).filter((key) => {
+    const children = targetChildren.get(key);
+    return !(key in targetKeys) && shapeOf(sourceKeys[key]) === 'string' && children && isPluralLeafSet(children);
+  });
 }
 
-/**
- * Base keys of gettext plural entries, e.g. `item` for `item__plural_1`. The
- * singular of a plural entry is compared against whichever form the target
- * language happens to put first, so it gets the same latitude as the other
- * forms.
- */
+function childLeavesByParent(keys: string[]): Map<string, Set<string>> {
+  const children = new Map<string, Set<string>>();
+  for (const key of keys) {
+    let end = key.lastIndexOf('.');
+    let child = key.slice(end + 1);
+    while (end !== -1) {
+      const parent = key.slice(0, end);
+      if (!children.has(parent)) children.set(parent, new Set());
+      children.get(parent)!.add(child);
+      child = parent.slice(parent.lastIndexOf('.') + 1);
+      end = parent.lastIndexOf('.');
+    }
+  }
+  return children;
+}
+
+function isPluralLeafSet(leaves: Set<string>): boolean {
+  return [...leaves].every((leaf) => RAILS_PLURAL_LEAVES.has(leaf));
+}
+
+/** Mirrors po-utils.ts's PLURAL_PREFIX; not imported so this module stays free of parser dependencies. */
+const GETTEXT_PLURAL_SUFFIX = /__plural_\d+$/;
+
+const COUNT_OPTIONAL_CATEGORIES = ['zero', 'one', 'two'];
+
+function mayOmitPlaceholder(key: string): boolean {
+  if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
+  const leaf = leafOf(key);
+  return COUNT_OPTIONAL_CATEGORIES.some((category) => leaf === category || leaf.endsWith(`_${category}`));
+}
+
 function gettextPluralBases(keys: string[]): Set<string> {
   const bases = new Set<string>();
   for (const key of keys) {
@@ -168,16 +176,15 @@ function gettextPluralBases(keys: string[]): Set<string> {
 const RAILS_PLURAL_LEAVES = new Set(['zero', 'one', 'two', 'few', 'many', 'other']);
 const I18NEXT_PLURAL_SUFFIXES = ['_zero', '_one', '_two', '_few', '_many', '_other', '_plural'];
 
-// A lone `status.other` with no sibling `status.one` etc. is not a real
-// plural group (see translation-utils.ts's isPluralForm) — it only counts
-// once at least two CLDR-category siblings share the same parent.
+// A lone `status.other` is not a plural group (see translation-utils.ts's isPluralForm);
+// it takes at least two CLDR-category siblings under one parent.
 function pluralParentsOf(keys: string[]): Set<string> {
   const railsCandidates = new Map<string, Set<string>>();
   const i18nextParents = new Set<string>();
 
   for (const key of keys) {
     const lastDot = key.lastIndexOf('.');
-    const leaf = lastDot === -1 ? key : key.slice(lastDot + 1);
+    const leaf = leafOf(key);
     const parent = lastDot === -1 ? '' : key.slice(0, lastDot);
     if (RAILS_PLURAL_LEAVES.has(leaf)) {
       if (!railsCandidates.has(parent)) railsCandidates.set(parent, new Set());
@@ -203,12 +210,7 @@ export interface PluralShapeMismatch {
   key: string;
 }
 
-/**
- * Flags a source key group that has plural sub-keys (Rails one/other, or
- * i18next _one/_plural suffixes) where the target has no plural forms at
- * all for that group, even though the target file does have *something*
- * under that key (otherwise it is a plain missing-key finding).
- */
+/** A source plural group the target has content for but no plural forms; with no content it is simply missing. */
 export function findPluralShapeMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): PluralShapeMismatch[] {
   const sourceParents = pluralParentsOf(Object.keys(sourceKeys));
   const targetParents = pluralParentsOf(Object.keys(targetKeys));
@@ -235,12 +237,7 @@ export interface IdenticalFinding {
   value: string;
 }
 
-/**
- * Two separate findings, deliberately not conflated: an empty target
- * string is a real gap, while a target that is byte-identical to the
- * source is only a hint — short words and proper nouns are legitimately
- * identical across languages, so this must never be reported as an error.
- */
+/** Identical text is only a hint, never an error: short words and proper nouns are often the same across languages. */
 export function findEmptyAndIdentical(
   sourceKeys: FlatMap,
   targetKeys: FlatMap
@@ -268,11 +265,7 @@ export interface MissingPluralCategories {
   missing: string[];
 }
 
-/**
- * Rails plural groups (`key.one`, `key.other`) in the target that lack
- * categories the target language needs, e.g. Polish without `few`/`many`.
- * Rails then silently falls back to `other`, rendering fluent but wrong text.
- */
+/** E.g. Polish without `few`/`many`: Rails silently falls back to `other`, rendering fluent but wrong text. */
 export function findMissingPluralCategories(targetKeys: FlatMap, locale: string): MissingPluralCategories[] {
   const required = usedPluralCategories(locale);
   if (!required) return [];
@@ -282,6 +275,36 @@ export function findMissingPluralCategories(targetKeys: FlatMap, locale: string)
     if (missing.length) findings.push({ key, missing });
   }
   return findings;
+}
+
+export interface ConflictingKey {
+  key: string;
+  files: string[];
+  values: string[];
+}
+
+/**
+ * Rails merges every YAML file of a locale into one namespace, so a key defined twice with
+ * different values silently takes whichever file loads last. `values[i]` is the value in `files[i]`.
+ */
+export function findConflictingKeys(files: { path: string; keys: FlatMap }[]): ConflictingKey[] {
+  const definitions = new Map<string, { files: string[]; values: string[] }>();
+  for (const { path, keys } of files) {
+    for (const [key, entry] of Object.entries(keys)) {
+      const value = Array.isArray(entry) ? JSON.stringify(entry) : toStringValue(entry);
+      if (value === null) continue;
+      if (!definitions.has(key)) definitions.set(key, { files: [], values: [] });
+      const definition = definitions.get(key)!;
+      definition.files.push(path);
+      definition.values.push(value);
+    }
+  }
+
+  const conflicts: ConflictingKey[] = [];
+  for (const [key, definition] of definitions) {
+    if (new Set(definition.values).size > 1) conflicts.push({ key, ...definition });
+  }
+  return conflicts;
 }
 
 function leafOf(key: string): string {
@@ -296,10 +319,11 @@ function parentOf(key: string): string {
 function railsPluralGroups(keys: FlatMap): Map<string, Set<string>> {
   const groups = new Map<string, Set<string>>();
   for (const key of Object.keys(keys)) {
-    if (!key.includes('.') || !RAILS_PLURAL_LEAVES.has(leafOf(key))) continue;
+    const leaf = leafOf(key);
+    if (!key.includes('.') || !RAILS_PLURAL_LEAVES.has(leaf)) continue;
     const parent = parentOf(key);
     if (!groups.has(parent)) groups.set(parent, new Set());
-    groups.get(parent)!.add(leafOf(key));
+    groups.get(parent)!.add(leaf);
   }
   for (const [parent, leaves] of groups) {
     if (!leaves.has('other') || leaves.size < 2) groups.delete(parent);
@@ -308,9 +332,8 @@ function railsPluralGroups(keys: FlatMap): Map<string, Set<string>> {
 }
 
 /**
- * Plural categories a locale uses for everyday counts, or null for an unknown
- * locale. CLDR gives es/fr/it/pt a `many` for 1,000,000 that rails-i18n does
- * not implement and no one writes, so only categories 0..1000 reach count.
+ * Null for an unknown locale. Only categories reached by 0..1000 count: CLDR gives es/fr/it/pt
+ * a `many` for 1,000,000 that rails-i18n does not implement and no one writes.
  */
 export function usedPluralCategories(locale: string): string[] | null {
   try {
@@ -320,13 +343,4 @@ export function usedPluralCategories(locale: string): string[] | null {
   } catch {
     return null;
   }
-}
-
-/** A missing `sv` `few`: the source has it for Polish's sake, Swedish never uses it. */
-export function isUnneededPluralLeaf(key: string, sourceKeys: FlatMap, locale: string): boolean {
-  const leaf = leafOf(key);
-  if (!key.includes('.') || !RAILS_PLURAL_LEAVES.has(leaf) || leaf === 'other') return false;
-  if (!railsPluralGroups(sourceKeys).has(parentOf(key))) return false;
-  const used = usedPluralCategories(locale);
-  return used !== null && !used.includes(leaf);
 }

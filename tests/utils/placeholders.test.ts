@@ -26,8 +26,7 @@ describe('extractPlaceholders', () => {
       { kind: 'printf', name: 's' },
       { kind: 'printf', name: 'd' }
     ]);
-    // A positional directive carries its conversion type, not its index: the
-    // index is what a translator is allowed to change.
+    // The index is what a translator may change, so only the conversion type is kept.
     expect(extractPlaceholders('%1$s of %2$s')).toEqual([
       { kind: 'positional', name: 's' },
       { kind: 'positional', name: 's' }
@@ -41,6 +40,11 @@ describe('extractPlaceholders', () => {
   it('does not treat a literal percent sign followed by a space as a directive', () => {
     expect(extractPlaceholders('Save 10% off')).toEqual([]);
     expect(extractPlaceholders('100%')).toEqual([]);
+  });
+
+  it('extracts unescaped and formatted i18next placeholders by name', () => {
+    expect(extractPlaceholders('Hi {{- name}}')).toEqual([{ kind: 'i18next', name: 'name' }]);
+    expect(extractPlaceholders('{{val, number}} items')).toEqual([{ kind: 'i18next', name: 'val' }]);
   });
 
   it('returns nothing for a plain string with no placeholders', () => {
@@ -91,6 +95,11 @@ describe('printf directives', () => {
 
   it('reads a directive immediately followed by a word', () => {
     expect(tokens('%g %sbyte(s)')).toEqual(tokens('%g %sbytes'));
+  });
+
+  it('does not read a percent glued to a number as a directive', () => {
+    expect(tokens('Save 5%discount')).toEqual([]);
+    expect(tokens('%d%s done')).toEqual(['printf:d', 'printf:s']);
   });
 
   it('ignores an escaped percent', () => {

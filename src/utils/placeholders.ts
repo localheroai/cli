@@ -1,15 +1,10 @@
 /**
- * Extracts interpolation placeholders from a translation string so two
- * strings can be compared for structural equivalence, independent of the
- * words around them.
- *
- * Order in the alternation matters: `%%` must be consumed before anything
- * else so an escaped percent cannot start a directive, `{{name}}` must be
- * tried before `{name}`, and `%<name>s` before a bare `%s`, or the shorter
- * pattern would eat part of the longer one and silently miscount both.
+ * Alternation order matters: `%%` first so an escaped percent cannot start a directive, and longer
+ * forms (`{{name}}`, `%<name>s`) before the shorter ones they contain, or both are miscounted.
+ * A `%` right after a digit ("5%discount") is a literal percent sign, not a directive.
  */
 const PLACEHOLDER_PATTERN =
-  /(%%)|\{\{\s*([\w.]+)\s*\}\}|%<([\w.]+)>[sdf]|%\{([\w.]+)\}|%\(([\w.]+)\)[sdf]|%(\d+)\$([sdfiugx])|%([sdfiugx])|\{([\w.]+)\}/g;
+  /(%%)|\{\{\s*-?\s*([\w.]+)\s*(?:,[^}]*)?\}\}|%<([\w.]+)>[sdf]|%\{([\w.]+)\}|%\(([\w.]+)\)[sdf]|%(\d+)\$([sdfiugx])|(?<!\d)%([sdfiugx])|\{([\w.]+)\}/g;
 
 export type PlaceholderKind =
   | 'i18next' // {{name}}
@@ -26,19 +21,15 @@ export interface Placeholder {
 }
 
 /**
- * ICU complex arguments such as `{count, plural, one {# item} other {# items}}`
- * contain literal branch text that is not a placeholder. Left alone, a branch
- * value of a single word ({He}, {Han}) is read as an ICU placeholder and two
- * correct translations are reported as a mismatch. Reduce each complex
- * argument to its bare argument name before extraction, so only `{count}`
- * remains and the translated branch text is ignored.
+ * Branch text in `{count, plural, one {# item} ...}` is not a placeholder, but a one-word
+ * branch ({He}, {Han}) would read as one, so each complex argument is reduced to `{count}`.
  */
 const ICU_COMPLEX_START = /\{\s*([\w.]+)\s*,\s*(plural|select|selectordinal)\s*,/g;
+const MAX_ICU_REDUCTIONS = 20;
 
 export function reduceIcuComplexArguments(text: string): string {
   let result = text;
-  let guard = 0;
-  while (guard++ < 20) {
+  for (let pass = 0; pass < MAX_ICU_REDUCTIONS; pass++) {
     ICU_COMPLEX_START.lastIndex = 0;
     const match = ICU_COMPLEX_START.exec(result);
     if (!match) break;
@@ -49,7 +40,6 @@ export function reduceIcuComplexArguments(text: string): string {
   return result;
 }
 
-/** Index of the `}` closing the `{` at `start`, or -1 if unbalanced. */
 function matchingBrace(text: string, start: number): number {
   let depth = 0;
   for (let i = start; i < text.length; i++) {
@@ -82,17 +72,14 @@ function classify(full: string): PlaceholderKind {
 }
 
 /**
- * gettext lets a translator renumber printf arguments to fit the grammar of
- * the target language: "%s: %s" can legitimately become "%2$s: %1$s". The
- * conversion is what has to match, not the position, so a positional
- * directive is compared as an ordinary printf one of the same type.
+ * gettext lets translators reorder arguments ("%s: %s" as "%2$s: %1$s"), so a positional
+ * directive compares as a plain printf one of the same conversion type.
  */
 function token(placeholder: Placeholder): string {
   if (placeholder.kind === 'positional') return `printf:${placeholder.name}`;
   return `${placeholder.kind}:${placeholder.name}`;
 }
 
-/** Multiset of placeholder tokens, keyed by "kind:name" -> count. */
 export function placeholderMultiset(text: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const placeholder of extractPlaceholders(text)) {
