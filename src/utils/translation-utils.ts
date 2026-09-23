@@ -155,6 +155,29 @@ function yamlPluralGroupBases(sourceKeys: Record<string, any>): Set<string> {
   return bases;
 }
 
+// The same rule read from the parsed YAML tree, which unlike flattened keys
+// can tell a nested `foo: { one:, other: }` from literal `"foo.one"` keys.
+export function yamlPluralGroupBasesFromTree(node: unknown, prefix = ''): Set<string> {
+  const bases = new Set<string>();
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return bases;
+
+  const entries = Object.entries(node as Record<string, unknown>);
+  const isGroup = prefix !== '' && entries.length >= 2 && entries.every(
+    ([key, value]) => CLDR_CATEGORIES.includes(key) && (value === null || typeof value !== 'object')
+  );
+  if (isGroup) {
+    bases.add(prefix);
+    return bases;
+  }
+
+  for (const [key, value] of entries) {
+    for (const base of yamlPluralGroupBasesFromTree(value, prefix ? `${prefix}.${key}` : key)) {
+      bases.add(base);
+    }
+  }
+  return bases;
+}
+
 function yamlPluralMetadata(base: string, category: string) {
   return { plural: true, plural_format: 'yaml', plural_category: category, plural_base: base };
 }
@@ -162,7 +185,8 @@ function yamlPluralMetadata(base: string, category: string) {
 export function findMissingTranslations(
   sourceKeys: Record<string, any>,
   targetKeys: Record<string, any>,
-  localeCategories?: string[]
+  localeCategories?: string[],
+  sourcePluralBases?: Set<string>
 ): TranslationKeysResult {
   const missingKeys: Record<string, SourceKeyDetails> = {};
   const skippedKeys: Record<string, SkippedKeyDetails> = {};
@@ -302,7 +326,7 @@ export function findMissingTranslations(
   // Only fires when the settings endpoint supplied localeCategories: a JSON
   // source gets `undefined` and behaves exactly as before.
   if (localeCategories) {
-    const pluralBases = yamlPluralGroupBases(sourceKeys);
+    const pluralBases = sourcePluralBases ?? yamlPluralGroupBases(sourceKeys);
 
     // Stamp real plural forms the way the importer does, so a group that first
     // reaches the backend through translate (a new group in a PR) is recognised
@@ -380,13 +404,11 @@ export function findMissingTranslationsByLocale(
     const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
     const sourceContent = parseFile(sourceContentRaw, sourceFile.format, sourceFile.path);
     const sourceWrapper = sourceContent[config.sourceLocale];
-    const sourceKeys = flattenTranslations(
-      sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
-        ? sourceWrapper
-        : sourceContent,
-      '',
-      sourceFile.format
-    );
+    const sourceTree = sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
+      ? sourceWrapper
+      : sourceContent;
+    const sourceKeys = flattenTranslations(sourceTree, '', sourceFile.format);
+    const sourcePluralBases = yamlPluralGroupBasesFromTree(sourceTree);
 
     let effectiveSourceKeys = sourceKeys;
     if (matcher) {
@@ -404,7 +426,8 @@ export function findMissingTranslationsByLocale(
         sourceFile,
         config.sourceLocale,
         matcher,
-        config.localePluralCategories?.[targetLocale]
+        config.localePluralCategories?.[targetLocale],
+        sourcePluralBases
       );
 
       if (result.targetRemoved && result.targetRemoved.length > 0) {
@@ -771,7 +794,8 @@ export function processLocaleTranslations(
   sourceFile: TranslationFile,
   sourceLocale: string,
   matcher?: (keyName: string) => boolean,
-  localeCategories?: string[]
+  localeCategories?: string[],
+  sourcePluralBases?: Set<string>
 ): ProcessLocaleResult & { targetRemoved?: string[] } {
   try {
     const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
@@ -853,7 +877,8 @@ export function processLocaleTranslations(
       const result = findMissingTranslations(
         sourceKeys,
         targetKeys,
-        isYamlFile ? localeCategories : undefined
+        isYamlFile ? localeCategories : undefined,
+        isYamlFile ? sourcePluralBases : undefined
       );
       missingKeys = result.missingKeys;
       skippedKeys = result.skippedKeys;

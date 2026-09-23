@@ -1,5 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile, yamlPluralGroupBasesFromTree } from '../../src/utils/translation-utils.js';
 import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
 import { createIgnoreMatcher } from '../../src/utils/ignore-keys.js';
 
@@ -665,6 +665,37 @@ describe('translation-utils', () => {
         const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
         expect(keys).toContain('questions_remaining.one');
       });
+    });
+  });
+
+  describe('plural groups from the YAML tree (#636)', () => {
+    const yamlFile = (tree) => [{ path: 'config/locales/en.yml', format: 'yml', content: createBase64Content({ en: tree }) }];
+    const polish = { sourceLocale: 'en', outputLocales: ['pl'], localePluralCategories: { pl: ['one', 'few', 'many', 'other'] } };
+    const requested = (result) => Object.assign({}, ...Object.values(result.missing).map((e) => e.keys));
+
+    it('finds nested groups whose children are all CLDR categories', () => {
+      const bases = yamlPluralGroupBasesFromTree({
+        board: { overdue: { one: 'a', other: 'b' }, title: 'x' },
+        home_type: { loft: 'Loft', other: 'Other' },
+        nested: { one: { deep: 'x' }, other: 'y' }
+      });
+      expect([...bases]).toEqual(['board.overdue']);
+    });
+
+    it('stamps and completes a nested plural group', () => {
+      const keys = requested(findMissingTranslationsByLocale(
+        yamlFile({ overdue: { one: '1 task', other: '%{count} tasks' } }), {}, polish, false
+      ));
+      expect(Object.keys(keys).sort()).toEqual(['overdue.few', 'overdue.many', 'overdue.one', 'overdue.other']);
+      expect(keys['overdue.one'].metadata.plural_format).toBe('yaml');
+    });
+
+    it('leaves literal dotted keys alone', () => {
+      const keys = requested(findMissingTranslationsByLocale(
+        yamlFile({ 'foo.one': 'One', 'foo.other': 'Other' }), {}, polish, false
+      ));
+      expect(Object.keys(keys).sort()).toEqual(['foo.one', 'foo.other']);
+      expect(keys['foo.one'].metadata).toBeUndefined();
     });
   });
 
