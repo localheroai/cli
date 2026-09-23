@@ -215,14 +215,16 @@ npx @localheroai/cli ci --verbose
 npx @localheroai/cli check
 ```
 
-Audits your translation files without calling the LocalHero.ai API: no API key, no network access, no credits used. Runs entirely on the files already on disk, using the same file discovery as `translate`. Good for CI (see [#518](https://github.com/localheroai/localhero-ai/issues/518)) when you run with `--auto-translate` off and want a failing check as the signal that a PR still needs human-reviewed translations, and just as useful as a one-off health check on your own repo.
+Audits your translation files without calling the Localhero.ai API: no API key, no network access, no credits used. Runs entirely on the files already on disk, using the same file discovery as `translate`. Good for CI (see [#518](https://github.com/localheroai/localhero-ai/issues/518)) when you run with `--auto-translate` off and want a failing check as the signal that a PR still needs human-reviewed translations, and just as useful as a one-off health check on your own repo.
 
 It reports, per target locale:
 
 - **Missing keys** — present in the source locale but absent, `null`, or an empty string in the target.
-- **Placeholder mismatches** — interpolation placeholders in the source string that are missing from the target, or added in the target but absent from the source. Covers Rails `%{name}` / `%<name>s`, printf `%s %d %1$s`, i18next/Vue/Angular `{{name}}`, ICU/React-intl `{name}`, and Python `%(name)s`. `{{name}}` is never also counted as `{name}`, and a literal `%` is never treated as a printf directive.
-- **Orphan keys** — present in a target locale but no longer in the source, i.e. left behind after a source key was deleted.
+- **Placeholder mismatches** — interpolation placeholders in the source string that are missing from the target, or added in the target but absent from the source. Covers Rails `%{name}` / `%<name>s`, printf `%s %d %1$s`, i18next/Vue/Angular `{{name}}`, ICU/React-intl `{name}`, and Python `%(name)s`. `{{name}}` is never also counted as `{name}`, and a literal `%` is never treated as a printf directive. Positional directives may be renumbered (`%1$s %2$s` → `%2$s %1$s`) but must keep their type. Inside ICU `plural`/`select` arguments only the argument name is compared, so branch text such as `{He}` is never mistaken for a placeholder.
+- **Placeholder hints** — a plural form that leaves out a placeholder, such as `"%{count} language"` → `"1 språk"` or a gettext zero form without the number. This is often correct, so it is reported as a hint and never fails the run. A plural form that *adds* a placeholder is still a mismatch.
+- **Orphan keys** — present in a target locale but no longer in the source, i.e. left behind after a source key was deleted. Reported as warnings and never fail the run: apps often ship bundled framework translations (rails-i18n) that the source locale does not have. Extra plural forms a language needs (Arabic `msgstr[2..5]`) are not orphans.
 - **Structure and plural-shape mismatches** — a leaf that is a string on one side and a map or array on the other, or a source key with plural sub-keys (Rails `one`/`other`, i18next `_one`/`_plural`) where the target has no plural forms at all.
+- **Missing plural categories** — a Rails plural group in the target that lacks forms its language needs, such as Polish or Russian with only `one`/`other` and no `few`/`many`. Rails falls back to `other` and renders a wrong form without any error. Only categories that whole numbers up to 1000 actually use are required.
 - **Empty and identical-to-source values** — an empty target string is reported as a real gap; a target that is byte-identical to the source is reported separately, as a *hint*, since short words and proper nouns are legitimately identical across languages.
 
 #### Options
@@ -235,9 +237,9 @@ It reports, per target locale:
 
 **`--all`**: Print every finding instead of capping each category at 10 with a "... and N more" line.
 
-**`--fail-on <mode>`**: Controls the exit code. `missing` (default) exits 1 when there are missing or empty keys; `placeholders` exits 1 on placeholder mismatches; `any` exits 1 on any of missing/empty/placeholders/orphans/structure; `none` always exits 0. Identical-to-source hints never affect the exit code.
+**`--fail-on <mode>`**: Controls the exit code. `missing` (default) exits 1 when there are missing or empty keys; `placeholders` exits 1 on placeholder mismatches; `any` exits 1 on any of missing/empty/placeholders/structure/plural categories; `none` always exits 0. Hints and orphan keys never affect the exit code.
 
-**`--format github`**: Emit GitHub Actions annotation lines (`::error file=...::message`) instead of the human report. Locale files aren't parsed with line tracking, so annotations are file-level, not line-level — that's a known limitation, not a rounding error.
+**`--format github`**: Emit GitHub Actions annotation lines (`::error file=...::message`) instead of the human report: `::error` for problems, `::warning` for orphans, `::notice` for hints. Locale files aren't parsed with line tracking, so annotations are file-level, not line-level — that's a known limitation, not a rounding error.
 
 ```bash
 npx @localheroai/cli check --locales sv,de --fail-on any

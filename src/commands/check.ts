@@ -12,6 +12,7 @@ import {
   findStructureMismatches,
   findPluralShapeMismatches,
   findMissingPluralCategories,
+  isUnneededPluralLeaf,
   findEmptyAndIdentical,
   toStringValue,
   type FlatMap,
@@ -24,7 +25,6 @@ import {
   type IdenticalFinding
 } from '../utils/check-utils.js';
 import type {
-  ProjectConfig,
   TranslationConfig,
   TranslationFileOptions,
   TranslationFile as OriginalTranslationFile,
@@ -173,6 +173,8 @@ export async function runCheck(
     }
   }
 
+  const allSourceKeys = Object.assign({}, ...sourceKeyMaps.map(({ keys }) => keys));
+
   const reports: LocaleReport[] = targetLocales.map((locale) => {
     const report: LocaleReport = {
       locale,
@@ -214,6 +216,7 @@ export async function runCheck(
     for (const entry of Object.values(missing)) {
       if (entry.locale !== locale) continue;
       for (const key of Object.keys(entry.keys)) {
+        if (isUnneededPluralLeaf(key, allSourceKeys, locale)) continue;
         report.missing.push({ key, path: entry.path, targetPath: entry.targetPath });
       }
     }

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
+
 ## [0.0.70] - 2026-09-16
 
 ### Fixed
