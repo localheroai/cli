@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.0.71] - 2026-09-24
 
 ### Fixed
 - Source and target files are now paired correctly when the source locale code also appears inside a word in the file name (`document.en.yml`, `tenant_signup.i18n.yml`, `orders.de.yml`). Before, the target file was not found, so a full `translate` treated every key in it as missing and overwrote existing translations. Edits to that target file in a pull request were not imported either.
