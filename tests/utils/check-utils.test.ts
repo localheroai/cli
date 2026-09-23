@@ -177,12 +177,23 @@ describe('plural forms', () => {
     expect(finding.hint).toBeUndefined();
   });
 
-  it('keeps a placeholder a plural form ADDS as a real mismatch', () => {
+  it('allows a plural form to add the count, which is always passed', () => {
+    expect(findPlaceholderMismatches({ 'items.one': 'One item' }, { 'items.one': '%{count} vara' })).toEqual([]);
+    expect(findPlaceholderMismatches({ msg_one: 'One message' }, { msg_one: '{{count}} viesti' })).toEqual([]);
+  });
+
+  it('keeps any other placeholder a plural form ADDS as a real mismatch', () => {
     const [finding] = findPlaceholderMismatches(
       { 'items.one': 'One item' },
-      { 'items.one': '%{count} vara' }
+      { 'items.one': '%{name}: en vara' }
     );
+    expect(finding.unexpectedInTarget).toEqual(['rails:name']);
     expect(finding.hint).toBeUndefined();
+  });
+
+  it('keeps an added count outside a plural form as a real mismatch', () => {
+    const [finding] = findPlaceholderMismatches({ title: 'Items' }, { title: '%{count} varor' });
+    expect(finding.unexpectedInTarget).toEqual(['rails:count']);
   });
 
   it('keeps an omission outside a plural form as a real mismatch', () => {

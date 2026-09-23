@@ -74,7 +74,9 @@ export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatM
     for (const [token, count] of sourceCounts) {
       if ((targetCounts.get(token) ?? 0) < count) missingInTarget.push(token);
     }
+    const pluralForm = isPluralFormKey(key) || pluralBases.has(key);
     for (const [token, count] of targetCounts) {
+      if (pluralForm && token.endsWith(':count')) continue;
       if ((sourceCounts.get(token) ?? 0) < count) unexpectedInTarget.push(token);
     }
 
@@ -158,6 +160,13 @@ function isPluralLeafSet(leaves: Set<string>): boolean {
 const GETTEXT_PLURAL_SUFFIX = /__plural_\d+$/;
 
 const COUNT_OPTIONAL_CATEGORIES = ['zero', 'one', 'two'];
+
+// Rails and i18next always pass `count` to a plural form, so a form may add it.
+function isPluralFormKey(key: string): boolean {
+  if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
+  const leaf = leafOf(key);
+  return RAILS_PLURAL_LEAVES.has(leaf) || I18NEXT_PLURAL_SUFFIXES.some((suffix) => leaf.endsWith(suffix));
+}
 
 function mayOmitPlaceholder(key: string): boolean {
   if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
