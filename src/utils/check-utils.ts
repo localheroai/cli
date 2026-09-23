@@ -38,11 +38,14 @@ export interface OrphanFinding {
 export function findOrphanKeys(sourceKeys: FlatMap, targetKeys: FlatMap): OrphanFinding[] {
   const orphans: OrphanFinding[] = [];
   const sourcePluralBases = gettextPluralBases(Object.keys(sourceKeys));
+  const sourcePluralGroups = railsPluralGroups(sourceKeys);
   for (const key of Object.keys(targetKeys)) {
     // Arabic has six plural forms where English has two; the extra ones are not leftovers.
     const extraPluralForm =
       GETTEXT_PLURAL_SUFFIX.test(key) && sourcePluralBases.has(key.replace(GETTEXT_PLURAL_SUFFIX, ''));
-    if (!(key in sourceKeys) && !extraPluralForm) {
+    // Polish `few`/`many` under an English `one`/`other` group are what the language needs.
+    const railsPluralForm = RAILS_PLURAL_LEAVES.has(leafOf(key)) && sourcePluralGroups.has(parentOf(key));
+    if (!(key in sourceKeys) && !extraPluralForm && !railsPluralForm) {
       orphans.push({ key, target: toStringValue(targetKeys[key]) });
     }
   }
@@ -271,30 +274,59 @@ export interface MissingPluralCategories {
  * Rails then silently falls back to `other`, rendering fluent but wrong text.
  */
 export function findMissingPluralCategories(targetKeys: FlatMap, locale: string): MissingPluralCategories[] {
-  let required: string[];
-  try {
-    const rules = new Intl.PluralRules(locale);
-    // Only categories everyday counts reach: CLDR gives es/fr/it/pt a `many`
-    // for 1,000,000 that rails-i18n does not implement and no one writes.
-    const reached = new Set(Array.from({ length: 1001 }, (_, n) => rules.select(n)));
-    required = rules.resolvedOptions().pluralCategories.filter((category) => reached.has(category));
-  } catch {
-    return [];
-  }
-  const groups = new Map<string, Set<string>>();
-  for (const key of Object.keys(targetKeys)) {
-    const dot = key.lastIndexOf('.');
-    const leaf = key.slice(dot + 1);
-    if (dot < 0 || !RAILS_PLURAL_LEAVES.has(leaf)) continue;
-    const parent = key.slice(0, dot);
-    if (!groups.has(parent)) groups.set(parent, new Set());
-    groups.get(parent)!.add(leaf);
-  }
+  const required = usedPluralCategories(locale);
+  if (!required) return [];
   const findings: MissingPluralCategories[] = [];
-  for (const [key, present] of groups) {
-    if (!present.has('other') || present.size < 2) continue;
+  for (const [key, present] of railsPluralGroups(targetKeys)) {
     const missing = required.filter((category) => !present.has(category));
     if (missing.length) findings.push({ key, missing });
   }
   return findings;
+}
+
+function leafOf(key: string): string {
+  return key.slice(key.lastIndexOf('.') + 1);
+}
+
+function parentOf(key: string): string {
+  return key.slice(0, key.lastIndexOf('.'));
+}
+
+/** Rails plural groups: a parent with `other` plus at least one more plural leaf. */
+function railsPluralGroups(keys: FlatMap): Map<string, Set<string>> {
+  const groups = new Map<string, Set<string>>();
+  for (const key of Object.keys(keys)) {
+    if (!key.includes('.') || !RAILS_PLURAL_LEAVES.has(leafOf(key))) continue;
+    const parent = parentOf(key);
+    if (!groups.has(parent)) groups.set(parent, new Set());
+    groups.get(parent)!.add(leafOf(key));
+  }
+  for (const [parent, leaves] of groups) {
+    if (!leaves.has('other') || leaves.size < 2) groups.delete(parent);
+  }
+  return groups;
+}
+
+/**
+ * Plural categories a locale uses for everyday counts, or null for an unknown
+ * locale. CLDR gives es/fr/it/pt a `many` for 1,000,000 that rails-i18n does
+ * not implement and no one writes, so only categories 0..1000 reach count.
+ */
+export function usedPluralCategories(locale: string): string[] | null {
+  try {
+    const rules = new Intl.PluralRules(locale);
+    const reached = new Set(Array.from({ length: 1001 }, (_, n) => rules.select(n)));
+    return rules.resolvedOptions().pluralCategories.filter((category) => reached.has(category));
+  } catch {
+    return null;
+  }
+}
+
+/** A missing `sv` `few`: the source has it for Polish's sake, Swedish never uses it. */
+export function isUnneededPluralLeaf(key: string, sourceKeys: FlatMap, locale: string): boolean {
+  const leaf = leafOf(key);
+  if (!key.includes('.') || !RAILS_PLURAL_LEAVES.has(leaf) || leaf === 'other') return false;
+  if (!railsPluralGroups(sourceKeys).has(parentOf(key))) return false;
+  const used = usedPluralCategories(locale);
+  return used !== null && !used.includes(leaf);
 }

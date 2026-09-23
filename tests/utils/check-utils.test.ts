@@ -5,7 +5,8 @@ import {
   findStructureMismatches,
   findPluralShapeMismatches,
   findEmptyAndIdentical,
-  findMissingPluralCategories
+  findMissingPluralCategories,
+  isUnneededPluralLeaf
 } from '../../src/utils/check-utils.js';
 
 describe('findOrphanKeys', () => {
@@ -184,5 +185,28 @@ describe('findMissingPluralCategories', () => {
 
   it('does not demand the Spanish `many` that only applies to millions', () => {
     expect(findMissingPluralCategories({ 'n.one': 'a', 'n.other': 'b' }, 'es')).toEqual([]);
+  });
+});
+
+describe('plural groups with categories only some languages use (#636 workaround)', () => {
+  const source = {
+    'archived.one': '%{count} task',
+    'archived.few': '%{count} tasks',
+    'archived.many': '%{count} tasks',
+    'archived.other': '%{count} tasks'
+  };
+
+  it('does not count Swedish as missing `few`/`many` it never uses', () => {
+    expect(isUnneededPluralLeaf('archived.few', source, 'sv')).toBe(true);
+    expect(isUnneededPluralLeaf('archived.few', source, 'pl')).toBe(false);
+    expect(isUnneededPluralLeaf('archived.other', source, 'sv')).toBe(false);
+  });
+
+  it('does not report Polish `few`/`many` under an English `one`/`other` group as orphans', () => {
+    const orphans = findOrphanKeys(
+      { 'n.one': 'a', 'n.other': 'b' },
+      { 'n.one': 'a', 'n.few': 'c', 'n.many': 'd', 'n.other': 'b', 'old.few': 'e' }
+    );
+    expect(orphans.map((o) => o.key)).toEqual(['old.few']);
   });
 });

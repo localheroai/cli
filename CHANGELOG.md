@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
 
 ## [0.0.72] - 2026-09-25
 
+### Added
+- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
+
 ### Fixed
 - A locale file in one folder is no longer paired with an unrelated folder at the same depth. When `countries/sv.yml` did not exist, `countries/en.yml` was matched with `pressroom/sv.yml`, so `translate` wrote the Swedish country names into the pressroom file and `check` reported them missing there. Translations for a folder without a target file now go to a new file in that folder.
 
