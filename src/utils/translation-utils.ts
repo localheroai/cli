@@ -498,6 +498,13 @@ export function batchKeysWithMissing(
   return { batches, errors };
 }
 
+// Only a locale that stands alone in the name is swapped: "document.en" becomes
+// "document.sv", while the "en" inside "document" or "tenant" is left alone.
+function swapLocaleInName(name: string, sourceLocale: string, targetLocale: string): string {
+  const escaped = sourceLocale.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return name.replace(new RegExp(`(^|[._-])${escaped}(?=$|[._-])`, 'g'), `$1${targetLocale}`);
+}
+
 /**
  * Find a target file that corresponds to the source file
  * @param targetFiles Array of target translation files
@@ -512,11 +519,17 @@ export function findTargetFile(
   sourceFile: TranslationFile,
   sourceLocale: string
 ): TranslationFile | undefined {
+  const expectedBaseName = swapLocaleInName(
+    path.basename(sourceFile.path, path.extname(sourceFile.path)),
+    sourceLocale,
+    targetLocale
+  );
+
   // First try exact directory matching (existing logic)
   let found = targetFiles.find(f =>
     f.locale === targetLocale &&
     path.dirname(f.path) === path.dirname(sourceFile.path) &&
-    path.basename(f.path, path.extname(f.path)) === path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale)
+    path.basename(f.path, path.extname(f.path)) === expectedBaseName
   );
 
   if (found) return found;
@@ -525,8 +538,7 @@ export function findTargetFile(
   found = targetFiles.find(f => {
     if (f.locale !== targetLocale) return false;
 
-    const basenameMatches = path.basename(f.path, path.extname(f.path)) ===
-      path.basename(sourceFile.path, path.extname(sourceFile.path)).replace(sourceLocale, targetLocale);
+    const basenameMatches = path.basename(f.path, path.extname(f.path)) === expectedBaseName;
 
     if (!basenameMatches) return false;
 
@@ -606,7 +618,7 @@ export function generateTargetPath(
   }
 
   // Case 3: File uses hyphen-locale format (e.g., "translations-en.yml")
-  if (sourceName.includes(`-${sourceLocale}`)) {
+  if (sourceName.endsWith(`-${sourceLocale}`)) {
     const baseName = sourceName.slice(0, -(sourceLocale.length + 1));
     return path.join(sourceDir, `${baseName}-${targetLocale}${sourceExt}`);
   }
@@ -618,13 +630,7 @@ export function generateTargetPath(
     return path.join(grandParentDir, targetLocale, path.basename(sourceFile.path));
   }
 
-  // Default case: If none of the above patterns match,
-  // construct the target path by replacing the locale in the filename only
-  const dirPath = path.dirname(sourceFile.path);
-  const fileName = path.basename(sourceFile.path);
-  const localeRegex = new RegExp(`\\b${sourceLocale}\\b`, 'g');
-  const newFileName = fileName.replace(localeRegex, targetLocale);
-  return path.join(dirPath, newFileName);
+  return path.join(sourceDir, `${swapLocaleInName(sourceName, sourceLocale, targetLocale)}${sourceExt}`);
 }
 
 /**

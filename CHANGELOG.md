@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- Source and target files are now paired correctly when the source locale code also appears inside a word in the file name (`document.en.yml`, `tenant_signup.i18n.yml`, `orders.de.yml`). Before, the target file was not found, so a full `translate` treated every key in it as missing and overwrote existing translations. Edits to that target file in a pull request were not imported either.
+- A new locale file is created at the right path when the source locale follows an underscore (`content_en.json` now gives `content_sv.json`, where it used to write into the source file) or when a hyphenated file sits in a locale directory (`en/my-entries.yml`).
+
 ## [0.0.70] - 2026-09-16
 
 ### Fixed
