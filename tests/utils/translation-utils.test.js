@@ -1,5 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile } from '../../src/utils/translation-utils.js';
 import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
 import { createIgnoreMatcher } from '../../src/utils/ignore-keys.js';
 
@@ -1091,7 +1091,10 @@ describe('translation-utils', () => {
       ['locale in filename with dot', 'config/locales/translations.en.yml', 'config/locales/translations.es.yml'],
       ['locale in filename with hyphen', 'config/locales/translations-en.yml', 'config/locales/translations-es.yml'],
       ['locale in directory name', 'config/locales/en/messages.yml', 'config/locales/es/messages.yml'],
-      ['prevents double dots in filenames', 'config/en/translations.en.yml', 'config/en/translations.es.yml']
+      ['prevents double dots in filenames', 'config/en/translations.en.yml', 'config/en/translations.es.yml'],
+      ['hyphenated filename in a locale directory', 'config/locales/en/my-entries.yml', 'config/locales/es/my-entries.yml'],
+      ['locale after an underscore', 'messages/content_en.json', 'messages/content_es.json'],
+      ['gettext file with the locale after an underscore', 'locale/strings_en.po', 'locale/strings_es.po']
     ])('handles %s', (_, sourcePath, expectedPath) => {
       const sourceFile = { path: sourcePath };
       expect(generateTargetPath(sourceFile, 'es', 'en')).toBe(expectedPath);
@@ -1254,6 +1257,57 @@ msgstr[2] ""
       expect(result.missingKeys['time-period|time-period|%(count)s day']).toBeUndefined();
       expect(result.missingKeys['Warning: Cannot undo']).toBeUndefined();
       expect(result.missingKeys['Save']).toBeUndefined();
+    });
+  });
+
+  describe('findTargetFile with the locale code inside other words', () => {
+    it.each([
+      ['en', 'sv', 'config/locales/en.yml', 'config/locales/sv.yml'],
+      ['en', 'sv', 'config/locales/document.en.yml', 'config/locales/document.sv.yml'],
+      ['en', 'sv', 'views/tenant_signup.i18n.yml', 'views/tenant_signup.i18n.yml'],
+      ['en', 'sv', 'locales/en/content.json', 'locales/sv/content.json'],
+      ['en', 'sv', 'locales/content.en.json', 'locales/content.sv.json'],
+      ['en', 'sv', 'src/i18n/en.json', 'src/i18n/sv.json'],
+      ['en', 'sv', 'messages/frontend-en.json', 'messages/frontend-sv.json'],
+      ['en', 'sv', 'messages/content_en.json', 'messages/content_sv.json'],
+      ['de', 'en', 'config/locales/orders.de.yml', 'config/locales/orders.en.yml'],
+      ['es', 'en', 'locales/es/messages.json', 'locales/en/messages.json'],
+      ['en', 'sv', 'locale/en/LC_MESSAGES/django.po', 'locale/sv/LC_MESSAGES/django.po'],
+      ['en', 'sv', 'locale/frontend-en.po', 'locale/frontend-sv.po'],
+      ['en', 'sv', 'locale/content.pot', 'locale/sv/LC_MESSAGES/content.po']
+    ])('pairs %s %s -> %s', (sourceLocale, targetLocale, sourcePath, targetPath) => {
+      const format = sourcePath.split('.').pop();
+      const sourceFile = { path: sourcePath, locale: sourceLocale, format };
+      const targetFile = { path: targetPath, locale: targetLocale, format };
+
+      expect(findTargetFile([targetFile], targetLocale, sourceFile, sourceLocale)).toBe(targetFile);
+    });
+
+    it('does not pair a file whose name only differs by the locale inside a word', () => {
+      const sourceFile = { path: 'config/locales/document.en.yml', locale: 'en', format: 'yml' };
+      const unrelated = { path: 'config/locales/documsvt.sv.yml', locale: 'sv', format: 'yml' };
+
+      expect(findTargetFile([unrelated], 'sv', sourceFile, 'en')).toBeUndefined();
+    });
+
+    it('does not report existing translations as missing', () => {
+      const sourceFile = {
+        path: 'config/locales/document.en.yml',
+        format: 'yml',
+        locale: 'en',
+        content: Buffer.from('en:\n  title: Title').toString('base64')
+      };
+      const targetFile = {
+        path: 'config/locales/document.sv.yml',
+        format: 'yml',
+        locale: 'sv',
+        content: Buffer.from('sv:\n  title: Titel').toString('base64')
+      };
+
+      const result = processLocaleTranslations({ title: 'Title' }, 'sv', [targetFile], sourceFile, 'en');
+
+      expect(result.targetPath).toBe('config/locales/document.sv.yml');
+      expect(result.missingKeys).toEqual({});
     });
   });
 
