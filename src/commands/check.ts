@@ -8,6 +8,12 @@ import {
 } from '../utils/translation-utils.js';
 import { createIgnoreMatcher, filterKeys } from '../utils/ignore-keys.js';
 import {
+  detectCheckConfig,
+  defaultConfigDetectionDeps,
+  type ConfigDetectionDeps,
+  type DetectedSetup
+} from '../utils/check-config.js';
+import {
   findOrphanKeys,
   findPlaceholderMismatches,
   findStructureMismatches,
@@ -47,6 +53,8 @@ export interface CheckOptions {
   all?: boolean;
   failOn?: FailOn;
   format?: (typeof FORMATS)[number];
+  path?: string;
+  pattern?: string;
 }
 
 interface CheckDependencies {
@@ -61,12 +69,16 @@ interface CheckDependencies {
       options?: TranslationFileOptions
     ) => Promise<TranslationFile[] | TranslationFilesResult>;
   };
+  projectDetection: Pick<ConfigDetectionDeps, 'detectProjectType'>;
+  fsUtils: Pick<ConfigDetectionDeps, 'listFiles' | 'readFile'>;
 }
 
 const defaultDeps: CheckDependencies = {
   console,
   configUtils: configService,
-  fileUtils: { findTranslationFiles }
+  fileUtils: { findTranslationFiles },
+  projectDetection: { detectProjectType: defaultConfigDetectionDeps.detectProjectType },
+  fsUtils: { listFiles: defaultConfigDetectionDeps.listFiles, readFile: defaultConfigDetectionDeps.readFile }
 };
 
 interface LocaleReport {
@@ -125,10 +137,43 @@ interface CheckResult {
   sourceFiles: string[];
   keyCount: number;
   parseFailures: TranslationFilesResult['parseFailures'];
+  detected: DetectedSetup | null;
 }
 
 function failedResult(sourceLocale = ''): CheckResult {
-  return { aborted: true, exitCode: 1, reports: [], sourceLocale, sourceFiles: [], keyCount: 0, parseFailures: [] };
+  return {
+    aborted: true,
+    exitCode: 1,
+    reports: [],
+    sourceLocale,
+    sourceFiles: [],
+    keyCount: 0,
+    parseFailures: [],
+    detected: null
+  };
+}
+
+const SOURCE_REASONS: Record<DetectedSetup['reason'], string> = {
+  option: 'from --source',
+  gettext: 'its catalog is untranslated',
+  template: 'from the .pot template',
+  en: 'en is present',
+  guessed: 'guessed from the most keys'
+};
+
+function printDetected(con: CheckDependencies['console'], detected: DetectedSetup): void {
+  const where = detected.paths.map((dir) => `${dir}${detected.pattern}`).join(', ');
+  con.log(chalk.blue(`ℹ No localhero.json found. Checking ${where}, source ${detected.source} (${SOURCE_REASONS[detected.reason]}).`));
+  if (detected.excluded.length > 0) {
+    con.log(chalk.blue(`ℹ Skipped ${detected.excluded.join(', ')}: no file matches a source file. Include them with --locales.`));
+  }
+  if (detected.reason === 'guessed') {
+    con.log(chalk.yellow(`⚠ ${detected.source} is a guess. If your source language is another one, pass --source <locale>.`));
+  }
+}
+
+function parseLocales(value: string | undefined): string[] {
+  return value ? value.split(',').map((l) => l.trim()).filter(Boolean) : [];
 }
 
 function invalidOption(options: CheckOptions): string | null {
@@ -168,7 +213,7 @@ export async function runCheck(
   options: CheckOptions = {},
   deps: CheckDependencies = defaultDeps
 ): Promise<CheckResult> {
-  const { console, configUtils, fileUtils } = deps;
+  const { console, configUtils, fileUtils, projectDetection, fsUtils } = deps;
 
   const optionError = invalidOption(options);
   if (optionError) {
@@ -176,10 +221,19 @@ export async function runCheck(
     return failedResult();
   }
 
-  const config = await configUtils.getProjectConfig();
+  const requestedLocales = parseLocales(options.locales);
+  let config: TranslationConfig | null = await configUtils.getProjectConfig();
+  let detected: DetectedSetup | null = null;
   if (!config) {
-    console.error(chalk.red('\n✖ No configuration found. Please run `npx @localheroai/cli init` first.\n'));
-    return failedResult();
+    const detection = await detectCheckConfig(
+      { source: options.source, locales: requestedLocales, path: options.path, pattern: options.pattern },
+      { ...projectDetection, ...fsUtils }
+    );
+    if (!detection) {
+      console.error(chalk.red('\n✖ No translation files found. Run check from your project root, or point it at your locale folder with --path <dir>.\n'));
+      return failedResult();
+    }
+    ({ config, detected } = detection);
   }
   if (!config.translationFiles?.paths) {
     console.error(chalk.red('\n✖ Invalid configuration: missing translationFiles.paths. Please run `npx @localheroai/cli init` to set up your configuration.\n'));
@@ -187,11 +241,9 @@ export async function runCheck(
   }
 
   const sourceLocale = options.source || config.sourceLocale;
-  const targetLocales = options.locales
-    ? options.locales.split(',').map((l) => l.trim()).filter(Boolean)
-    : config.outputLocales || [];
+  const targetLocales = options.locales ? requestedLocales : config.outputLocales || [];
 
-  const result = await fileUtils.findTranslationFiles(config as TranslationConfig, {
+  const result = await fileUtils.findTranslationFiles(config, {
     returnFullResult: true,
     sourceLocale,
     targetLocales,
@@ -201,6 +253,7 @@ export async function runCheck(
   const filesFor = (locale: string) => (targetFilesByLocale[locale] || []).map((f) => f.path);
 
   if (!options.json && !options.format) {
+    if (detected) printDetected(console, detected);
     console.log(chalk.blue(`ℹ Source locale: ${sourceLocale} (${sourceFiles.map((f) => f.path).join(', ') || 'no source files found'})`));
     if (targetLocales.length === 0) console.log(chalk.blue('ℹ Target locales: none configured'));
     for (const locale of targetLocales) {
@@ -323,7 +376,8 @@ export async function runCheck(
     sourceLocale,
     sourceFiles: sourceFiles.map((f) => f.path),
     keyCount: totalSourceKeys.size,
-    parseFailures
+    parseFailures,
+    detected
   };
 }
 
@@ -487,7 +541,7 @@ function printGithubAnnotations(con: CheckDependencies['console'], reports: Loca
 
 export async function check(options: CheckOptions = {}, deps: CheckDependencies = defaultDeps): Promise<void> {
   const con = deps.console;
-  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures } = await runCheck(options, deps);
+  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures, detected } = await runCheck(options, deps);
   process.exitCode = exitCode;
   if (aborted) return;
 
@@ -498,6 +552,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
         sourceFiles,
         keyCount,
         parseFailures,
+        detected,
         locales: reports.map((r) => ({
           locale: r.locale,
           files: r.files,

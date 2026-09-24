@@ -117,8 +117,10 @@ program
 program
   .command('check')
   .description('Check translation files for missing keys, placeholder mismatches, orphans and structure issues (fully offline, no credits used)')
-  .option('--source <locale>', 'Override the detected source locale')
-  .option('--locales <codes>', 'Comma-separated list of target locales to check (defaults to configured output locales)')
+  .option('--source <locale>', 'Source locale (default: from localhero.json, else detected)')
+  .option('--locales <codes>', 'Comma-separated target locales to check (default: from localhero.json, else every other locale found)')
+  .option('--path <dir>', 'Locale folder to scan when there is no localhero.json')
+  .option('--pattern <glob>', 'File pattern inside --path (default: **/*.{json,yml,yaml,po,pot})')
   .option('--json', 'Output a machine-readable JSON report on stdout')
   .option('--all', 'Print every finding instead of capping each category')
   .option('--fail-on <mode>', 'Exit non-zero when findings exist: missing (default), placeholders, any, or none', 'missing')

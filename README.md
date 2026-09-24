@@ -217,6 +217,8 @@ npx @localheroai/cli check
 
 Audits your translation files without calling the Localhero.ai API: no API key, no network access, no credits used. Runs entirely on the files already on disk, using the same file discovery and `ignoreKeys` as `translate`, and prints which files it loaded for each locale. Good for CI when you run with `--auto-translate` off and want a failing check as the signal that a PR still needs human-reviewed translations, and just as useful as a one-off health check on your own repo.
 
+Works without a Localhero.ai account or `localhero.json`. With no config it finds the locale folder the way `init` does, reads the languages from the file and folder names, and picks the source language in this order: `--source`, a gettext catalog whose `msgstr` are untranslated, a `.pot` template, `en`, and otherwise the language with the most keys. It prints what it picked; a guess is marked as one. With a `localhero.json`, its paths, locales and `ignoreKeys` are used as is.
+
 It reports, per target locale:
 
 - **Missing keys**: present in the source locale but absent or `null` in the target.
@@ -230,9 +232,13 @@ It reports, per target locale:
 
 #### Options
 
-**`--source <locale>`**: Override the detected source locale.
+**`--source <locale>`**: The source language. Defaults to the one in `localhero.json`, or the detected one without it.
 
-**`--locales <codes>`**: Comma-separated target locales to check, instead of every configured output locale.
+**`--locales <codes>`**: Comma-separated target locales to check. Defaults to the configured output locales, or every other language found without a config.
+
+**`--path <dir>`**: The locale folder to scan when there is no `localhero.json`, for layouts the detection misses.
+
+**`--pattern <glob>`**: The file pattern inside `--path`. Defaults to `**/*.{json,yml,yaml,po,pot}`.
 
 **`--json`**: Print a machine-readable report on stdout (and nothing else), including the files loaded per locale and any files that could not be parsed. Stable key names, safe to aggregate across many repos.
 

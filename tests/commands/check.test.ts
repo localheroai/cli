@@ -1,6 +1,7 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { runCheck, check, CheckOptions } from '../../src/commands/check.js';
 import type { TranslationConfig, TranslationFile } from '../../src/types/index.js';
+import type { ProjectDetectionResult } from '../../src/utils/project-detection.js';
 
 function yamlFile(locale: string, body: string, dir = 'config/locales'): TranslationFile {
   return {
@@ -11,10 +12,10 @@ function yamlFile(locale: string, body: string, dir = 'config/locales'): Transla
   };
 }
 
-function poFile(locale: string, body: string): TranslationFile {
+function poFile(locale: string, body: string, filePath = `locale/${locale}.po`): TranslationFile {
   const header = `msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n"Language: ${locale}\\n"\n\n`;
   return {
-    path: `locale/${locale}.po`,
+    path: filePath,
     format: 'po',
     locale,
     content: Buffer.from(header + body).toString('base64')
@@ -26,6 +27,8 @@ describe('check command', () => {
   let config: TranslationConfig;
   let files: TranslationFile[];
   let parseFailures: { path: string; error: string }[];
+  let noConfig: boolean;
+  let projectType: ProjectDetectionResult;
 
   beforeEach(() => {
     mockConsole = { log: jest.fn(), error: jest.fn() };
@@ -37,22 +40,32 @@ describe('check command', () => {
     } as TranslationConfig;
     files = [];
     parseFailures = [];
+    noConfig = false;
+    projectType = { type: 'rails', defaults: { translationPath: 'config/locales/', filePattern: '**/*.{yml,yaml}' } };
     process.exitCode = undefined;
   });
 
   function deps() {
     return {
       console: mockConsole,
-      configUtils: { getProjectConfig: jest.fn(async () => config) },
+      configUtils: { getProjectConfig: jest.fn(async () => (noConfig ? null : config)) },
       fileUtils: {
-        findTranslationFiles: jest.fn(async () => ({
+        findTranslationFiles: jest.fn(async (_: TranslationConfig, options: { sourceLocale: string; targetLocales: string[] }) => ({
           allFiles: files,
-          sourceFiles: files.filter((f) => f.locale === config.sourceLocale),
+          sourceFiles: files.filter((f) => f.locale === options.sourceLocale),
           targetFilesByLocale: Object.fromEntries(
-            config.outputLocales.map((l) => [l, files.filter((f) => f.locale === l)])
+            options.targetLocales.map((l) => [l, files.filter((f) => f.locale === l)])
           ),
           parseFailures
         }))
+      },
+      projectDetection: { detectProjectType: jest.fn(async () => projectType) },
+      fsUtils: {
+        listFiles: jest.fn(async () => files.map((f) => f.path)),
+        readFile: jest.fn(async (filePath: string) => {
+          const file = files.find((f) => f.path === filePath);
+          return Buffer.from(file?.content ?? '', 'base64').toString('utf8');
+        })
       }
     };
   }
@@ -363,5 +376,142 @@ describe('check command', () => {
     await check({}, deps() as never);
 
     expect(printed()).toContain('sv: config/locales/sv.yml');
+  });
+
+  describe('without localhero.json', () => {
+    beforeEach(() => {
+      noConfig = true;
+    });
+
+    it('detects the locale folder and languages, with en as the source', async () => {
+      files = [
+        yamlFile('en', '  a: "A"\n  b: "B"\n'),
+        yamlFile('sv', '  a: "A-sv"\n'),
+        yamlFile('de', '  a: "A-de"\n  b: "B-de"\n')
+      ];
+
+      const { exitCode, sourceLocale, reports } = await run();
+
+      expect(sourceLocale).toBe('en');
+      expect(reports.map((r) => r.locale).sort()).toEqual(['de', 'sv']);
+      expect(reports.find((r) => r.locale === 'sv')!.missing.map((m) => m.key)).toEqual(['b']);
+      expect(exitCode).toBe(1);
+      expect(printed()).toContain('No localhero.json');
+    });
+
+    it('leaves files without a locale out of the scan instead of warning about each', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+      const checkDeps = deps();
+      checkDeps.fsUtils.listFiles.mockResolvedValue([...files.map((f) => f.path), 'config/locales/shared_glossary.yml']);
+
+      await runCheck({}, checkDeps as never);
+
+      const [scannedConfig] = checkDeps.fileUtils.findTranslationFiles.mock.calls[0] as [TranslationConfig];
+      expect(scannedConfig.translationFiles.ignore).toEqual(['config/locales/shared_glossary.yml']);
+    });
+
+    it('scans --path with --pattern instead of detecting', async () => {
+      files = [yamlFile('en', '  a: "A"\n', 'i18n'), yamlFile('sv', '  a: "A-sv"\n', 'i18n')];
+      const checkDeps = deps();
+
+      const { exitCode } = await runCheck({ path: 'i18n', pattern: '**/*.yml' }, checkDeps as never);
+
+      expect(exitCode).toBe(0);
+      expect(checkDeps.projectDetection.detectProjectType).not.toHaveBeenCalled();
+      expect(checkDeps.fsUtils.listFiles).toHaveBeenCalledWith(['i18n/'], '**/*.yml', []);
+    });
+
+    it('says when the source language is a guess', async () => {
+      files = [yamlFile('sv', '  a: "A"\n  b: "B"\n'), yamlFile('de', '  a: "A-de"\n')];
+
+      const { sourceLocale } = await run();
+
+      expect(sourceLocale).toBe('sv');
+      expect(printed()).toMatch(/guess/i);
+      expect(printed()).toContain('--source');
+    });
+
+    it('uses the gettext catalog that looks like a source', async () => {
+      projectType = { type: 'django', defaults: { translationPath: 'locale/', filePattern: '**/*.{po,pot}' } };
+      files = [
+        poFile('sv', 'msgid "Hej"\nmsgstr ""\n', 'locale/sv/LC_MESSAGES/django.po'),
+        poFile('en', 'msgid "Hej"\nmsgstr "Hello"\n', 'locale/en/LC_MESSAGES/django.po')
+      ];
+
+      const { sourceLocale, reports } = await run();
+
+      expect(sourceLocale).toBe('sv');
+      expect(reports.map((r) => r.locale)).toEqual(['en']);
+    });
+
+    it('does not treat locales without a counterpart of a source file as targets', async () => {
+      files = [
+        yamlFile('en', '  a: "A"\n'),
+        yamlFile('sv', '  a: "A-sv"\n'),
+        yamlFile('fr', '  date:\n    today: "Aujourd\'hui"\n', 'config/locales/rails-i18n')
+      ];
+
+      const { reports } = await run();
+
+      expect(reports.map((r) => r.locale)).toEqual(['sv']);
+      expect(printed()).toContain('fr');
+      expect(printed()).toContain('--locales');
+    });
+
+    it('includes .pot templates when detection picked a gettext pattern', async () => {
+      projectType = { type: 'detected', defaults: { translationPath: 'translations/', filePattern: '**/*.po' } };
+      files = [poFile('sv', 'msgid "Hello"\nmsgstr "Hej"\n', 'translations/sv.po')];
+      const checkDeps = deps();
+      checkDeps.fsUtils.listFiles.mockResolvedValue(['translations/messages.pot', 'translations/sv.po']);
+
+      const { sourceLocale } = await runCheck({}, checkDeps as never);
+
+      expect(checkDeps.fsUtils.listFiles).toHaveBeenCalledWith(['translations/'], '**/*.{po,pot}', []);
+      expect(sourceLocale).toBe('en');
+    });
+
+    it('counts gettext plural entries as keys, not their metadata, when guessing the source', async () => {
+      projectType = { type: 'django', defaults: { translationPath: 'locale/', filePattern: '**/*.po' } };
+      const plain = ['A', 'B', 'C', 'D'].map((id) => `msgid "${id}"\nmsgstr "${id}-sv"\n`).join('\n');
+      const plural = 'msgid "1 file"\nmsgid_plural "%d files"\nmsgstr[0] "1 Datei"\nmsgstr[1] "%d Dateien"\n';
+      files = [
+        poFile('sv', plain, 'locale/sv/LC_MESSAGES/django.po'),
+        poFile('de', plural, 'locale/de/LC_MESSAGES/django.po')
+      ];
+
+      const { sourceLocale } = await run();
+
+      expect(sourceLocale).toBe('sv');
+    });
+
+    it('scans an absolute --path relative to the working directory', async () => {
+      files = [yamlFile('en', '  a: "A"\n', 'i18n'), yamlFile('sv', '  a: "A-sv"\n', 'i18n')];
+      const checkDeps = deps();
+
+      await runCheck({ path: `${process.cwd()}/i18n` }, checkDeps as never);
+
+      expect(checkDeps.fsUtils.listFiles).toHaveBeenCalledWith(['i18n/'], '**/*.{json,yml,yaml,po,pot}', []);
+    });
+
+    it('stops with a pointer to --path when nothing is found', async () => {
+      const { exitCode } = await run();
+
+      expect(exitCode).toBe(1);
+      expect(mockConsole.error).toHaveBeenCalledWith(expect.stringContaining('--path'));
+    });
+
+    it('reports what was detected in --json', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+
+      await check({ json: true }, deps() as never);
+
+      expect(JSON.parse(printed()).detected).toEqual({
+        source: 'en',
+        reason: 'en',
+        paths: ['config/locales/'],
+        pattern: '**/*.{yml,yaml}',
+        excluded: []
+      });
+    });
   });
 });
