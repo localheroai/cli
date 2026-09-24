@@ -1328,6 +1328,13 @@ msgstr[2] ""
       expect(findTargetFile([target], 'sv', source, 'en')).toBe(target);
     });
 
+    it('only swaps the locale segment that differs when the locale appears twice in the path', () => {
+      const source = file('src/locales/en/examples/en/en.json', 'en');
+      const target = file('src/locales/sv/examples/en/sv.json', 'sv');
+
+      expect(findTargetFile([target], 'sv', source, 'en')).toBe(target);
+    });
+
     it('writes the missing keys of a folder without a target to that folder', () => {
       const sourceFile = {
         path: 'config/locales/countries/en.yml',
