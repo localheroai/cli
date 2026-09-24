@@ -569,12 +569,11 @@ export function findTargetFile(
     const targetDirParts = path.dirname(f.path).split(path.sep);
     const targetFileBaseName = path.basename(f.path, path.extname(f.path));
 
-    if (
-      sourceFileBaseName === sourceLocale &&
-      targetFileBaseName === targetLocale &&
-      sourceDirParts.length === targetDirParts.length
-    ) {
-      return true;
+    // locales/en/en.json ↔ locales/sv/sv.json: the folders must match once the
+    // locale segment is swapped, or countries/en.yml pairs with pressroom/sv.yml.
+    if (sourceFileBaseName === sourceLocale && targetFileBaseName === targetLocale) {
+      const expectedDir = sourceDirParts.map((part) => (part === sourceLocale ? targetLocale : part));
+      return expectedDir.join(path.sep) === targetDirParts.join(path.sep);
     }
 
     // Nested directory structure

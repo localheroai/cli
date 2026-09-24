@@ -1311,6 +1311,43 @@ msgstr[2] ""
     });
   });
 
+  describe('findTargetFile with locale-named files in sibling folders', () => {
+    const file = (path, locale) => ({ path, locale, format: path.split('.').pop() });
+
+    it('does not pair a source with a same-depth file in an unrelated folder', () => {
+      const source = file('config/locales/countries/en.yml', 'en');
+      const unrelated = file('config/locales/pressroom/sv.yml', 'sv');
+
+      expect(findTargetFile([unrelated], 'sv', source, 'en')).toBeUndefined();
+    });
+
+    it('still pairs a folder per locale holding a file named after the locale', () => {
+      const source = file('src/locales/en/en.json', 'en');
+      const target = file('src/locales/sv/sv.json', 'sv');
+
+      expect(findTargetFile([target], 'sv', source, 'en')).toBe(target);
+    });
+
+    it('writes the missing keys of a folder without a target to that folder', () => {
+      const sourceFile = {
+        path: 'config/locales/countries/en.yml',
+        format: 'yml',
+        locale: 'en',
+        content: Buffer.from('en:\n  countries:\n    se: Sweden').toString('base64')
+      };
+      const unrelated = {
+        path: 'config/locales/pressroom/sv.yml',
+        format: 'yml',
+        locale: 'sv',
+        content: Buffer.from('sv:\n  pressroom:\n    follow: Följ').toString('base64')
+      };
+
+      const result = processLocaleTranslations({ 'countries.se': 'Sweden' }, 'sv', [unrelated], sourceFile, 'en');
+
+      expect(result.targetPath).toBe('config/locales/countries/sv.yml');
+    });
+  });
+
   describe('findTargetFile matching', () => {
     const createYamlFile = (path, content, locale) => ({
       path,

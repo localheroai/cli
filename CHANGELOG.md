@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- A locale file in one folder is no longer paired with an unrelated folder at the same depth. When `countries/sv.yml` did not exist, `countries/en.yml` was matched with `pressroom/sv.yml`, so `translate` wrote the Swedish country names into the pressroom file and `check` reported them missing there. Translations for a folder without a target file now go to a new file in that folder.
+
 ## [0.0.71] - 2026-09-24
 
 ### Fixed
