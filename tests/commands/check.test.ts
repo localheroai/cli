@@ -28,6 +28,7 @@ describe('check command', () => {
   let files: TranslationFile[];
   let parseFailures: { path: string; error: string }[];
   let noConfig: boolean;
+  let rawContents: Record<string, string>;
   let projectType: ProjectDetectionResult;
 
   beforeEach(() => {
@@ -41,6 +42,7 @@ describe('check command', () => {
     files = [];
     parseFailures = [];
     noConfig = false;
+    rawContents = {};
     projectType = { type: 'rails', defaults: { translationPath: 'config/locales/', filePattern: '**/*.{yml,yaml}' } };
     process.exitCode = undefined;
   });
@@ -64,7 +66,7 @@ describe('check command', () => {
         listFiles: jest.fn(async () => files.map((f) => f.path)),
         readFile: jest.fn(async (filePath: string) => {
           const file = files.find((f) => f.path === filePath);
-          return Buffer.from(file?.content ?? '', 'base64').toString('utf8');
+          return rawContents[filePath] ?? Buffer.from(file?.content ?? '', 'base64').toString('utf8');
         })
       }
     };
@@ -227,6 +229,30 @@ describe('check command', () => {
     const { reports } = await run();
 
     expect(reports[0].placeholderMismatches.map((f) => f.key)).toEqual(['Hello %(name)s']);
+  });
+
+  it('reports duplicate keys in a YAML file instead of failing to parse it', async () => {
+    files = [yamlFile('en', '  a: "A"\n  b: "B"\n')];
+    rawContents['config/locales/sv.yml'] = 'sv:\n  a: "A-sv"\n  b: "Gammal"\n  b: "Ny"\n';
+    parseFailures = [{ path: 'config/locales/sv.yml', error: 'Map keys must be unique at line 4, column 3' }];
+
+    const { exitCode, reports, parseFailures: remaining } = await run();
+
+    expect(remaining).toEqual([]);
+    expect(reports[0].missing).toEqual([]);
+    expect(reports[0].duplicateKeys).toEqual([{ key: 'b', path: 'config/locales/sv.yml', values: ['Gammal', 'Ny'] }]);
+    expect(exitCode).toBe(0);
+  });
+
+  it('caps GitHub annotations and says how many were left out', async () => {
+    const keys = Array.from({ length: 60 }, (_, i) => `  k${i}: "K${i}"\n`).join('');
+    files = [yamlFile('en', keys), yamlFile('sv', '  k0: "K0-sv"\n')];
+
+    await check({ format: 'github' }, deps() as never);
+
+    const lines = printed().split('\n');
+    expect(lines).toHaveLength(51);
+    expect(lines[50]).toMatch(/^::warning::.*9 more findings.*--json/);
   });
 
   it('escapes GitHub annotation messages and properties', async () => {
@@ -491,6 +517,31 @@ describe('check command', () => {
       await runCheck({ path: `${process.cwd()}/i18n` }, checkDeps as never);
 
       expect(checkDeps.fsUtils.listFiles).toHaveBeenCalledWith(['i18n/'], '**/*.{json,yml,yaml,po,pot}', []);
+    });
+
+    it('does not count a source file the locale has no file for as missing keys', async () => {
+      files = [
+        yamlFile('en', '  a: "A"\n'),
+        yamlFile('en', '  p: "P"\n', 'config/locales/pressroom'),
+        yamlFile('sv', '  p: "P-sv"\n', 'config/locales/pressroom')
+      ];
+
+      const { exitCode, reports } = await run();
+
+      expect(reports[0].missing).toEqual([]);
+      expect(reports[0].missingFiles).toEqual(['config/locales/en.yml']);
+      expect(exitCode).toBe(0);
+    });
+
+    it('says so when only one language is found', async () => {
+      files = [yamlFile('sv', '  a: "A"\n')];
+
+      const { exitCode } = await run();
+
+      expect(exitCode).toBe(0);
+      expect(printed()).toContain('Only sv found');
+      expect(printed()).not.toMatch(/guess/i);
+      expect(printed()).not.toContain('Locale        Keys');
     });
 
     it('stops with a pointer to --path when nothing is found', async () => {

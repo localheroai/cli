@@ -1,4 +1,4 @@
-import { placeholderMultiset } from './placeholders.js';
+import { placeholderMultiset, isStrftimeFormat } from './placeholders.js';
 
 export type FlatValue = unknown;
 export type FlatMap = Record<string, FlatValue>;
@@ -63,6 +63,7 @@ export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatM
     if (source === null || source === '') continue;
     const target = toStringValue(targetKeys[key]);
     if (target === null || target === '') continue;
+    if (isStrftimeFormat(source) || isStrftimeFormat(target)) continue;
 
     const sourceCounts = placeholderMultiset(source);
     const targetCounts = placeholderMultiset(target);

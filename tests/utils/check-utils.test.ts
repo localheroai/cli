@@ -57,6 +57,17 @@ describe('findPlaceholderMismatches', () => {
     expect(findPlaceholderMismatches(source, target)).toEqual([]);
   });
 
+  it('does not compare strftime date formats as printf placeholders', () => {
+    const source = { 'time.formats.short': '%b %d, %H:%M', 'date.formats.default': '%Y-%m-%d' };
+    const target = { 'time.formats.short': '%e %b %H:%M', 'date.formats.default': '%d.%m.%Y' };
+    expect(findPlaceholderMismatches(source, target)).toEqual([]);
+  });
+
+  it('still compares printf placeholders next to a literal percent', () => {
+    const [finding] = findPlaceholderMismatches({ off: '%d%% off' }, { off: '%% rabatt' });
+    expect(finding.missingInTarget).toEqual(['printf:d']);
+  });
+
   it('passes when both sides use the same placeholder', () => {
     const source = { welcome: 'Hi %{name}' };
     const target = { welcome: 'Hej %{name}' };

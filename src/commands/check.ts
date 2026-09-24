@@ -1,6 +1,7 @@
 import chalk from 'chalk';
 import { configService, type ConfigService } from '../utils/config.js';
-import { findTranslationFiles, parseFile, flattenTranslations } from '../utils/files.js';
+import { findTranslationFiles, parseFile, flattenTranslations, extractLocaleFromPath } from '../utils/files.js';
+import { findDuplicateYamlKeys, dedupeYaml } from '../utils/yaml-duplicates.js';
 import {
   findMissingTranslationsByLocale,
   findTargetFile,
@@ -95,6 +96,43 @@ interface LocaleReport {
   pluralShapeMismatches: (PluralShapeMismatch & { path: string })[];
   missingPluralCategories: (MissingPluralCategories & { path: string })[];
   conflictingKeys: ConflictingKey[];
+  duplicateKeys: { key: string; path: string; values: string[] }[];
+  /** Source files this locale has no file for; only reported without a localhero.json. */
+  missingFiles: string[];
+}
+
+const DUPLICATE_KEY_ERROR = 'Map keys must be unique';
+
+interface RecoveredFiles {
+  files: TranslationFile[];
+  duplicates: { locale: string; key: string; path: string; values: string[] }[];
+}
+
+// The CLI's YAML parser rejects a repeated key that Rails accepts (last value
+// wins), so such files are reparsed here and the repeat becomes a finding.
+async function recoverDuplicateKeyFiles(
+  failures: TranslationFilesResult['parseFailures'],
+  knownLocales: string[],
+  config: TranslationConfig,
+  readFile: CheckDependencies['fsUtils']['readFile']
+): Promise<RecoveredFiles> {
+  const recovered: RecoveredFiles = { files: [], duplicates: [] };
+  for (const failure of failures) {
+    const format = failure.path.split('.').pop() ?? '';
+    if (!['yml', 'yaml'].includes(format) || !String(failure.error).includes(DUPLICATE_KEY_ERROR)) continue;
+    let locale: string;
+    try {
+      locale = extractLocaleFromPath(failure.path, config.translationFiles.localeRegex, knownLocales);
+    } catch {
+      continue;
+    }
+    const raw = await readFile(failure.path);
+    recovered.files.push({ path: failure.path, format, locale, content: Buffer.from(dedupeYaml(raw)).toString('base64') });
+    for (const duplicate of findDuplicateYamlKeys(raw, locale)) {
+      recovered.duplicates.push({ locale, path: failure.path, ...duplicate });
+    }
+  }
+  return recovered;
 }
 
 function decode(file: TranslationFile, sourceLocale: string): Record<string, any> {
@@ -161,8 +199,12 @@ const SOURCE_REASONS: Record<DetectedSetup['reason'], string> = {
   guessed: 'guessed from the most keys'
 };
 
-function printDetected(con: CheckDependencies['console'], detected: DetectedSetup): void {
+function printDetected(con: CheckDependencies['console'], detected: DetectedSetup, targetCount: number): void {
   const where = detected.paths.map((dir) => `${dir}${detected.pattern}`).join(', ');
+  if (targetCount === 0) {
+    con.log(chalk.blue(`ℹ No localhero.json found. Only ${detected.source} found in ${where}, so there is nothing to compare.`));
+    return;
+  }
   con.log(chalk.blue(`ℹ No localhero.json found. Checking ${where}, source ${detected.source} (${SOURCE_REASONS[detected.reason]}).`));
   if (detected.excluded.length > 0) {
     con.log(chalk.blue(`ℹ Skipped ${detected.excluded.join(', ')}: no file matches a source file. Include them with --locales.`));
@@ -249,13 +291,27 @@ export async function runCheck(
     targetLocales,
     ...(options.json ? { logger: { log: console.error } } : {})
   });
-  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [] } = result as TranslationFilesResult;
+  const discovered = result as TranslationFilesResult;
+  const recovered = await recoverDuplicateKeyFiles(
+    discovered.parseFailures ?? [],
+    [sourceLocale, ...targetLocales],
+    config,
+    fsUtils.readFile
+  );
+  const recoveredPaths = new Set(recovered.files.map((f) => f.path));
+  const parseFailures = (discovered.parseFailures ?? []).filter((f) => !recoveredPaths.has(f.path));
+  const allFiles = [...discovered.allFiles, ...recovered.files];
+  const sourceFiles = [...discovered.sourceFiles, ...recovered.files.filter((f) => f.locale === sourceLocale)];
+  const targetFilesByLocale: Record<string, TranslationFile[]> = { ...discovered.targetFilesByLocale };
+  for (const file of recovered.files.filter((f) => f.locale !== sourceLocale)) {
+    targetFilesByLocale[file.locale] = [...(targetFilesByLocale[file.locale] ?? []), file];
+  }
   const filesFor = (locale: string) => (targetFilesByLocale[locale] || []).map((f) => f.path);
 
   if (!options.json && !options.format) {
-    if (detected) printDetected(console, detected);
+    if (detected) printDetected(console, detected, targetLocales.length);
     console.log(chalk.blue(`ℹ Source locale: ${sourceLocale} (${sourceFiles.map((f) => f.path).join(', ') || 'no source files found'})`));
-    if (targetLocales.length === 0) console.log(chalk.blue('ℹ Target locales: none configured'));
+    if (targetLocales.length === 0 && !detected) console.log(chalk.blue('ℹ Target locales: none configured'));
     for (const locale of targetLocales) {
       console.log(chalk.blue(`ℹ ${locale}: ${filesFor(locale).join(', ') || 'no files found'}`));
     }
@@ -315,7 +371,11 @@ export async function runCheck(
       orphans: [],
       structureMismatches: [],
       pluralShapeMismatches: [],
-      conflictingKeys: []
+      conflictingKeys: [],
+      duplicateKeys: recovered.duplicates
+        .filter((d) => d.locale === locale)
+        .map(({ key, path, values }) => ({ key, path, values })),
+      missingFiles: []
     };
 
     const targetFiles = targetFilesByLocale[locale] || [];
@@ -355,8 +415,15 @@ export async function runCheck(
     );
 
     const reportedElsewhere = new Set([...reshapedKeys, ...report.empty.map((f) => f.key)]);
+    const existingTargets = new Set(filesFor(locale));
     for (const entry of Object.values(missing)) {
       if (entry.locale !== locale) continue;
+      // Without a config the targets are guessed, so a language that only
+      // translates part of the app is not reported missing for the rest.
+      if (detected && !existingTargets.has(entry.targetPath)) {
+        report.missingFiles.push(entry.path);
+        continue;
+      }
       for (const key of Object.keys(entry.keys)) {
         if (ignoreMatcher(key) || isAtOrUnder(key, reportedElsewhere)) continue;
         report.missing.push({ key, path: entry.path, targetPath: entry.targetPath });
@@ -395,7 +462,8 @@ function shouldFail(reports: LocaleReport[], failOn: FailOn): boolean {
       r.structureMismatches.length +
       r.pluralShapeMismatches.length +
       r.missingPluralCategories.length +
-      r.conflictingKeys.length,
+      r.conflictingKeys.length +
+      r.duplicateKeys.length,
     0
   );
   return totalMissing > 0 || placeholderCount > 0 || structureCount > 0;
@@ -427,6 +495,7 @@ function printHumanReport(
   keyCount: number,
   all: boolean
 ): void {
+  if (reports.length === 0) return;
   con.log(chalk.bold('\nLocale        Keys   Missing  Placeholders  Orphans  Complete'));
   for (const r of reports) {
     const missing = missingCount(r);
@@ -491,6 +560,14 @@ function printHumanReport(
       (m) => `${m.key}: ${m.files.join(', ')}`,
       all
     );
+    printList(
+      con,
+      'Duplicate keys (the last value wins)',
+      r.duplicateKeys,
+      (m) => `${m.key}: ${m.values.map((v) => `"${truncate(v, 30)}"`).join(' then ')} in ${m.path}`,
+      all
+    );
+    printList(con, `Not checked: no ${r.locale} file for`, r.missingFiles, (m) => m, all);
     printList(con, 'Identical to source (hint)', r.identical, (m) => `${m.key}: "${truncate(m.value)}"`, all);
   }
 }
@@ -503,9 +580,13 @@ function escapeAnnotationProperty(text: string): string {
   return escapeAnnotationData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
 }
 
+// GitHub shows only a handful of annotations per run; thousands just bury the log.
+const MAX_ANNOTATIONS = 50;
+
 function printGithubAnnotations(con: CheckDependencies['console'], reports: LocaleReport[]): void {
+  const lines: string[] = [];
   const annotate = (level: 'error' | 'warning' | 'notice', file: string, message: string) =>
-    con.log(`::${level} file=${escapeAnnotationProperty(file)}::${escapeAnnotationData(message)}`);
+    lines.push(`::${level} file=${escapeAnnotationProperty(file)}::${escapeAnnotationData(message)}`);
 
   // Parsed locale files carry no line numbers, so annotations are file-level.
   for (const r of reports) {
@@ -536,6 +617,14 @@ function printGithubAnnotations(con: CheckDependencies['console'], reports: Loca
     for (const m of r.conflictingKeys) {
       annotate('error', m.files[0], `"${m.key}" has different values in ${m.files.join(', ')} (locale ${r.locale})`);
     }
+    for (const m of r.duplicateKeys) {
+      annotate('warning', m.path, `"${m.key}" is defined ${m.values.length} times; the last value wins (locale ${r.locale})`);
+    }
+  }
+
+  for (const line of lines.slice(0, MAX_ANNOTATIONS)) con.log(line);
+  if (lines.length > MAX_ANNOTATIONS) {
+    con.log(`::warning::${lines.length - MAX_ANNOTATIONS} more findings not shown. Run check --json for the full report.`);
   }
 }
 
@@ -566,7 +655,9 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
           orphans: r.orphans,
           structureMismatches: r.structureMismatches,
           pluralShapeMismatches: r.pluralShapeMismatches,
-          conflictingKeys: r.conflictingKeys
+          conflictingKeys: r.conflictingKeys,
+          duplicateKeys: r.duplicateKeys,
+          missingFiles: r.missingFiles
         }))
       })
     );

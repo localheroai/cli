@@ -80,6 +80,14 @@ function token(placeholder: Placeholder): string {
   return `${placeholder.kind}:${placeholder.name}`;
 }
 
+// Rails date.formats/time.formats are strftime, where %d is a day, not a number.
+// Only directives printf never uses mark a string as a date format.
+const STRFTIME_DIRECTIVE = /%[-_0^#]?[aAbBCDFGhHIjklLmMnNpPrRSTUVwWXyYzZ]/;
+
+export function isStrftimeFormat(text: string): boolean {
+  return STRFTIME_DIRECTIVE.test(text.replace(/%%/g, ''));
+}
+
 export function placeholderMultiset(text: string): Map<string, number> {
   const counts = new Map<string, number>();
   for (const placeholder of extractPlaceholders(text)) {
