@@ -82,6 +82,20 @@ export const gitService = {
     } catch {
       return null;
     }
+  },
+
+  /**
+   * Get the commit the working tree is checked out at
+   * @returns Commit SHA or null if not in a git repository
+   */
+  async getHeadSha(): Promise<string | null> {
+    try {
+      const { exec } = this.deps;
+      const { stdout } = await exec('git', ['rev-parse', 'HEAD']);
+      return stdout.trim();
+    } catch {
+      return null;
+    }
   }
 };
 
@@ -100,4 +114,12 @@ export async function updateGitignore(basePath: string): Promise<boolean> {
  */
 export async function getCurrentBranch(): Promise<string | null> {
   return gitService.getCurrentBranch();
+}
+
+/**
+ * Get the commit the working tree is checked out at
+ * @returns Commit SHA or null if not in a git repository
+ */
+export async function getHeadSha(): Promise<string | null> {
+  return gitService.getHeadSha();
 }

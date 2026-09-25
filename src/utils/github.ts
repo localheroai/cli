@@ -552,14 +552,22 @@ ${buildExtractStep(options)}      - name: Translate
   buildTranslateCommitMessage(translationSummary?: CommitSummary): string {
     let commitMessage = 'Update translations';
 
+    const summaryLines: string[] = [];
     if (translationSummary && translationSummary.keysTranslated > 0) {
-      const { keysTranslated, languages, viewUrl } = translationSummary;
-      const languageList = languages.join(', ');
+      const { keysTranslated, languages } = translationSummary;
+      summaryLines.push(`${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languages.join(', ')}`);
+    }
+    const keysAligned = translationSummary?.keysAligned ?? 0;
+    if (keysAligned > 0) {
+      const alignedLanguages = (translationSummary?.alignedLanguages ?? []).join(', ');
+      summaryLines.push(`Aligned ${keysAligned} ${keysAligned > 1 ? 'keys' : 'key'} in ${alignedLanguages} to reworded source texts`);
+    }
 
-      commitMessage += `\n\n${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languageList}`;
+    if (summaryLines.length > 0) {
+      commitMessage += `\n\n${summaryLines.join('\n')}`;
 
-      if (viewUrl) {
-        commitMessage += `\n\n${viewUrl}`;
+      if (translationSummary?.viewUrl) {
+        commitMessage += `\n\n${translationSummary.viewUrl}`;
       }
     }
 

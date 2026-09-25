@@ -15,8 +15,9 @@ export interface TargetChange {
   key: string;
   status: 'added' | 'updated';
   value: string;
-  old_value?: string;
+  old_value?: string | null;
   source_value?: string;
+  aligned_source?: string;
 }
 
 export interface TargetChangeFile {
@@ -27,7 +28,7 @@ export interface TargetChangeFile {
   changes: TargetChange[];
 }
 
-const MAX_TOTAL_CHANGES = 1000;
+export const MAX_TOTAL_CHANGES = 1000;
 const PO_FORMATS = new Set(['po', 'pot']);
 
 /**
