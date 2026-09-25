@@ -105,6 +105,16 @@ describe('diffAgainstBase', () => {
     expect(diffAgainstBase(git, base, inputs({ a: 'A' })).inTarget('sv', file.path, 'a')).toBe(false);
   });
 
+  it('reads a renamed file from its old path', () => {
+    const git = fakeGit({
+      files: { base: { 'config/locales/old/sv.yml': 'sv:\n  a: "A"\n' } },
+      renames: { 'config/locales/sv.yml': 'config/locales/old/sv.yml' }
+    });
+
+    expect(diffAgainstBase(git, base, inputs({ a: 'A' })).inTarget('sv', file.path, 'a')).toBe(false);
+    expect(git.calls).toContainEqual(['diff', '--name-status', '-z', '--find-renames', '--diff-filter=R', '--relative', 'base']);
+  });
+
   it('throws when git cannot read the base', () => {
     expect(() => diffAgainstBase(fakeGit({}), base, inputs({ a: 'A' }))).toThrow();
   });

@@ -12,6 +12,8 @@ export interface FakeRepo {
   mergeBases?: Record<string, string>;
   /** File contents per commit and path relative to the working directory. */
   files?: Record<string, Record<string, string>>;
+  /** Files renamed since the base: new path mapped to old path. */
+  renames?: Record<string, string>;
 }
 
 export interface FakeGit {
@@ -57,6 +59,9 @@ export function fakeGit(repo: FakeRepo): FakeGit {
       const base = repo.mergeBases?.[rest[0]];
       if (base) return `${base}\n`;
       fail('');
+    }
+    if (command === 'diff') {
+      return Object.entries(repo.renames ?? {}).map(([to, from]) => `R100\0${from}\0${to}\0`).join('');
     }
     if (command === 'show') {
       const [ref, filePath] = rest[0].split(':./');

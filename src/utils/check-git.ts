@@ -78,11 +78,22 @@ export function resolveChangeBase(git: GitRunner, options: ChangeBaseOptions): C
   return fromPullRequest;
 }
 
+export function relativeToCwd(filePath: string): string {
+  return path.relative(process.cwd(), path.resolve(filePath)).split(path.sep).join('/');
+}
+
+/** Files renamed since `ref`, as a map from the current path to the path at `ref`, both relative to the working directory. */
+export function renamesSince(git: GitRunner, ref: string): Map<string, string> {
+  const fields = git(['diff', '--name-status', '-z', '--find-renames', '--diff-filter=R', '--relative', ref]).split('\0');
+  const renames = new Map<string, string>();
+  for (let i = 0; i + 2 < fields.length; i += 3) renames.set(fields[i + 2], fields[i + 1]);
+  return renames;
+}
+
 /** The file's content at `ref`, or null when it did not exist there. Throws when git itself fails. */
 export function readFileAtRef(git: GitRunner, ref: string, filePath: string): string | null {
-  const relative = path.relative(process.cwd(), path.resolve(filePath)).split(path.sep).join('/');
   try {
-    return git(['show', `${ref}:./${relative}`]);
+    return git(['show', `${ref}:./${relativeToCwd(filePath)}`]);
   } catch (error) {
     const { message, stderr } = error as Error & { stderr?: unknown };
     if (MISSING_AT_REF.test(`${message}\n${String(stderr ?? '')}`)) return null;

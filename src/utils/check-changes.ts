@@ -1,7 +1,7 @@
 import { valuesEqual } from './git-changes.js';
 import { PLURAL_SUFFIX_REGEX } from './po-utils.js';
 import { dedupeYaml } from './yaml-duplicates.js';
-import { readFileAtRef, type GitRunner } from './check-git.js';
+import { readFileAtRef, relativeToCwd, renamesSince, type GitRunner } from './check-git.js';
 import type { FlatMap } from './check-utils.js';
 import type { TranslationFile } from '../types/index.js';
 
@@ -48,8 +48,8 @@ export function createChangeMatcher(changed: Set<string>): (key: string) => bool
 type KeyReader = (file: TranslationFile) => FlatMap;
 
 /** An unparsable base version reads as empty, so every key in the file counts as changed. */
-function keysAtRef(git: GitRunner, ref: string, file: TranslationFile, read: KeyReader): FlatMap {
-  const raw = readFileAtRef(git, ref, file.path);
+function keysAtRef(git: GitRunner, ref: string, basePath: string, file: TranslationFile, read: KeyReader): FlatMap {
+  const raw = readFileAtRef(git, ref, basePath);
   if (raw === null) return {};
   const at = (text: string): TranslationFile => ({ ...file, content: Buffer.from(text).toString('base64') });
   try {
@@ -86,11 +86,15 @@ export function diffAgainstBase(git: GitRunner, base: { ref: string; label: stri
   const source = new Map<string, (key: string) => boolean>();
   const target = new Map<string, (key: string) => boolean>();
   const targetId = (locale: string, path: string) => `${locale}\0${path}`;
+  // A moved file keeps its keys; read from the new path it would look entirely new.
+  const renames = renamesSince(git, base.ref);
+  const before = (file: TranslationFile, read: KeyReader) =>
+    keysAtRef(git, base.ref, renames.get(relativeToCwd(file.path)) ?? file.path, file, read);
   for (const { file, keys } of inputs.sources) {
-    source.set(file.path, createChangeMatcher(changedKeys(keysAtRef(git, base.ref, file, inputs.readSource), keys)));
+    source.set(file.path, createChangeMatcher(changedKeys(before(file, inputs.readSource), keys)));
   }
   for (const { locale, file, keys } of inputs.targets) {
-    target.set(targetId(locale, file.path), createChangeMatcher(changedKeys(keysAtRef(git, base.ref, file, inputs.readTarget), keys)));
+    target.set(targetId(locale, file.path), createChangeMatcher(changedKeys(before(file, inputs.readTarget), keys)));
   }
   return {
     base: base.label,
