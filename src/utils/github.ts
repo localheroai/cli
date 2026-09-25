@@ -6,12 +6,12 @@ import { configService, PROJECT_CONFIG_FILE } from './config.js';
 import { CommitSummary, ProjectConfig } from '../types/index.js';
 import {
   createSignedCommit,
-  fetchBranchHead,
   StaleHeadError,
   CreateCommitInput,
-  CreateCommitResult,
-  BranchHead
+  CreateCommitResult
 } from './github-graphql.js';
+
+export type CommitResult = 'no-changes' | 'new' | 'skipped';
 
 /**
  * Dependencies for the GitHub service
@@ -27,7 +27,6 @@ interface GitHubDependencies {
     getProjectConfig: (basePath?: string) => Promise<ProjectConfig | null>;
   };
   createSignedCommit?: (input: CreateCommitInput) => Promise<CreateCommitResult>;
-  fetchBranchHead?: (repo: string, branch: string, token: string) => Promise<BranchHead>;
   [key: string]: unknown;
 }
 
@@ -39,8 +38,7 @@ const defaultDependencies: GitHubDependencies = {
   console,
   fetchGitHubInstallationToken,
   configService,
-  createSignedCommit,
-  fetchBranchHead
+  createSignedCommit
 };
 
 interface WorkflowOptions {
@@ -489,10 +487,10 @@ ${buildExtractStep(options)}      - name: Translate
     modifiedFiles: string[],
     syncSummary?: CommitSummary,
     options?: { branchName?: string }
-  ): Promise<void> {
+  ): Promise<CommitResult> {
     const { exec, console: log } = this.deps;
 
-    if (!this.isGitHubAction()) return;
+    if (!this.isGitHubAction()) return 'no-changes';
 
     log.log('\nCommitting sync changes...');
     try {
@@ -508,10 +506,12 @@ ${buildExtractStep(options)}      - name: Translate
         });
         if (result === 'no-changes') {
           log.log('No changes to commit - translations already up to date.');
+        } else if (result === 'skipped') {
+          log.log('Branch moved during the sync; skipping commit so the newer push is not overwritten.');
         } else {
           log.log('✓ Signed commit created and pushed to GitHub\n');
         }
-        return;
+        return result;
       }
 
       this.configureGitUser();
@@ -523,7 +523,7 @@ ${buildExtractStep(options)}      - name: Translate
 
       if (!this.hasStagedChanges()) {
         log.log('No changes to commit - translations already up to date.');
-        return;
+        return 'no-changes';
       }
 
       const canAmend = this.canAmendLastCommit(true);
@@ -537,6 +537,7 @@ ${buildExtractStep(options)}      - name: Translate
       } else {
         log.log('✓ New commit created and pushed to GitHub\n');
       }
+      return 'new';
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       log.error('Auto-commit failed:', errorMessage);
@@ -593,10 +594,10 @@ ${buildExtractStep(options)}      - name: Translate
    * @param filesPath Path pattern for files to commit
    * @param translationSummary Optional summary of translation results
    */
-  async autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<void> {
+  async autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<CommitResult> {
     const { exec, console: log } = this.deps;
 
-    if (!this.isGitHubAction()) return;
+    if (!this.isGitHubAction()) return 'no-changes';
 
     log.log('Running in GitHub Actions. Committing changes...');
     try {
@@ -612,10 +613,12 @@ ${buildExtractStep(options)}      - name: Translate
         });
         if (result === 'no-changes') {
           log.log('No changes to commit.');
+        } else if (result === 'skipped') {
+          log.log('Branch moved during the run; skipping commit. The new push triggers a fresh run.');
         } else {
           log.log('Signed commit pushed to GitHub.');
         }
-        return;
+        return result;
       }
 
       this.configureGitUser();
@@ -624,7 +627,7 @@ ${buildExtractStep(options)}      - name: Translate
 
       if (!this.hasStagedChanges()) {
         log.log('No changes to commit.');
-        return;
+        return 'no-changes';
       }
 
       this.commit(commitMessage);
@@ -633,6 +636,7 @@ ${buildExtractStep(options)}      - name: Translate
       await this.pushWithRetry(branchName, token);
 
       log.log('Changes committed and pushed successfully.');
+      return 'new';
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       log.error('Auto-commit failed:', errorMessage);
@@ -645,20 +649,22 @@ ${buildExtractStep(options)}      - name: Translate
    * mutation. Produces signed commits attributed to the LocalHero App. Works
    * with repos that enforce `required_signatures` rulesets.
    *
-   * The new commit is stacked on top of the current branch HEAD. The mutation
-   * has no amend primitive — `expectedHeadOid` is a strict precondition, so
-   * sync PRs end up with two commits (the bot's initial sync trigger commit
-   * plus the CLI's translation commit), squashed at merge.
+   * The new commit is stacked on the checkout's HEAD, which is what the files
+   * were generated from. The mutation sends whole-file contents, so if the
+   * branch moved during the run, committing on the newer HEAD would revert
+   * that push. GitHub rejects the stale `expectedHeadOid`; we skip the commit
+   * and let the new push's run redo the work. The mutation has no amend
+   * primitive, so sync PRs keep the bot's sync trigger commit as well.
    *
-   * Returns 'no-changes' if all files match what's already on the branch,
-   * otherwise 'new'.
+   * Returns 'no-changes' if there are no files to commit, 'skipped' if the
+   * branch moved, otherwise 'new'.
    */
   async apiCommitAndPush(params: {
     branchName: string;
     filePaths: string[];
     message: string;
-  }): Promise<'no-changes' | 'new'> {
-    const { console: log, env } = this.deps;
+  }): Promise<CommitResult> {
+    const { exec, env } = this.deps;
 
     const repository = env.GITHUB_REPOSITORY;
     if (!repository) {
@@ -671,35 +677,51 @@ ${buildExtractStep(options)}      - name: Translate
     }
 
     const token = await this.getTokenForPush();
+    const checkoutHead = exec('git rev-parse HEAD', { stdio: 'pipe' }).toString().trim();
+    await this.warnIfCheckoutIsNotPullRequestHead(checkoutHead);
 
-    const maxRetries = 3;
-    let lastError: unknown;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        const head = await this.deps.fetchBranchHead!(repository, params.branchName, token);
-        const headlineAndBody = this.splitCommitMessage(params.message);
-
-        await this.deps.createSignedCommit!({
-          repositoryNameWithOwner: repository,
-          branchName: params.branchName,
-          expectedHeadOid: head.sha,
-          message: headlineAndBody,
-          fileChanges: { additions },
-          token
-        });
-
-        return 'new';
-      } catch (error) {
-        lastError = error;
-        if (error instanceof StaleHeadError && attempt < maxRetries) {
-          log.log(`Branch advanced under us, retrying (${attempt}/${maxRetries})...`);
-          continue;
-        }
-        throw error;
+    try {
+      await this.deps.createSignedCommit!({
+        repositoryNameWithOwner: repository,
+        branchName: params.branchName,
+        expectedHeadOid: checkoutHead,
+        message: this.splitCommitMessage(params.message),
+        fileChanges: { additions },
+        token
+      });
+      return 'new';
+    } catch (error) {
+      if (error instanceof StaleHeadError) {
+        return 'skipped';
       }
+      throw error;
+    }
+  },
+
+  /**
+   * The default actions/checkout on pull_request checks out a merge commit,
+   * which is never the branch tip, so every signed commit would be skipped.
+   */
+  async warnIfCheckoutIsNotPullRequestHead(checkoutHead: string): Promise<void> {
+    const { fs, env, console: log } = this.deps;
+    const eventPath = env.GITHUB_EVENT_PATH;
+    if (!eventPath || !fs.existsSync(eventPath)) return;
+
+    let pullRequestHead: unknown;
+    try {
+      const event = JSON.parse((await fs.readFile(eventPath, 'utf8')).toString());
+      pullRequestHead = event?.pull_request?.head?.sha;
+    } catch {
+      return;
     }
 
-    throw lastError;
+    if (typeof pullRequestHead !== 'string' || pullRequestHead === checkoutHead) return;
+
+    log.log(
+      `::warning::Signed commits need the pull request branch checked out. This run checked out ${checkoutHead.slice(0, 7)}, ` +
+      `not the pull request head ${pullRequestHead.slice(0, 7)}, which is likely why the commit gets skipped. ` +
+      'Set `ref: ${{ github.head_ref }}` on actions/checkout.'
+    );
   },
 
   async readFilesAsAdditions(filePaths: string[]): Promise<{ path: string; contents: string }[]> {
@@ -767,6 +789,6 @@ export function fetchActionToken(): Promise<{ token: string | null; errorCode?: 
  * @param filesPath Path pattern for files to commit
  * @param translationSummary Optional summary of translation results
  */
-export function autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<void> {
+export function autoCommitChanges(filesPath: string, translationSummary?: CommitSummary): Promise<CommitResult> {
   return githubService.autoCommitChanges(filesPath, translationSummary);
 }

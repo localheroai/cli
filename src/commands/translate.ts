@@ -22,7 +22,7 @@ import {
   BatchResult,
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
-import { autoCommitChanges, buildMakemessagesCommand } from '../utils/github.js';
+import { autoCommitChanges, buildMakemessagesCommand, type CommitResult } from '../utils/github.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
@@ -115,7 +115,7 @@ interface TranslationDependencies {
       keysTranslated: number;
       languages: string[];
       viewUrl?: string;
-    }) => Promise<void>;
+    }) => Promise<CommitResult>;
   };
   execUtils: {
     execSync: (command: string, options?: any) => Buffer | string;

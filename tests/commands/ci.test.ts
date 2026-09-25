@@ -538,6 +538,28 @@ describe('ci command', () => {
       expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledTimes(1);
     });
 
+    it('completes the sync update after the commit lands', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      mockEnv.LOCALHERO_SYNC_VERSION = '3';
+      const deps = buildSyncDeps();
+      deps.githubUtils.autoCommitSyncChanges.mockResolvedValue('new');
+
+      await ci({}, deps);
+
+      expect(deps.syncApi.completeSyncUpdate).toHaveBeenCalledWith('sync_abc', 3);
+    });
+
+    it('leaves the sync update open when the commit was skipped because the branch moved', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      mockEnv.LOCALHERO_SYNC_VERSION = '3';
+      const deps = buildSyncDeps();
+      deps.githubUtils.autoCommitSyncChanges.mockResolvedValue('skipped');
+
+      await ci({}, deps);
+
+      expect(deps.syncApi.completeSyncUpdate).not.toHaveBeenCalled();
+    });
+
     it('maps file_references to metadata.source_references for .po files', async () => {
       mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
       mockConfigUtils.getValidProjectConfig = jest.fn().mockResolvedValue({

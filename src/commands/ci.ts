@@ -203,11 +203,14 @@ async function runSyncMode(
 
   if (githubUtils.isGitHubAction() && !options?.skipCommit) {
     const languages = [...new Set(allFiles.map(f => f.language))];
-    await githubUtils.autoCommitSyncChanges(
+    const commitResult = await githubUtils.autoCommitSyncChanges(
       modifiedFiles,
       { keysTranslated: keysUpdated, languages, viewUrl: syncUrl },
       { branchName }
     );
+    if (commitResult === 'skipped') {
+      return;
+    }
   }
 
   if (options?.syncUpdateVersion) {
