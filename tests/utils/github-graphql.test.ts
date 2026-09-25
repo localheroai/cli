@@ -1,7 +1,6 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import {
   createSignedCommit,
-  fetchBranchHead,
   StaleHeadError,
   GitHubGraphQLError
 } from '../../src/utils/github-graphql.js';
@@ -57,7 +56,7 @@ describe('createSignedCommit', () => {
   it('throws StaleHeadError when GitHub returns STALE_DATA', async () => {
     const mockFetch = jest.fn(async () =>
       jsonResponse({
-        errors: [{ type: 'STALE_DATA', message: 'Expected branch to point at <abc> but it points at <def>' }]
+        errors: [{ type: 'STALE_DATA', message: 'Expected branch to point to "abc" but it did not. Pull and try again.' }]
       })
     );
 
@@ -81,7 +80,7 @@ describe('createSignedCommit', () => {
       jsonResponse({
         errors: [
           { type: 'OTHER', message: 'noise that came back first' },
-          { type: 'STALE_DATA', message: 'Expected branch to point at <abc> but it points at <def>' }
+          { type: 'STALE_DATA', message: 'Expected branch to point to "abc" but it did not. Pull and try again.' }
         ]
       })
     );
@@ -144,41 +143,5 @@ describe('createSignedCommit', () => {
         { fetch: mockFetch as any }
       )
     ).rejects.toBeInstanceOf(GitHubGraphQLError);
-  });
-});
-
-describe('fetchBranchHead', () => {
-  it('returns the head sha', async () => {
-    const mockFetch = jest.fn()
-      .mockImplementationOnce(async () => jsonResponse({ object: { sha: 'a'.repeat(40) } }));
-
-    const head = await fetchBranchHead(
-      'localheroai/test',
-      'feature',
-      'ghs_token',
-      { fetch: mockFetch as any }
-    );
-
-    expect(head.sha).toBe('a'.repeat(40));
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    const [refUrl] = mockFetch.mock.calls[0] as [string];
-    expect(refUrl).toBe('https://api.github.com/repos/localheroai/test/git/ref/heads/feature');
-  });
-
-  it('throws when ref response is not 200', async () => {
-    const mockFetch = jest.fn(async () => new Response('Not Found', { status: 404 }));
-
-    await expect(
-      fetchBranchHead('localheroai/test', 'missing', 'ghs_token', { fetch: mockFetch as any })
-    ).rejects.toBeInstanceOf(GitHubGraphQLError);
-  });
-
-  it('throws when the ref response has no sha', async () => {
-    const mockFetch = jest.fn(async () => jsonResponse({ object: {} }));
-
-    await expect(
-      fetchBranchHead('localheroai/test', 'feature', 'ghs_token', { fetch: mockFetch as any })
-    ).rejects.toThrow(/has no head SHA/);
   });
 });

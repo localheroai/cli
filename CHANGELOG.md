@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- With signed commits (`github.signedCommits: true`), a push to the branch while a run was in progress could be overwritten. The CLI committed its files on top of the newer push, so an edit in that push to one of the same translation files was silently reverted to the version the run started from. The commit now goes on top of the commit the run checked out. If the branch has moved since, the CLI skips the commit, prints "Branch moved during the run; skipping commit", and exits successfully; the new push starts a fresh run on the current files. A sync from Localhero that is skipped this way is not marked as completed.
+
 ### Changed
 - The workflow `localhero init` generates for Django and Phoenix skips the extract step (and its setup) on Localhero's own translation commits. The follow-up run on those commits no longer spends time on `makemessages` or `mix gettext.extract` before the action skips itself.
 

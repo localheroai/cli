@@ -4,7 +4,7 @@
  * `createCommitOnBranch` is the canonical way to push commits via the GitHub
  * App API and have them automatically signed by GitHub. It accepts a base SHA
  * (`expectedHeadOid`) and atomically rejects the call if the branch has
- * advanced — no orphaned tree/commit objects on retry.
+ * advanced, without leaving orphaned tree/commit objects.
  *
  * Reference: https://docs.github.com/en/graphql/reference/mutations#createcommitonbranch
  */
@@ -127,40 +127,4 @@ export async function createSignedCommit(
   }
 
   return { commitSha: commit.oid, commitUrl: commit.url };
-}
-
-export interface BranchHead {
-  sha: string;
-}
-
-/**
- * Fetch the current HEAD SHA of a branch via the REST API. Used as the
- * `expectedHeadOid` precondition for `createCommitOnBranch`.
- */
-export async function fetchBranchHead(
-  repositoryNameWithOwner: string,
-  branchName: string,
-  token: string,
-  deps: GraphQLDependencies = defaultDeps
-): Promise<BranchHead> {
-  const refUrl = `https://api.github.com/repos/${repositoryNameWithOwner}/git/ref/heads/${encodeURIComponent(branchName)}`;
-  const refResponse = await deps.fetch(refUrl, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'localhero-cli'
-    }
-  });
-
-  if (!refResponse.ok) {
-    throw new GitHubGraphQLError(`Failed to fetch branch head: ${refResponse.status} ${refResponse.statusText}`);
-  }
-
-  const refBody = (await refResponse.json()) as { object?: { sha?: string } };
-  const sha = refBody.object?.sha;
-  if (!sha) {
-    throw new GitHubGraphQLError(`Branch ${branchName} has no head SHA`);
-  }
-
-  return { sha };
 }
