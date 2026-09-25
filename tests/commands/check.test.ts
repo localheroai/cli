@@ -627,7 +627,7 @@ describe('check command', () => {
 
         expect(printed()).not.toContain('"old"');
         expect(appendFile).toHaveBeenCalledWith('/summary.md', expect.any(String));
-        expect(summary()).toContain('Missing translation for "new" (locale sv)');
+        expect(summary()).toContain('Missing translation for "new" (locale sv) in `config/locales/sv.yml`');
         expect(summary()).toContain('| sv | 1 | 0 | 0 | 0 | 0 | 1 |');
         expect(summary()).toContain('https://localhero.ai');
       });
@@ -639,7 +639,7 @@ describe('check command', () => {
 
         expect(process.exitCode).toBe(0);
         expect(annotations()).toEqual([]);
-        expect(summary()).toContain('No problems in changed keys');
+        expect(summary()).toContain('No new problems');
       });
 
       it('fetches the base commit a depth-1 checkout lacks', async () => {
@@ -729,7 +729,7 @@ describe('check command', () => {
 
         expect(annotations()).toEqual([]);
         expect(printed()).toContain('Missing keys (1):\n  new');
-        expect(printed()).toContain('2 problems in keys that did not change');
+        expect(printed()).toContain('2 problems already on the base branch are not listed');
       });
 
       it('writes no summary without GITHUB_STEP_SUMMARY', async () => {
@@ -816,6 +816,49 @@ describe('check command', () => {
 
       expect(exitCode).toBe(0);
       expect(reports[0].missing).toEqual([expect.objectContaining({ key: 'b', introduced: false })]);
+    });
+
+    describe('a problem the base already had', () => {
+      it('stays existing when the pull request rewords a form of its plural group', async () => {
+        onBase(yamlFile('en', '  items:\n    one: "%{count} item"\n    other: "%{count} items"\n'), yamlFile('sv', '  items: "Saker"\n'));
+        files = [yamlFile('en', '  items:\n    one: "One item"\n    other: "%{count} items"\n'), yamlFile('sv', '  items: "Saker"\n')];
+
+        const { exitCode, reports } = await run({ failOn: 'any' });
+
+        expect(reports[0].pluralShapeMismatches).toEqual([expect.objectContaining({ key: 'items', introduced: false })]);
+        expect(exitCode).toBe(0);
+      });
+
+      it('stays existing when the pull request rewords a key two files define differently', async () => {
+        const conflicted = (dir: string, title: string) => yamlFile('sv', `  title: "${title}"\n`, dir);
+        onBase(yamlFile('en', '  title: "Title"\n'), conflicted('config/locales', 'Titel'), conflicted('config/locales/extra', 'Rubrik'));
+        files = [yamlFile('en', '  title: "The title"\n'), conflicted('config/locales', 'Titel'), conflicted('config/locales/extra', 'Rubrik')];
+
+        const { exitCode, reports } = await run({ failOn: 'any' });
+
+        expect(reports[0].conflictingKeys).toEqual([expect.objectContaining({ key: 'title', introduced: false })]);
+        expect(exitCode).toBe(0);
+      });
+
+      it('stays existing when the pull request rewords a source that keeps the same placeholder', async () => {
+        onBase(yamlFile('en', '  hi: "Hi %{name}"\n'), yamlFile('sv', '  hi: "Hej"\n'));
+        files = [yamlFile('en', '  hi: "Hi there %{name}!"\n'), yamlFile('sv', '  hi: "Hej"\n')];
+
+        const { exitCode, reports } = await run({ failOn: 'placeholders' });
+
+        expect(reports[0].placeholderMismatches).toEqual([expect.objectContaining({ key: 'hi', introduced: false })]);
+        expect(exitCode).toBe(0);
+      });
+
+      it('becomes introduced when the pull request turns it into a different problem', async () => {
+        onBase(yamlFile('en', '  hi: "Hi %{name}"\n'), yamlFile('sv', '  hi: "Hej"\n'));
+        files = [yamlFile('en', '  hi: "Hi %{first_name}"\n'), yamlFile('sv', '  hi: "Hej"\n')];
+
+        const { exitCode, reports } = await run({ failOn: 'placeholders' });
+
+        expect(reports[0].placeholderMismatches).toEqual([expect.objectContaining({ key: 'hi', introduced: true })]);
+        expect(exitCode).toBe(1);
+      });
     });
 
     it('says what a placeholder mismatch is about', async () => {

@@ -38,7 +38,7 @@ import {
 } from '../utils/check-utils.js';
 import { detectCiContext, type CiContext, type Env } from '../utils/ci-context.js';
 import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js';
-import { diffAgainstBase, type ChangeInputs, type ChangeStatus, type KeyChanges } from '../utils/check-changes.js';
+import { baseFileSet, DUPLICATE_KEY_ERROR, type ChangeStatus, type FileSet } from '../utils/check-changes.js';
 import { buildStepSummary, plural, type ProblemCounts } from '../utils/check-summary.js';
 import { spellPlaceholders } from '../utils/placeholders.js';
 import { keyLineFinder, type KeyLineLookup } from '../utils/key-lines.js';
@@ -98,7 +98,7 @@ const defaultDeps: CheckDependencies = {
   appendFile: (path, text) => appendFileSync(path, text)
 };
 
-/** Set on each finding in changed-only mode: whether a key the change touched caused it. */
+/** Set on each finding in changed-only mode: false when the base already had the same problem. */
 interface Introduced {
   introduced?: boolean;
 }
@@ -124,11 +124,9 @@ interface LocaleReport {
   missingFiles: string[];
 }
 
-const DUPLICATE_KEY_ERROR = 'Map keys must be unique';
-
 interface RecoveredFiles {
   files: TranslationFile[];
-  duplicates: { locale: string; key: string; path: string; values: string[] }[];
+  duplicates: FileSet['duplicates'];
 }
 
 // The CLI's YAML parser rejects a repeated key that Rails accepts (last value
@@ -269,59 +267,72 @@ function outputFormat(options: CheckOptions, ci: CiContext): OutputFormat {
 
 const SILENT = { log: () => {} };
 
-/** A target file the change deleted still needs comparing, so its keys count as removed. */
-function targetsToCompare(
-  locale: string,
-  files: TranslationFile[],
-  missing: { locale: string; targetPath: string }[],
-  read: (file: TranslationFile) => FlatMap
-): ChangeInputs['targets'] {
-  const paths = new Set(files.map((f) => f.path));
-  const deleted = new Set(missing.filter((m) => m.locale === locale && !paths.has(m.targetPath)).map((m) => m.targetPath));
-  return [
-    ...files.map((file) => ({ locale, file, keys: read(file) })),
-    ...[...deleted].map((path) => ({ locale, file: { path, format: formatOf(path), locale }, keys: {} }))
-  ];
+/** Target files a missing key points at that no longer exist: the change may have deleted them. */
+function vanishedTargets(reports: LocaleReport[], files: FileSet): TranslationFile[] {
+  const vanished: TranslationFile[] = [];
+  for (const report of reports) {
+    const present = new Set((files.targetFilesByLocale[report.locale] ?? []).map((f) => f.path));
+    for (const path of new Set(report.missing.map((m) => m.targetPath))) {
+      if (!present.has(path)) vanished.push({ path, format: formatOf(path), locale: report.locale });
+    }
+  }
+  return vanished;
 }
 
 function compareWithBase(
   deps: CheckDependencies,
   ci: CiContext,
   config: TranslationConfig,
-  inputs: ChangeInputs
-): { status: ChangeStatus; changes: KeyChanges | null } {
+  files: FileSet,
+  current: LocaleReport[],
+  analyzeFiles: (files: FileSet) => LocaleReport[]
+): { status: ChangeStatus; reports: LocaleReport[] } {
   const configured = config.translationFiles.baseBranch || deps.env.GITHUB_BASE_REF;
   const base = resolveChangeBase(deps.git, {
     pullRequest: ci.pullRequest,
     baseBranches: configured ? [configured] : ['main', 'master']
   });
-  if ('error' in base) return { status: base, changes: null };
+  if ('error' in base) return { status: base, reports: current };
+  let before: LocaleReport[];
   try {
-    const changes = diffAgainstBase(deps.git, base, inputs);
-    return { status: { base: changes.base }, changes };
+    before = analyzeFiles(baseFileSet(deps.git, base.ref, files, vanishedTargets(current, files)));
   } catch (error) {
-    return { status: { error: `git could not read the base version: ${(error as Error).message.trim()}` }, changes: null };
+    return { status: { error: `git could not read the base version: ${(error as Error).message.trim()}` }, reports: current };
   }
+  return {
+    status: { base: base.label },
+    reports: current.map((report) => tagAgainstBase(report, before.find((b) => b.locale === report.locale)))
+  };
 }
 
-function tagIntroduced(report: LocaleReport, changes: KeyChanges, pairedSources: Map<string, string[]>, allSources: string[]): void {
-  const { locale } = report;
-  const introducedIn = (key: string, targetPaths: string[], sourcePaths: string[]): boolean =>
-    targetPaths.some((path) => changes.inTarget(locale, path, key)) || sourcePaths.some((path) => changes.inSource(path, key));
-  const inTarget = <T extends { key: string; path: string }>(findings: T[], sources?: string[]): (T & Introduced)[] =>
-    findings.map((f) => ({ ...f, introduced: introducedIn(f.key, [f.path], sources ?? pairedSources.get(f.path) ?? allSources) }));
+function sortedList(items: string[]): string {
+  return [...items].sort().join('\0');
+}
 
-  report.missing = report.missing.map((f) => ({ ...f, introduced: introducedIn(f.key, [f.targetPath], [f.path]) }));
-  report.empty = inTarget(report.empty);
-  report.identical = inTarget(report.identical);
-  report.placeholderMismatches = inTarget(report.placeholderMismatches);
-  report.placeholderHints = inTarget(report.placeholderHints);
-  report.structureMismatches = inTarget(report.structureMismatches);
-  report.pluralShapeMismatches = inTarget(report.pluralShapeMismatches);
-  report.missingPluralCategories = inTarget(report.missingPluralCategories);
-  report.duplicateKeys = inTarget(report.duplicateKeys);
-  report.orphans = inTarget(report.orphans, allSources);
-  report.conflictingKeys = report.conflictingKeys.map((f) => ({ ...f, introduced: introducedIn(f.key, f.files, allSources) }));
+/**
+ * A finding is introduced when the base did not have the same problem. Each identity holds what makes the
+ * problem, so a placeholder mismatch that now misses a different placeholder counts as new.
+ */
+function tagAgainstBase(report: LocaleReport, base: LocaleReport | undefined): LocaleReport {
+  const tag = <T>(current: T[], before: T[] | undefined, identity: (finding: T) => unknown[]): (T & Introduced)[] => {
+    const existing = new Set((before ?? []).map((finding) => JSON.stringify(identity(finding))));
+    return current.map((finding) => ({ ...finding, introduced: !existing.has(JSON.stringify(identity(finding))) }));
+  };
+  const placeholders = (f: Located<PlaceholderMismatch>) => [f.key, f.path, sortedList(f.missingInTarget), sortedList(f.unexpectedInTarget)];
+  return {
+    ...report,
+    missing: tag(report.missing, base?.missing, (f) => [f.key, f.targetPath]),
+    empty: tag(report.empty, base?.empty, (f) => [f.key, f.path]),
+    identical: tag(report.identical, base?.identical, (f) => [f.key, f.path, f.value]),
+    placeholderMismatches: tag(report.placeholderMismatches, base?.placeholderMismatches, placeholders),
+    placeholderHints: tag(report.placeholderHints, base?.placeholderHints, placeholders),
+    orphans: tag(report.orphans, base?.orphans, (f) => [f.key, f.path]),
+    structureMismatches: tag(report.structureMismatches, base?.structureMismatches, (f) => [f.key, f.path, f.sourceShape, f.targetShape]),
+    pluralShapeMismatches: tag(report.pluralShapeMismatches, base?.pluralShapeMismatches, (f) => [f.key, f.path]),
+    missingPluralCategories: tag(report.missingPluralCategories, base?.missingPluralCategories, (f) => [f.key, f.path, sortedList(f.missing)]),
+    conflictingKeys: tag(report.conflictingKeys, base?.conflictingKeys, (f) => [f.key, f.files, f.values]),
+    duplicateKeys: tag(report.duplicateKeys, base?.duplicateKeys, (f) => [f.key, f.path, f.values])
+  };
 }
 
 function filterFindings(r: LocaleReport, keep: (finding: Introduced) => boolean): LocaleReport {
@@ -374,6 +385,125 @@ function reshapedKeysBetween(sourceKeys: FlatMap, targetKeys: FlatMap): string[]
     ...findPluralShapeMismatches(sourceKeys, targetKeys).map((f) => f.key),
     ...findPluralizedFlatKeys(sourceKeys, targetKeys)
   ];
+}
+
+interface AnalysisContext {
+  sourceLocale: string;
+  targetLocales: string[];
+  detected: DetectedSetup | null;
+  console: CheckDependencies['console'];
+  ignoreMatcher: (key: string) => boolean;
+}
+
+function analyze(files: FileSet, context: AnalysisContext): { reports: LocaleReport[]; keyCount: number } {
+  const { sourceLocale, targetLocales, detected, console, ignoreMatcher } = context;
+  const { sourceFiles, targetFilesByLocale } = files;
+  const filesFor = (locale: string) => (targetFilesByLocale[locale] || []).map((f) => f.path);
+  const withoutIgnored = (keys: FlatMap): FlatMap => filterKeys(keys, ignoreMatcher).kept;
+  const localePluralCategories: Record<string, string[]> = {};
+  for (const locale of targetLocales) {
+    const categories = usedPluralCategories(locale);
+    if (categories) localePluralCategories[locale] = categories;
+  }
+
+  const { missing } = findMissingTranslationsByLocale(
+    sourceFiles,
+    targetFilesByLocale,
+    { sourceLocale, outputLocales: targetLocales, localePluralCategories },
+    false,
+    console,
+    { ignoreMatcher }
+  );
+
+  const readSource = (file: TranslationFile): FlatMap => withoutIgnored(sourceKeysFor(file, sourceLocale));
+  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: readSource(file) }));
+  const totalSourceKeys = new Set<string>();
+  for (const { keys } of sourceKeyMaps) {
+    for (const [key, value] of Object.entries(keys)) {
+      const text = toStringValue(value);
+      if (Array.isArray(value) || (text !== null && text !== '')) totalSourceKeys.add(key);
+    }
+  }
+  const allSourceKeys: FlatMap = Object.assign({}, ...sourceKeyMaps.map(({ keys }) => keys));
+
+  const reports: LocaleReport[] = targetLocales.map((locale) => {
+    const reshapedKeys = new Set<string>();
+    const report: LocaleReport = {
+      locale,
+      files: filesFor(locale),
+      keyCount: totalSourceKeys.size,
+      missing: [],
+      empty: [],
+      identical: [],
+      placeholderMismatches: [],
+      placeholderHints: [],
+      missingPluralCategories: [],
+      orphans: [],
+      structureMismatches: [],
+      pluralShapeMismatches: [],
+      conflictingKeys: [],
+      duplicateKeys: files.duplicates
+        .filter((d) => d.locale === locale)
+        .map(({ key, path, values }) => ({ key, path, values })),
+      missingFiles: []
+    };
+
+    const targetFiles = targetFilesByLocale[locale] || [];
+    const pairedTargetKeys = new Map<string, FlatMap>();
+    for (const { file: sourceFile, keys: sourceKeys } of sourceKeyMaps) {
+      const { keys: allTargetKeys, path: targetPath } = targetKeysFor(targetFiles, locale, sourceFile, sourceLocale);
+      const targetKeys = withoutIgnored(allTargetKeys);
+
+      const { empty, identical } = findEmptyAndIdentical(sourceKeys, targetKeys);
+      report.empty.push(...withPath(empty, targetPath));
+      report.identical.push(...withPath(identical, targetPath));
+      for (const finding of withPath(findPlaceholderMismatches(sourceKeys, targetKeys), targetPath)) {
+        (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(finding);
+      }
+      const structureMismatches = findStructureMismatches(sourceKeys, targetKeys);
+      const pluralShapeMismatches = findPluralShapeMismatches(sourceKeys, targetKeys);
+      report.structureMismatches.push(...withPath(structureMismatches, targetPath));
+      report.pluralShapeMismatches.push(...withPath(pluralShapeMismatches, targetPath));
+      for (const { key } of [...structureMismatches, ...pluralShapeMismatches]) reshapedKeys.add(key);
+      for (const key of findPluralizedFlatKeys(sourceKeys, targetKeys)) reshapedKeys.add(key);
+
+      if (targetPath) pairedTargetKeys.set(targetPath, targetKeys);
+      report.missingPluralCategories.push(...withPath(findMissingPluralCategories(targetKeys, locale), targetPath));
+    }
+
+    // Rails merges every file of a locale, so a target key is an orphan only when no source file has it.
+    for (const [targetPath, targetKeys] of pairedTargetKeys) {
+      const reshaped = new Set([...reshapedKeys, ...reshapedKeysBetween(allSourceKeys, targetKeys)]);
+      const orphans = findOrphanKeys(allSourceKeys, targetKeys).filter((f) => !isAtOrUnder(f.key, reshaped));
+      report.orphans.push(...withPath(orphans, targetPath));
+    }
+
+    // Only single-language YAML shares one namespace per locale: gettext domains, i18next namespaces
+    // and multi-language files (often scoped to one view) are separate.
+    report.conflictingKeys = findConflictingKeys(
+      targetFiles.filter((file) => isYaml(file) && !file.multiLanguage).map((file) => ({ path: file.path, keys: withoutIgnored(keysOf(file, locale, sourceLocale)) }))
+    );
+
+    const reportedElsewhere = new Set([...reshapedKeys, ...report.empty.map((f) => f.key)]);
+    const existingTargets = new Set(filesFor(locale));
+    for (const entry of Object.values(missing)) {
+      if (entry.locale !== locale) continue;
+      // Without a config the targets are guessed, so a language that only
+      // translates part of the app is not reported missing for the rest.
+      if (detected && !existingTargets.has(entry.targetPath)) {
+        report.missingFiles.push(entry.path);
+        continue;
+      }
+      for (const key of Object.keys(entry.keys)) {
+        if (ignoreMatcher(key) || isAtOrUnder(key, reportedElsewhere)) continue;
+        report.missing.push({ key, path: entry.path, targetPath: entry.targetPath });
+      }
+    }
+
+    return report;
+  });
+
+  return { reports, keyCount: totalSourceKeys.size };
 }
 
 export async function runCheck(
@@ -457,129 +587,20 @@ export async function runCheck(
     return failedResult(format, sourceLocale);
   }
 
-  const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
-  const withoutIgnored = (keys: FlatMap): FlatMap => filterKeys(keys, ignoreMatcher).kept;
-  const localePluralCategories: Record<string, string[]> = {};
-  for (const locale of targetLocales) {
-    const categories = usedPluralCategories(locale);
-    if (categories) localePluralCategories[locale] = categories;
-  }
-
-  const { missing } = findMissingTranslationsByLocale(
-    sourceFiles,
-    targetFilesByLocale,
-    { sourceLocale, outputLocales: targetLocales, localePluralCategories },
-    false,
+  const context: AnalysisContext = {
+    sourceLocale,
+    targetLocales,
+    detected,
     console,
-    { ignoreMatcher }
-  );
-
-  const readSource = (file: TranslationFile): FlatMap => withoutIgnored(sourceKeysFor(file, sourceLocale));
-  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: readSource(file) }));
-  const totalSourceKeys = new Set<string>();
-  for (const { keys } of sourceKeyMaps) {
-    for (const [key, value] of Object.entries(keys)) {
-      const text = toStringValue(value);
-      if (Array.isArray(value) || (text !== null && text !== '')) totalSourceKeys.add(key);
-    }
-  }
-  const allSourceKeys: FlatMap = Object.assign({}, ...sourceKeyMaps.map(({ keys }) => keys));
-
-  const readTarget = (file: TranslationFile): FlatMap => withoutIgnored(keysOf(file, file.locale, sourceLocale));
+    ignoreMatcher: createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? [])
+  };
+  const files: FileSet = { sourceFiles, targetFilesByLocale, duplicates: recovered.duplicates };
+  const current = analyze(files, context);
   const changedOnly = !options.full && (options.changedOnly || ci.pullRequest !== null);
-  const { status: changeStatus, changes: keyChanges } = changedOnly
-    ? compareWithBase(deps, ci, config, {
-      sources: sourceKeyMaps,
-      targets: targetLocales.flatMap((locale) =>
-        targetsToCompare(locale, targetFilesByLocale[locale] || [], Object.values(missing), readTarget)
-      ),
-      readSource,
-      readTarget
-    })
-    : { status: null, changes: null };
-  const sourcePaths = sourceKeyMaps.map(({ file }) => file.path);
-
-  const reports: LocaleReport[] = targetLocales.map((locale) => {
-    const reshapedKeys = new Set<string>();
-    const report: LocaleReport = {
-      locale,
-      files: filesFor(locale),
-      keyCount: totalSourceKeys.size,
-      missing: [],
-      empty: [],
-      identical: [],
-      placeholderMismatches: [],
-      placeholderHints: [],
-      missingPluralCategories: [],
-      orphans: [],
-      structureMismatches: [],
-      pluralShapeMismatches: [],
-      conflictingKeys: [],
-      duplicateKeys: recovered.duplicates
-        .filter((d) => d.locale === locale)
-        .map(({ key, path, values }) => ({ key, path, values })),
-      missingFiles: []
-    };
-
-    const targetFiles = targetFilesByLocale[locale] || [];
-    const pairedTargetKeys = new Map<string, FlatMap>();
-    const pairedSources = new Map<string, string[]>();
-    for (const { file: sourceFile, keys: sourceKeys } of sourceKeyMaps) {
-      const { keys: allTargetKeys, path: targetPath } = targetKeysFor(targetFiles, locale, sourceFile, sourceLocale);
-      const targetKeys = withoutIgnored(allTargetKeys);
-
-      const { empty, identical } = findEmptyAndIdentical(sourceKeys, targetKeys);
-      report.empty.push(...withPath(empty, targetPath));
-      report.identical.push(...withPath(identical, targetPath));
-      for (const finding of withPath(findPlaceholderMismatches(sourceKeys, targetKeys), targetPath)) {
-        (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(finding);
-      }
-      const structureMismatches = findStructureMismatches(sourceKeys, targetKeys);
-      const pluralShapeMismatches = findPluralShapeMismatches(sourceKeys, targetKeys);
-      report.structureMismatches.push(...withPath(structureMismatches, targetPath));
-      report.pluralShapeMismatches.push(...withPath(pluralShapeMismatches, targetPath));
-      for (const { key } of [...structureMismatches, ...pluralShapeMismatches]) reshapedKeys.add(key);
-      for (const key of findPluralizedFlatKeys(sourceKeys, targetKeys)) reshapedKeys.add(key);
-
-      if (targetPath) {
-        pairedTargetKeys.set(targetPath, targetKeys);
-        pairedSources.set(targetPath, [...(pairedSources.get(targetPath) ?? []), sourceFile.path]);
-      }
-      report.missingPluralCategories.push(...withPath(findMissingPluralCategories(targetKeys, locale), targetPath));
-    }
-
-    // Rails merges every file of a locale, so a target key is an orphan only when no source file has it.
-    for (const [targetPath, targetKeys] of pairedTargetKeys) {
-      const reshaped = new Set([...reshapedKeys, ...reshapedKeysBetween(allSourceKeys, targetKeys)]);
-      const orphans = findOrphanKeys(allSourceKeys, targetKeys).filter((f) => !isAtOrUnder(f.key, reshaped));
-      report.orphans.push(...withPath(orphans, targetPath));
-    }
-
-    // Only single-language YAML shares one namespace per locale: gettext domains, i18next namespaces
-    // and multi-language files (often scoped to one view) are separate.
-    report.conflictingKeys = findConflictingKeys(
-      targetFiles.filter((file) => isYaml(file) && !file.multiLanguage).map((file) => ({ path: file.path, keys: withoutIgnored(keysOf(file, locale, sourceLocale)) }))
-    );
-
-    const reportedElsewhere = new Set([...reshapedKeys, ...report.empty.map((f) => f.key)]);
-    const existingTargets = new Set(filesFor(locale));
-    for (const entry of Object.values(missing)) {
-      if (entry.locale !== locale) continue;
-      // Without a config the targets are guessed, so a language that only
-      // translates part of the app is not reported missing for the rest.
-      if (detected && !existingTargets.has(entry.targetPath)) {
-        report.missingFiles.push(entry.path);
-        continue;
-      }
-      for (const key of Object.keys(entry.keys)) {
-        if (ignoreMatcher(key) || isAtOrUnder(key, reportedElsewhere)) continue;
-        report.missing.push({ key, path: entry.path, targetPath: entry.targetPath });
-      }
-    }
-
-    if (keyChanges) tagIntroduced(report, keyChanges, pairedSources, sourcePaths);
-    return report;
-  });
+  const quiet = { ...context, console: { log: SILENT.log, error: SILENT.log } };
+  const { status: changeStatus, reports } = changedOnly
+    ? compareWithBase(deps, ci, config, files, current.reports, (baseFiles) => analyze(baseFiles, quiet).reports)
+    : { status: null, reports: current.reports };
 
   const failOn = options.failOn || 'missing';
   // Without the diff, failing on every existing finding would block pull requests that did not cause them.
@@ -593,7 +614,7 @@ export async function runCheck(
     reports,
     sourceLocale,
     sourceFiles: sourceFiles.map((f) => f.path),
-    keyCount: totalSourceKeys.size,
+    keyCount: current.keyCount,
     parseFailures,
     detected,
     format,
@@ -780,6 +801,8 @@ interface Annotation {
   file: string;
   line?: number;
   message: string;
+  /** The file the problem is in, when the annotation points elsewhere. */
+  targetFile?: string;
 }
 
 // A missing translation points at the source key's line: in a pull request that
@@ -801,7 +824,8 @@ function annotationsFor(reports: LocaleReport[], sourceLocale: string, lineOf: L
         locale: r.locale,
         file: m.path,
         line: lineOf(m.path, m.key, sourceLocale),
-        message: `Missing translation for "${m.key}" (locale ${r.locale})`
+        message: `Missing translation for "${m.key}" (locale ${r.locale})`,
+        targetFile: m.targetPath
       });
     }
     for (const m of r.empty) {
@@ -866,8 +890,8 @@ function unavailableMessage(error: string): string {
   return `Could not compare with the base branch: ${error}. Checked every key instead; its findings do not fail the run. In GitHub Actions, check out with fetch-depth: 0 if this keeps happening.`;
 }
 
-function unchangedKeyProblems(count: number): string {
-  return `${plural(count, 'problem')} in keys that did not change ${count === 1 ? 'is' : 'are'}`;
+function existingProblemsLine(count: number): string {
+  return `${plural(count, 'problem')} already on the base branch ${count === 1 ? 'is' : 'are'}`;
 }
 
 function changedOnlyJson(changes: ChangeStatus) {
@@ -922,7 +946,7 @@ function writeStepSummary(
   const listed = changes !== null && 'error' in changes ? [] : reports.map((r) => filterFindings(r, isIntroduced));
   const markdown = buildStepSummary({
     changes,
-    problems: problemsIn(listed, sourceLocale),
+    problems: problemsIn(listed, sourceLocale).map((a) => ({ ...a, file: a.targetFile ?? a.file })),
     counts: countedInSummary(changes, reports).map((r) => ({ locale: r.locale, counts: problemCounts(r) })),
     missingTranslations: reports.some((r) => missingCount(r) > 0)
   });
@@ -957,12 +981,12 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
     }
     if (base) {
       const where = summaryPath ? 'counted in the job summary' : 'not listed; run with --full to see them';
-      con.log(`Checked the keys changed since ${base}. ${unchangedKeyProblems(existingProblems)} ${where}.`);
+      con.log(`Compared with ${base}. ${existingProblemsLine(existingProblems)} ${where}.`);
     }
   } else if (base) {
-    con.log(chalk.blue(`ℹ Checking the keys changed since ${base}.`));
+    con.log(chalk.blue(`ℹ Compared with ${base}. Only new problems are listed.`));
     printFindings(con, introduced, Boolean(options.all));
-    con.log(`\n${unchangedKeyProblems(existingProblems)} not listed. Run with --full to see them.`);
+    con.log(`\n${existingProblemsLine(existingProblems)} not listed. Run with --full to see them.`);
   } else {
     if (unavailable) con.log(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));
     printHumanReport(con, reports, keyCount, Boolean(options.all));

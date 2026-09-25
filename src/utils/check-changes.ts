@@ -1,107 +1,60 @@
-import { valuesEqual } from './git-changes.js';
-import { PLURAL_SUFFIX_REGEX } from './po-utils.js';
-import { dedupeYaml } from './yaml-duplicates.js';
+import { parseFile } from './files.js';
+import { dedupeYaml, findDuplicateYamlKeys } from './yaml-duplicates.js';
 import { readFileAtRef, relativeToCwd, renamesSince, type GitRunner } from './check-git.js';
-import type { FlatMap } from './check-utils.js';
 import type { TranslationFile } from '../types/index.js';
-
-const RAILS_PLURAL_LEAF = /\.(zero|one|two|few|many|other)$/;
-const I18NEXT_PLURAL_SUFFIX = /_(zero|one|two|few|many|other|plural)$/;
-
-export function changedKeys(before: FlatMap, after: FlatMap): Set<string> {
-  const changed = new Set<string>();
-  for (const [key, value] of Object.entries(after)) {
-    if (!(key in before) || !valuesEqual(before[key], value)) changed.add(key);
-  }
-  for (const key of Object.keys(before)) {
-    if (!(key in after)) changed.add(key);
-  }
-  return changed;
-}
-
-function pluralBase(key: string): string {
-  return key.replace(PLURAL_SUFFIX_REGEX, '').replace(RAILS_PLURAL_LEAF, '').replace(I18NEXT_PLURAL_SUFFIX, '');
-}
-
-function ancestorsOf(key: string): string[] {
-  const ancestors: string[] = [];
-  for (let end = key.lastIndexOf('.'); end > 0; end = key.lastIndexOf('.', end - 1)) {
-    ancestors.push(key.slice(0, end));
-  }
-  return ancestors;
-}
-
-/**
- * A finding belongs to a change when its key changed, when it sits on a parent of a changed key
- * (a plural group, a string that became a map) or when it is another plural form of a changed key.
- */
-export function createChangeMatcher(changed: Set<string>): (key: string) => boolean {
-  const ancestors = new Set<string>();
-  const bases = new Set<string>();
-  for (const key of changed) {
-    for (const ancestor of ancestorsOf(key)) ancestors.add(ancestor);
-    bases.add(pluralBase(key));
-  }
-  return (key) => changed.has(key) || ancestors.has(key) || bases.has(pluralBase(key));
-}
-
-type KeyReader = (file: TranslationFile) => FlatMap;
-
-/** An unparsable base version reads as empty, so every key in the file counts as changed. */
-function keysAtRef(git: GitRunner, ref: string, basePath: string, file: TranslationFile, read: KeyReader): FlatMap {
-  const raw = readFileAtRef(git, ref, basePath);
-  if (raw === null) return {};
-  const at = (text: string): TranslationFile => ({ ...file, content: Buffer.from(text).toString('base64') });
-  try {
-    return read(at(raw));
-  } catch {
-    if (file.format !== 'yml' && file.format !== 'yaml') return {};
-  }
-  try {
-    return read(at(dedupeYaml(raw)));
-  } catch {
-    return {};
-  }
-}
 
 /** The base a changed-only run compared with, or why it could not; null for a full check. */
 export type ChangeStatus = { base: string } | { error: string } | null;
 
-export interface KeyChanges {
-  base: string;
-  inSource: (path: string, key: string) => boolean;
-  inTarget: (locale: string, path: string, key: string) => boolean;
+export const DUPLICATE_KEY_ERROR = 'Map keys must be unique';
+
+export interface FileSet {
+  sourceFiles: TranslationFile[];
+  targetFilesByLocale: Record<string, TranslationFile[]>;
+  /** Repeated YAML keys in files that only parse once deduplicated. */
+  duplicates: { locale: string; path: string; key: string; values: string[] }[];
 }
 
-export interface ChangeInputs {
-  sources: { file: TranslationFile; keys: FlatMap }[];
-  /** Multi-language files share a path across locales, so targets are told apart by locale too. */
-  targets: { locale: string; file: TranslationFile; keys: FlatMap }[];
-  readSource: KeyReader;
-  readTarget: KeyReader;
+function isYaml(format: string): boolean {
+  return format === 'yml' || format === 'yaml';
 }
 
 /**
- * Diffs each file against its version at `base.ref`, read with the same key reader as the check itself
- * so the changed keys use the check's key names. Throws when git fails.
+ * The same files as they were at `ref`, under their current paths so findings on both sides compare.
+ * A moved file is read from its old path. A file the base lacks, or cannot parse, is left out.
+ * `deletedTargets` are target files the change removed; they exist only at the base.
+ * Throws when git fails.
  */
-export function diffAgainstBase(git: GitRunner, base: { ref: string; label: string }, inputs: ChangeInputs): KeyChanges {
-  const source = new Map<string, (key: string) => boolean>();
-  const target = new Map<string, (key: string) => boolean>();
-  const targetId = (locale: string, path: string) => `${locale}\0${path}`;
-  // A moved file keeps its keys; read from the new path it would look entirely new.
-  const renames = renamesSince(git, base.ref);
-  const before = (file: TranslationFile, read: KeyReader) =>
-    keysAtRef(git, base.ref, renames.get(relativeToCwd(file.path)) ?? file.path, file, read);
-  for (const { file, keys } of inputs.sources) {
-    source.set(file.path, createChangeMatcher(changedKeys(before(file, inputs.readSource), keys)));
-  }
-  for (const { locale, file, keys } of inputs.targets) {
-    target.set(targetId(locale, file.path), createChangeMatcher(changedKeys(before(file, inputs.readTarget), keys)));
-  }
-  return {
-    base: base.label,
-    inSource: (path, key) => source.get(path)?.(key) ?? false,
-    inTarget: (locale, path, key) => target.get(targetId(locale, path))?.(key) ?? false
+export function baseFileSet(git: GitRunner, ref: string, current: FileSet, deletedTargets: TranslationFile[]): FileSet {
+  const renames = renamesSince(git, ref);
+  const rawByPath = new Map<string, string | null>();
+  const duplicates: FileSet['duplicates'] = [];
+
+  const readRaw = (path: string): string | null => {
+    if (!rawByPath.has(path)) rawByPath.set(path, readFileAtRef(git, ref, renames.get(relativeToCwd(path)) ?? path));
+    return rawByPath.get(path) ?? null;
   };
+
+  const atBase = (file: TranslationFile): TranslationFile | null => {
+    const raw = readRaw(file.path);
+    if (raw === null) return null;
+    const version = (text: string): TranslationFile => ({ ...file, content: Buffer.from(text).toString('base64') });
+    try {
+      parseFile(raw, file.format, file.path);
+      return version(raw);
+    } catch (error) {
+      if (!isYaml(file.format) || !String(error).includes(DUPLICATE_KEY_ERROR)) return null;
+    }
+    for (const duplicate of findDuplicateYamlKeys(raw, file.locale)) {
+      duplicates.push({ locale: file.locale, path: file.path, ...duplicate });
+    }
+    return version(dedupeYaml(raw));
+  };
+  const present = (files: TranslationFile[]) => files.map(atBase).filter((file): file is TranslationFile => file !== null);
+
+  const targetFilesByLocale: FileSet['targetFilesByLocale'] = {};
+  for (const [locale, files] of Object.entries(current.targetFilesByLocale)) {
+    targetFilesByLocale[locale] = present([...files, ...deletedTargets.filter((file) => file.locale === locale)]);
+  }
+  return { sourceFiles: present(current.sourceFiles), targetFilesByLocale, duplicates };
 }

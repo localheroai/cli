@@ -18,7 +18,7 @@ describe('buildStepSummary', () => {
       missingTranslations: true
     });
 
-    expect(markdown).toContain('Compared with `main (abc1234)`: 2 problems in changed keys.');
+    expect(markdown).toContain('Compared with `main (abc1234)`: 2 new problems.');
     expect(markdown).toContain('#### sv\n\n- Missing translation for "new" (locale sv) in `config/locales/sv.yml`');
     expect(markdown).toContain('#### de\n\n- Missing translation for "new" (locale de)');
     expect(markdown).toContain('### Existing problems');
@@ -30,7 +30,7 @@ describe('buildStepSummary', () => {
   it('says when the change adds no problems and leaves out the Localhero.ai line without missing translations', () => {
     const markdown = buildStepSummary({ changes: { base: 'main' }, problems: [], counts: [], missingTranslations: false });
 
-    expect(markdown).toContain('No problems in changed keys.');
+    expect(markdown).toContain('No new problems.');
     expect(markdown).not.toContain('Existing problems');
     expect(markdown).not.toContain('localhero.ai');
   });

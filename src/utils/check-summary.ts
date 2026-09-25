@@ -18,7 +18,7 @@ export interface ProblemCounts {
 export interface StepSummaryInput {
   changes: ChangeStatus;
   problems: SummaryProblem[];
-  /** Problems in unchanged keys, or every problem when the comparison failed. */
+  /** Problems the base already had, or every problem when the comparison failed. */
   counts: { locale: string; counts: ProblemCounts }[];
   missingTranslations: boolean;
 }
@@ -52,7 +52,7 @@ function statusLine(input: StepSummaryInput): string {
       '> Check out with `fetch-depth: 0` in actions/checkout if this keeps happening.'
     ].join('\n');
   }
-  const found = problems.length ? `${plural(problems.length, 'problem')} in changed keys.` : 'No problems in changed keys.';
+  const found = problems.length ? `${plural(problems.length, 'new problem')}.` : 'No new problems.';
   return `Compared with \`${changes.base}\`: ${found}`;
 }
 
@@ -87,7 +87,7 @@ export function buildStepSummary(input: StepSummaryInput): string {
   const lines = ['## Translation check', '', statusLine(input), '', ...problemList(input.problems)];
   const table = countsTable(input.counts);
   if (table.length && input.changes && 'base' in input.changes) {
-    lines.push('### Existing problems', '', 'In keys that did not change. They do not fail the check.', '', ...table);
+    lines.push('### Existing problems', '', 'Already on the base branch. They do not fail the check.', '', ...table);
   } else if (table.length && input.changes) {
     lines.push('### Problems found', '', ...table);
   }

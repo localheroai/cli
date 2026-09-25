@@ -240,15 +240,15 @@ For each target locale it reports:
 
 **`--pattern <glob>`**: The file pattern inside `--path`. Defaults to `**/*.{json,yml,yaml,po,pot}`.
 
-**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases. `changedOnly` is `null` in a full check. In changed-only mode it is `{ "base": "main (d260ed6)", "diffAvailable": true }` and each finding has `"introduced": true` when a changed key caused it, `false` when it was already there. When the comparison failed it is `{ "base": null, "diffAvailable": false, "reason": "..." }` and findings have no `introduced`.
+**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases. `changedOnly` is `null` in a full check. In changed-only mode it is `{ "base": "main (d260ed6)", "diffAvailable": true }` and each finding has `"introduced": true` when the base did not have it, `false` when it was already there. When the comparison failed it is `{ "base": null, "diffAvailable": false, "reason": "..." }` and findings have no `introduced`.
 
 **`--all`**: Prints every finding instead of the first 10 per category.
 
-**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`. In changed-only mode only findings in changed keys count.
+**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`. In changed-only mode only new problems count.
 
 **`--format <github|text>`**: `github` prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines. In GitHub Actions `github` is the default; `--format text` prints the report there instead. `--json` wins over both.
 
-**`--changed-only`**: Only reports and fails on problems in keys changed since the base branch. A key has changed when the branch added, edited or removed it in the source or in a translation. Problems elsewhere are counted, not listed. They never fail the run. The base is `translationFiles.baseBranch` from `localhero.json`, else `main` or `master`. On a GitHub pull request it is the pull request's base branch. There this mode is on by default.
+**`--changed-only`**: Only reports and fails on new problems: ones the base branch did not have. `check` runs the same checks on the base versions of the files to tell. A problem that was already there is counted, not listed. It never fails the run, even when the branch edited its key. One that changed, like a placeholder mismatch that now misses a different placeholder, counts as new. The base is `translationFiles.baseBranch` from `localhero.json`, else `main` or `master`. On a GitHub pull request it is the pull request's base branch. There this mode is on by default.
 
 **`--full`**: Checks every key, also on a pull request.
 
