@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 - `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
 
+### Fixed
+- New files in a pull request are translated again. Since 0.0.60, `--changed-only` (and so `ci` on a PR branch) could not tell a file that is new in the branch from a git error, and skipped it: a new source file was never translated, and new target files and their keys never reached Localhero for review. This affected every project, not only multi-language files.
+- A multi-language file (`multiLanguageFiles: true`) that only has the source language, like a new `welcome.i18n.yml` with just `en:`, is now picked up and the other languages are added to it. Before, it was skipped with "Could not extract locale from path".
+- A language key in a multi-language file that isn't one of your locales, like `no:` in a project that uses `nb`, is now named in a warning and left untouched, and the rest of the file is still translated. Before, the whole file was skipped.
+
 ## [0.0.73] - 2026-09-25
 
 ### Fixed

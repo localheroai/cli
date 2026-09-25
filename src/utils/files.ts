@@ -13,7 +13,7 @@ import type {
 } from '../types/index.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from './file-size.js';
-import { detectMultiLanguage } from './multi-language-detection.js';
+import { detectMultiLanguage, sourceKeyedLocales } from './multi-language-detection.js';
 
 
 /**
@@ -122,6 +122,41 @@ export function extractLocaleFromPath(filePath: string, localeRegex?: string, kn
   }
 
   throw new Error(`Could not extract locale from path: ${filePath}`);
+}
+
+function pathHasLocale(filePath: string, localeRegex: string | undefined, knownLocales: string[]): boolean {
+  try {
+    extractLocaleFromPath(filePath, localeRegex, knownLocales);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveMultiLanguageLocales(
+  filePath: string,
+  parsedContent: unknown,
+  knownLocales: string[],
+  sourceLocale: string,
+  localeRegex: string | undefined
+): string[] | null {
+  if (detectMultiLanguage(parsedContent, knownLocales)) {
+    return Object.keys(parsedContent as Record<string, unknown>);
+  }
+  if (pathHasLocale(filePath, localeRegex, knownLocales)) {
+    return null;
+  }
+
+  const sourceKeyed = sourceKeyedLocales(parsedContent, knownLocales, sourceLocale);
+  if (!sourceKeyed) {
+    return null;
+  }
+  for (const key of sourceKeyed.unknown) {
+    console.warn(chalk.yellow(
+      `Warning: Skipping "${key}" in ${filePath}: not one of your locales (${knownLocales.join(', ')})`
+    ));
+  }
+  return sourceKeyed.locales;
 }
 
 /**
@@ -420,7 +455,11 @@ export async function findTranslationFiles(
             sourceLanguage: sourceLocale
           });
 
-          if (detectMultiLanguage(parsedContent, knownLocales)) {
+          const multiLanguageLocales = resolveMultiLanguageLocales(
+            file, parsedContent, knownLocales, sourceLocale, localeRegex
+          );
+
+          if (multiLanguageLocales) {
             if (!betaNoticeEmitted) {
               logger.log(chalk.blue('ℹ Multi-language files: beta feature — please report issues'));
               betaNoticeEmitted = true;
@@ -428,7 +467,7 @@ export async function findTranslationFiles(
             const parsedObj = parsedContent as Record<string, unknown>;
             const base64 = Buffer.from(rawContent).toString('base64');
 
-            for (const fileLocale of Object.keys(parsedObj)) {
+            for (const fileLocale of multiLanguageLocales) {
               const entry: TranslationFile = {
                 path: filePath,
                 format,

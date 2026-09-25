@@ -69,6 +69,66 @@ describe('readFileContentWithKeys with ignoreMatcher', () => {
     expect(out.removed).toEqual([{ name: 'activerecord.errors.foo', locale: 'sv' }]);
   });
 
+  it('reads configured locale wrappers and ignores unconfigured locale keys in multi-lang YAML', async () => {
+    const src = [
+      'en:',
+      '  title: "Hello"',
+      '  activerecord:',
+      '    errors:',
+      '      foo: "bar"',
+      'sv:',
+      '  title: "Hej"',
+      'no:',
+      '  title: "Hei"',
+      '',
+    ].join('\n');
+    const p = path.join(tmp, 'published_profile.i18n.yml');
+    await fs.writeFile(p, src, 'utf8');
+    const matcher = createIgnoreMatcher(['activerecord.errors.*']);
+    const out = await readFileContentWithKeys(
+      p,
+      { sourceLanguage: 'en', currentLanguage: 'en' },
+      { ignoreMatcher: matcher, knownLocales, sourceLocale: 'en', multiLanguage: true }
+    );
+    expect(out.keys.map((k) => k.name)).toEqual(['title', 'title']);
+    expect(out.removed).toEqual([{ name: 'activerecord.errors.foo', locale: undefined }]);
+  });
+
+  it('does not split a file into locale subtrees unless the scan marked it multi-language', async () => {
+    const src = [
+      'en:',
+      '  title: "Hello"',
+      'sv:',
+      '  activerecord:',
+      '    errors:',
+      '      foo: "bar"',
+      'no:',
+      '  title: "Hei"',
+      '',
+    ].join('\n');
+    const p = path.join(tmp, 'en.yml');
+    await fs.writeFile(p, src, 'utf8');
+    const matcher = createIgnoreMatcher(['activerecord.errors.*']);
+    const out = await readFileContentWithKeys(
+      p,
+      { sourceLanguage: 'en', currentLanguage: 'en' },
+      { ignoreMatcher: matcher, knownLocales, sourceLocale: 'en', multiLanguage: false }
+    );
+    expect(out.removed).toEqual([]);
+  });
+
+  it('keeps a language-names JSON file as flat keys when it has an unconfigured locale key', async () => {
+    const p = path.join(tmp, 'languages.json');
+    await fs.writeFile(p, JSON.stringify({ en: 'English', sv: 'Svenska', de: 'Deutsch' }), 'utf8');
+    const matcher = createIgnoreMatcher(['activerecord.errors.*']);
+    const out = await readFileContentWithKeys(
+      p,
+      { sourceLanguage: 'en', currentLanguage: 'en' },
+      { ignoreMatcher: matcher, knownLocales, sourceLocale: 'en' }
+    );
+    expect(out.keys.map((k) => k.name)).toEqual(['en', 'sv', 'de']);
+  });
+
   it('removes matching keys from multi-lang YAML across all locale wrappers', async () => {
     const src = [
       '---',

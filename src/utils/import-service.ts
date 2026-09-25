@@ -7,7 +7,7 @@ import { findTranslationFiles as findFiles, flattenTranslations } from './files.
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
 import { localeCodesMatch } from './translation-processor.js';
-import { detectMultiLanguage } from './multi-language-detection.js';
+import { detectMultiLanguage, sourceKeyedLocales } from './multi-language-detection.js';
 import type { IgnoreSummary, RemovedKey } from './ignore-keys.js';
 import { summarizeRemoved } from './ignore-keys.js';
 import type {
@@ -61,6 +61,14 @@ export interface FilterOptions {
   ignoreMatcher?: (keyName: string) => boolean;
   knownLocales?: string[];
   sourceLocale?: string;
+  multiLanguage?: boolean;
+}
+
+interface SubtreeContext {
+  knownLocales: string[];
+  sourceLocale: string | undefined;
+  currentLanguage: string | undefined;
+  multiLanguage: boolean;
 }
 
 export interface FileReadResult {
@@ -106,9 +114,7 @@ type Subtree = {
 
 function buildSubtrees(
   parsed: unknown,
-  knownLocales: string[],
-  sourceLocale: string | undefined,
-  currentLanguage: string | undefined
+  { knownLocales, sourceLocale, currentLanguage, multiLanguage }: SubtreeContext
 ): Subtree[] {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [];
   const obj = parsed as Record<string, unknown>;
@@ -116,6 +122,15 @@ function buildSubtrees(
 
   if (detectMultiLanguage(parsed, knownLocales)) {
     return topKeys.map((loc) => ({
+      obj: (obj[loc] ?? {}) as Record<string, unknown>,
+      pathPrefix: [loc],
+      locale: loc === sourceLocale ? undefined : loc,
+    }));
+  }
+
+  const sourceKeyed = multiLanguage ? sourceKeyedLocales(parsed, knownLocales, sourceLocale) : null;
+  if (sourceKeyed && sourceKeyed.unknown.length > 0) {
+    return sourceKeyed.locales.map((loc) => ({
       obj: (obj[loc] ?? {}) as Record<string, unknown>,
       pathPrefix: [loc],
       locale: loc === sourceLocale ? undefined : loc,
@@ -140,9 +155,7 @@ function buildSubtrees(
 function readYaml(
   content: string,
   matcher: ((k: string) => boolean) | undefined,
-  knownLocales: string[],
-  sourceLocale: string | undefined,
-  currentLanguage: string | undefined
+  context: SubtreeContext
 ): FileReadResult {
   if (!matcher) {
     try {
@@ -167,7 +180,7 @@ function readYaml(
     return { content: Buffer.from(content).toString('base64'), keys: [], removed: [] };
   }
 
-  const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
+  const subtrees = buildSubtrees(parsed, context);
   const removed: RemovedKey[] = [];
   // Key names exclude the locale wrapper (pathPrefix): the server keys by name,
   // locale lives on the translation.
@@ -202,9 +215,7 @@ function readYaml(
 function readJson(
   content: string,
   matcher: ((k: string) => boolean) | undefined,
-  knownLocales: string[],
-  sourceLocale: string | undefined,
-  currentLanguage: string | undefined
+  context: SubtreeContext
 ): FileReadResult {
   try {
     const parsed = JSON.parse(content);
@@ -217,7 +228,7 @@ function readJson(
       };
     }
 
-    const subtrees = buildSubtrees(parsed, knownLocales, sourceLocale, currentLanguage);
+    const subtrees = buildSubtrees(parsed, context);
     const removed: RemovedKey[] = [];
     const keptFlat: Record<string, unknown> = {};
     // Key names are stored without the locale wrapper
@@ -284,15 +295,18 @@ export async function readFileContentWithKeys(
   const content = await fs.readFile(filePath, 'utf8');
   const format = getFileFormat(filePath);
   const matcher = filterOptions?.ignoreMatcher;
-  const knownLocales = filterOptions?.knownLocales ?? [];
-  const sourceLocale = filterOptions?.sourceLocale;
-  const currentLanguage = options?.currentLanguage;
+  const context: SubtreeContext = {
+    knownLocales: filterOptions?.knownLocales ?? [],
+    sourceLocale: filterOptions?.sourceLocale,
+    currentLanguage: options?.currentLanguage,
+    multiLanguage: filterOptions?.multiLanguage ?? false
+  };
 
   if (format === 'yaml') {
-    return readYaml(content, matcher, knownLocales, sourceLocale, currentLanguage);
+    return readYaml(content, matcher, context);
   }
   if (format === 'json') {
-    return readJson(content, matcher, knownLocales, sourceLocale, currentLanguage);
+    return readJson(content, matcher, context);
   }
   if (format === 'po' || format === 'pot') {
     return readPo(content, options, matcher);
@@ -491,7 +505,7 @@ export const importService = {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
         },
-        filterOpts
+        filterOpts && { ...filterOpts, multiLanguage: file.multi_language }
       );
       allRemoved.push(...fileResult.removed);
 
@@ -518,7 +532,7 @@ export const importService = {
           sourceLanguage: config.sourceLocale,
           currentLanguage: file.language
         },
-        filterOpts
+        filterOpts && { ...filterOpts, multiLanguage: file.multi_language }
       );
       allTranslations.push({
         language: file.language,

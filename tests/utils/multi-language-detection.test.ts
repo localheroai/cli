@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { detectMultiLanguage } from '../../src/utils/multi-language-detection.js';
+import { detectMultiLanguage, sourceKeyedLocales } from '../../src/utils/multi-language-detection.js';
 
 describe('detectMultiLanguage', () => {
   const locales = ['en', 'sv', 'nb', 'fi'];
@@ -45,5 +45,51 @@ describe('detectMultiLanguage', () => {
 
   it('returns false when knownLocales is empty', () => {
     expect(detectMultiLanguage({ en: {}, sv: {} }, [])).toBe(false);
+  });
+});
+
+describe('sourceKeyedLocales', () => {
+  const locales = ['en', 'sv', 'nb', 'fi'];
+
+  it('accepts a file with only the source locale key', () => {
+    expect(sourceKeyedLocales({ en: { subject: 'hi' } }, locales, 'en')).toEqual({ locales: ['en'], unknown: [] });
+  });
+
+  it('keeps known locales and reports locale-shaped keys that are not configured', () => {
+    expect(sourceKeyedLocales({ en: {}, sv: {}, no: {}, fi: {} }, locales, 'en')).toEqual({
+      locales: ['en', 'sv', 'fi'],
+      unknown: ['no']
+    });
+  });
+
+  it('returns null without the source locale key', () => {
+    expect(sourceKeyedLocales({ sv: {}, nb: {} }, locales, 'en')).toBeNull();
+  });
+
+  it('returns null when a top-level key does not look like a locale code', () => {
+    expect(sourceKeyedLocales({ en: {}, users: {} }, locales, 'en')).toBeNull();
+  });
+
+  it('returns null when the source value is not an object (a language-names file)', () => {
+    expect(sourceKeyedLocales({ en: 'English', sv: 'Svenska', de: 'Deutsch' }, locales, 'en')).toBeNull();
+  });
+
+  it('accepts empty target locale blocks', () => {
+    expect(sourceKeyedLocales({ en: { title: 'Hi' }, sv: null, no: null }, locales, 'en')).toEqual({
+      locales: ['en', 'sv'],
+      unknown: ['no']
+    });
+  });
+
+  it('accepts configured locale codes outside the xx or xx-XX shape', () => {
+    expect(sourceKeyedLocales({ en: {}, ja_easy: {}, no: {} }, ['en', 'ja_easy'], 'en')).toEqual({
+      locales: ['en', 'ja_easy'],
+      unknown: ['no']
+    });
+  });
+
+  it('returns null for non-objects', () => {
+    expect(sourceKeyedLocales(null, locales, 'en')).toBeNull();
+    expect(sourceKeyedLocales([], locales, 'en')).toBeNull();
   });
 });

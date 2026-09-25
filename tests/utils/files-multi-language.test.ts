@@ -225,6 +225,82 @@ users:
     expect(files[0].multiLanguage).toBeUndefined();
   });
 
+  it('treats a file with only the source locale as multi-language when its name has no locale', async () => {
+    mockGlob.mockResolvedValue(['apps/messaging/views/published_profile.i18n.yml']);
+    mockReadFile.mockResolvedValue(`en:
+  subject: Increase your visibility
+`);
+
+    const result = await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv', 'nb', 'fi'],
+      translationFiles: {
+        paths: ['apps/messaging/views/'],
+        multiLanguageFiles: true
+      }
+    });
+
+    const files = result as Array<{ path: string; locale: string; hasLanguageWrapper?: boolean; multiLanguage?: boolean; translations?: Record<string, unknown> }>;
+    expect(files).toHaveLength(1);
+    expect(files[0].locale).toBe('en');
+    expect(files[0].multiLanguage).toBe(true);
+    expect(files[0].hasLanguageWrapper).toBe(true);
+    expect(files[0].translations).toEqual({ subject: 'Increase your visibility' });
+  });
+
+  it('skips unconfigured locale keys with a warning and keeps the configured ones', async () => {
+    mockGlob.mockResolvedValue(['apps/messaging/views/published_profile.i18n.yml']);
+    mockReadFile.mockResolvedValue(`en:
+  subject: Hello
+sv:
+  subject: Hej
+no:
+  subject: Hei
+fi:
+  subject: Moi
+`);
+
+    const result = await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv', 'nb', 'fi'],
+      translationFiles: {
+        paths: ['apps/messaging/views/'],
+        multiLanguageFiles: true
+      }
+    });
+
+    const files = result as Array<{ locale: string; multiLanguage?: boolean }>;
+    expect(files.map(f => f.locale)).toEqual(['en', 'sv', 'fi']);
+    files.forEach(f => expect(f.multiLanguage).toBe(true));
+    const warnings = (global.console.warn as jest.Mock).mock.calls.map(call => call.join(' '));
+    expect(warnings).toContainEqual(expect.stringContaining('"no"'));
+    expect(warnings).toContainEqual(expect.stringContaining('en, sv, nb, fi'));
+  });
+
+  it('still skips a file without a locale in its name when a top-level key is not a locale', async () => {
+    mockGlob.mockResolvedValue(['apps/messaging/views/published_profile.i18n.yml']);
+    mockReadFile.mockResolvedValue(`en:
+  subject: Hello
+users:
+  name: Name
+`);
+
+    const result = await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv'],
+      translationFiles: {
+        paths: ['apps/messaging/views/'],
+        multiLanguageFiles: true
+      }
+    });
+
+    expect(result).toHaveLength(0);
+    expect((global.console.warn as jest.Mock)).toHaveBeenCalledWith(
+      expect.stringContaining('Could not extract locale from path'),
+      expect.anything()
+    );
+  });
+
   it('falls through when top-level keys have mismatched case (case-sensitive rejection)', async () => {
     mockGlob.mockResolvedValue(['config/locales/en.yml']);
     mockReadFile.mockResolvedValue(`EN:
