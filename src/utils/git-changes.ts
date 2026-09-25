@@ -404,9 +404,15 @@ export function diffFileKeys(
 
   let oldFlat: Record<string, any> = {};
   try {
+    // stderr is piped and git's locale pinned: the missing-at-ref check below reads git's English message
     const oldContent = execSync(
       `git show ${resolvedRef}:"${sanitizedPath}"`,
-      { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
+      {
+        encoding: 'utf-8',
+        maxBuffer: 10 * 1024 * 1024,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, LC_ALL: 'C' }
+      }
     );
     const oldObj = parseFile(oldContent, file.format, file.path);
     const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
