@@ -41,6 +41,7 @@ import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js
 import { diffAgainstBase, type ChangeInputs, type KeyChanges } from '../utils/check-changes.js';
 import { buildStepSummary, type ProblemCounts } from '../utils/check-summary.js';
 import { spellPlaceholders } from '../utils/placeholders.js';
+import { keyLineFinder, type KeyLineLookup } from '../utils/key-lines.js';
 import type {
   TranslationConfig,
   TranslationFile,
@@ -203,6 +204,8 @@ interface CheckResult {
   detected: DetectedSetup | null;
   format: OutputFormat;
   changes: ChangeStatus;
+  /** Raw text of each loaded file by path, for annotation line numbers. */
+  fileContents: Record<string, string>;
 }
 
 function failedResult(format: OutputFormat, sourceLocale = ''): CheckResult {
@@ -216,7 +219,8 @@ function failedResult(format: OutputFormat, sourceLocale = ''): CheckResult {
     parseFailures: [],
     detected: null,
     format,
-    changes: null
+    changes: null,
+    fileContents: {}
   };
 }
 
@@ -590,7 +594,36 @@ export async function runCheck(
     parseFailures,
     detected,
     format,
-    changes: changeStatus
+    changes: changeStatus,
+    fileContents: rawContents(discovered.allFiles)
+  };
+}
+
+// Files rebuilt because of duplicate keys are left out: their lines no longer match the repo.
+function rawContents(files: TranslationFile[]): Record<string, string> {
+  const contents: Record<string, string> = {};
+  for (const file of files) {
+    if (file.content && !(file.path in contents)) {
+      contents[file.path] = Buffer.from(file.content, 'base64').toString('utf8');
+    }
+  }
+  return contents;
+}
+
+type LineOf = (file: string, key: string, locale: string) => number | undefined;
+
+function lineLocator(contents: Record<string, string>): LineOf {
+  const finders = new Map<string, KeyLineLookup>();
+  return (file, key, locale) => {
+    const content = contents[file];
+    if (content === undefined) return undefined;
+    const cacheKey = `${file}\u0000${locale}`;
+    let find = finders.get(cacheKey);
+    if (!find) {
+      find = keyLineFinder(content, file.split('.').pop() ?? '', locale);
+      finders.set(cacheKey, find);
+    }
+    return find(key) ?? undefined;
   };
 }
 
@@ -742,58 +775,73 @@ interface Annotation {
   level: 'error' | 'warning' | 'notice';
   locale: string;
   file: string;
+  line?: number;
   message: string;
 }
 
-// Parsed locale files carry no line numbers, so annotations are file-level.
-function annotationsFor(reports: LocaleReport[]): Annotation[] {
+// A missing translation points at the source key's line: in a pull request that
+// added the key, that line is in the diff, so GitHub shows the annotation inline.
+function annotationsFor(reports: LocaleReport[], sourceLocale: string, lineOf: LineOf = () => undefined): Annotation[] {
   const annotations: Annotation[] = [];
   for (const r of reports) {
-    const annotate = (level: Annotation['level'], file: string, message: string) =>
-      annotations.push({ level, locale: r.locale, file, message });
+    const annotate = (level: Annotation['level'], file: string, message: string, key?: string) =>
+      annotations.push({
+        level,
+        locale: r.locale,
+        file,
+        line: key === undefined ? undefined : lineOf(file, key, r.locale),
+        message
+      });
     for (const m of r.missing) {
-      annotate('error', m.targetPath, `Missing translation for "${m.key}" (locale ${r.locale})`);
+      annotations.push({
+        level: 'error',
+        locale: r.locale,
+        file: m.path,
+        line: lineOf(m.path, m.key, sourceLocale),
+        message: `Missing translation for "${m.key}" (locale ${r.locale})`
+      });
     }
     for (const m of r.empty) {
-      annotate('error', m.path, `Empty translation for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Empty translation for "${m.key}" (locale ${r.locale})`, m.key);
     }
     for (const m of r.placeholderMismatches) {
-      annotate('error', m.path, `Placeholder mismatch for "${m.key}" (locale ${r.locale}): ${placeholderProblem(m)}`);
+      annotate('error', m.path, `Placeholder mismatch for "${m.key}" (locale ${r.locale}): ${placeholderProblem(m)}`, m.key);
     }
     for (const m of r.missingPluralCategories) {
-      annotate('error', m.path, `"${m.key}" lacks plural forms ${m.missing.join(', ')} (locale ${r.locale})`);
+      annotate('error', m.path, `"${m.key}" lacks plural forms ${m.missing.join(', ')} (locale ${r.locale})`, m.key);
     }
     for (const m of r.placeholderHints) {
       const omitted = spellPlaceholders(m.missingInTarget, m.source).join(', ');
-      annotate('notice', m.path, `Plural form omits ${omitted} for "${m.key}" (locale ${r.locale})`);
+      annotate('notice', m.path, `Plural form omits ${omitted} for "${m.key}" (locale ${r.locale})`, m.key);
     }
     for (const m of r.orphans) {
-      annotate('warning', m.path, `Orphan key "${m.key}" (locale ${r.locale}) no longer in source`);
+      annotate('warning', m.path, `Orphan key "${m.key}" (locale ${r.locale}) no longer in source`, m.key);
     }
     for (const m of r.structureMismatches) {
-      annotate('error', m.path, `Structure mismatch for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Structure mismatch for "${m.key}" (locale ${r.locale})`, m.key);
     }
     for (const m of r.pluralShapeMismatches) {
-      annotate('error', m.path, `Plural shape mismatch for "${m.key}" (locale ${r.locale})`);
+      annotate('error', m.path, `Plural shape mismatch for "${m.key}" (locale ${r.locale})`, m.key);
     }
     for (const m of r.conflictingKeys) {
-      annotate('error', m.files[0], `"${m.key}" has different values in ${m.files.join(', ')} (locale ${r.locale})`);
+      annotate('error', m.files[0], `"${m.key}" has different values in ${m.files.join(', ')} (locale ${r.locale})`, m.key);
     }
     for (const m of r.duplicateKeys) {
-      annotate('warning', m.path, `"${m.key}" is defined ${m.values.length} times; the last value wins (locale ${r.locale})`);
+      annotate('warning', m.path, `"${m.key}" is defined ${m.values.length} times; the last value wins (locale ${r.locale})`, m.key);
     }
   }
   return annotations;
 }
 
-function problemsIn(reports: LocaleReport[]): Annotation[] {
-  return annotationsFor(reports).filter((a) => a.level !== 'notice');
+function problemsIn(reports: LocaleReport[], sourceLocale: string): Annotation[] {
+  return annotationsFor(reports, sourceLocale).filter((a) => a.level !== 'notice');
 }
 
 function printGithubAnnotations(con: CheckDependencies['console'], annotations: Annotation[]): void {
-  const lines = annotations.map(
-    ({ level, file, message }) => `::${level} file=${escapeAnnotationProperty(file)}::${escapeAnnotationData(message)}`
-  );
+  const lines = annotations.map(({ level, file, line, message }) => {
+    const where = line === undefined ? '' : `,line=${line}`;
+    return `::${level} file=${escapeAnnotationProperty(file)}${where}::${escapeAnnotationData(message)}`;
+  });
   for (const line of lines.slice(0, MAX_ANNOTATIONS)) con.log(line);
   if (lines.length > MAX_ANNOTATIONS) {
     con.log(`::warning::${lines.length - MAX_ANNOTATIONS} more findings not shown. Run check --json for the full report.`);
@@ -825,13 +873,19 @@ function changedOnlyJson(changes: ChangeStatus) {
   return { base: changes.base, diffAvailable: true };
 }
 
-function writeStepSummary(deps: CheckDependencies, path: string, changes: ChangeStatus, reports: LocaleReport[]): void {
+function writeStepSummary(
+  deps: CheckDependencies,
+  path: string,
+  changes: ChangeStatus,
+  reports: LocaleReport[],
+  sourceLocale: string
+): void {
   const compared = changes !== null && 'base' in changes;
   const listed = changes !== null && 'error' in changes ? [] : reports.map((r) => filterFindings(r, isIntroduced));
   const counted = changes === null ? [] : compared ? reports.map((r) => filterFindings(r, isExisting)) : reports;
   const markdown = buildStepSummary({
     changes,
-    problems: problemsIn(listed),
+    problems: problemsIn(listed, sourceLocale),
     counts: counted.map((r) => ({ locale: r.locale, counts: problemCounts(r) })),
     missingTranslations: reports.some((r) => missingCount(r) > 0)
   });
@@ -844,7 +898,7 @@ function writeStepSummary(deps: CheckDependencies, path: string, changes: Change
 
 export async function check(options: CheckOptions = {}, deps: CheckDependencies = defaultDeps): Promise<void> {
   const con = deps.console;
-  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures, detected, format, changes } =
+  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures, detected, format, changes, fileContents } =
     await runCheck(options, deps);
   process.exitCode = exitCode;
   if (aborted) return;
@@ -852,7 +906,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   const unavailable = changes !== null && 'error' in changes ? changes.error : null;
   const base = changes !== null && 'base' in changes ? changes.base : null;
   const introduced = reports.map((r) => filterFindings(r, isIntroduced));
-  const existingProblems = base ? problemsIn(reports.map((r) => filterFindings(r, isExisting))).length : 0;
+  const existingProblems = base ? problemsIn(reports.map((r) => filterFindings(r, isExisting)), sourceLocale).length : 0;
   const summaryPath = detectCiContext(deps.env).stepSummaryPath;
 
   if (format === 'json') {
@@ -888,7 +942,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
     if (unavailable) {
       con.log(`::warning::${escapeAnnotationData(unavailableMessage(unavailable))}`);
     } else {
-      printGithubAnnotations(con, annotationsFor(introduced));
+      printGithubAnnotations(con, annotationsFor(introduced, sourceLocale, lineLocator(fileContents)));
     }
     if (base) {
       const verb = existingProblems === 1 ? 'is' : 'are';
@@ -905,5 +959,5 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
     printHumanReport(con, reports, keyCount, Boolean(options.all));
   }
 
-  if (summaryPath) writeStepSummary(deps, summaryPath, changes, reports);
+  if (summaryPath) writeStepSummary(deps, summaryPath, changes, reports, sourceLocale);
 }

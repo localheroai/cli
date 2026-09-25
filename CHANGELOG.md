@@ -5,7 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
+- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
+- `check` in GitHub Actions needs no flags. Its annotations carry line numbers, which puts each finding next to the changed line in the pull request diff. In a pull request it only fails on problems the pull request introduced; problems already on the base branch are counted in the job summary. `--full` checks every key, `--format text` prints the plain report.
 
 ## [0.0.73] - 2026-09-25
 

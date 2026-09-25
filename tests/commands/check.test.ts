@@ -277,7 +277,7 @@ describe('check command', () => {
     const lines = printed().split('\n');
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(
-      '::error file=locale/sv.po::Missing translation for "Line one%0ALine two: 100%25" (locale sv)'
+      '::error file=locale/en.po,line=6::Missing translation for "Line one%0ALine two: 100%25" (locale sv)'
     );
   });
 
@@ -384,7 +384,7 @@ describe('check command', () => {
     mockConsole.log.mockClear();
     await check({ format: 'github' }, deps() as never);
     expect(printed()).toBe(
-      '::error file=config/locales/sv.yml::"title" has different values in config/locales/sv.yml, config/locales/pages/sv.yml (locale sv)'
+      '::error file=config/locales/sv.yml,line=2::"title" has different values in config/locales/sv.yml, config/locales/pages/sv.yml (locale sv)'
     );
 
     mockConsole.log.mockClear();
@@ -619,7 +619,7 @@ describe('check command', () => {
         await check({}, deps() as never);
 
         expect(process.exitCode).toBe(1);
-        expect(annotations()).toEqual(['::error file=config/locales/sv.yml::Missing translation for "new" (locale sv)']);
+        expect(annotations()).toEqual(['::error file=config/locales/en.yml,line=3::Missing translation for "new" (locale sv)']);
       });
 
       it('leaves a missing translation the base already had to the job summary', async () => {
@@ -654,7 +654,7 @@ describe('check command', () => {
 
         expect(git.calls).toContainEqual(['fetch', '--no-tags', '--depth=1', 'origin', BASE]);
         expect(process.exitCode).toBe(1);
-        expect(annotations()).toEqual(['::error file=config/locales/sv.yml::Missing translation for "new" (locale sv)']);
+        expect(annotations()).toEqual(['::error file=config/locales/en.yml,line=3::Missing translation for "new" (locale sv)']);
       });
 
       it('checks every key without failing on them when it cannot compare with the base', async () => {
@@ -825,7 +825,7 @@ describe('check command', () => {
       await check({}, deps() as never);
 
       expect(annotations()).toEqual([
-        '::error file=config/locales/sv.yml::Placeholder mismatch for "hi" (locale sv): missing %25{name}, unexpected {name}'
+        '::error file=config/locales/sv.yml,line=2::Placeholder mismatch for "hi" (locale sv): missing %25{name}, unexpected {name}'
       ]);
     });
 
@@ -890,7 +890,7 @@ describe('check command', () => {
       await check({}, deps() as never);
 
       expect(process.exitCode).toBe(1);
-      expect(annotations()).toEqual(['::error file=config/locales/sv.yml::Missing translation for "b" (locale sv)']);
+      expect(annotations()).toEqual(['::error file=config/locales/en.yml,line=3::Missing translation for "b" (locale sv)']);
       expect(git.calls).toEqual([]);
     });
 
