@@ -1335,6 +1335,14 @@ msgstr[2] ""
       expect(findTargetFile([target], 'sv', source, 'en')).toBe(target);
     });
 
+    it('pairs a multi-language file with its own target locale block', () => {
+      const source = { ...file('config/locales/documents/termination.yml', 'en'), multiLanguage: true };
+      const target = { ...file('config/locales/documents/termination.yml', 'sv'), multiLanguage: true };
+      const siblings = [file('config/locales/sv.yml', 'sv'), file('config/locales/pressroom/sv.yml', 'sv')];
+
+      expect(findTargetFile([...siblings, target], 'sv', source, 'en')).toBe(target);
+    });
+
     it('writes the missing keys of a folder without a target to that folder', () => {
       const sourceFile = {
         path: 'config/locales/countries/en.yml',
