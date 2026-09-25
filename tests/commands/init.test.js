@@ -1,5 +1,6 @@
 import { jest } from '@jest/globals';
-import { init, buildFilePatternFromContents } from '../../src/commands/init.js';
+import { init } from '../../src/commands/init.js';
+import { buildFilePatternFromContents } from '../../src/utils/project-detection.js';
 
 describe('init command', () => {
   let mockConsole;

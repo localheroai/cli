@@ -11,6 +11,7 @@ import { push } from './commands/push.js';
 import { init, InitOptions } from './commands/init.js';
 import { translate, TranslationOptions } from './commands/translate.js';
 import { ci, CiOptions } from './commands/ci.js';
+import { check, CheckOptions } from './commands/check.js';
 import { clone } from './commands/clone.js';
 import { glossary, GlossaryOptions } from './commands/glossary.js';
 import { settings, SettingsOptions } from './commands/settings.js';
@@ -112,6 +113,19 @@ program
   .option('-v, --verbose', 'Show detailed progress information')
   .option('--skip-commit', 'Skip auto-commit (translations still run on backend)')
   .action(wrapCommandAction((options: CiOptions) => ci(options)));
+
+program
+  .command('check')
+  .description('Check translation files for missing keys, broken placeholders and structure issues. Runs offline, no account or localhero.json needed')
+  .option('--source <locale>', 'Source locale (default: from localhero.json, else detected)')
+  .option('--locales <codes>', 'Comma-separated target locales to check (default: from localhero.json, else every other locale found)')
+  .option('--path <dir>', 'Locale folder to scan when there is no localhero.json')
+  .option('--pattern <glob>', 'File pattern inside --path (default: **/*.{json,yml,yaml,po,pot})')
+  .option('--json', 'Output a machine-readable JSON report on stdout')
+  .option('--all', 'Print every finding instead of capping each category')
+  .option('--fail-on <mode>', 'Exit non-zero when findings exist: missing (default), placeholders, any, or none', 'missing')
+  .option('--format <format>', 'Use "github" for GitHub Actions annotation output')
+  .action(wrapCommandAction((options: CheckOptions) => check(options)));
 
 program
   .command('pull')

@@ -389,6 +389,24 @@ pt-BR:
     expect(noticeCalls).toHaveLength(1);
   });
 
+  it('sends the beta notice to the logger passed in options', async () => {
+    mockGlob.mockResolvedValue(['config/locales/invitation.i18n.yml']);
+    mockReadFile.mockResolvedValue(multiLangYaml);
+    const logger = { log: jest.fn() };
+
+    await findTranslationFiles({
+      sourceLocale: 'en',
+      outputLocales: ['sv', 'nb', 'fi'],
+      translationFiles: {
+        paths: ['config/locales/'],
+        multiLanguageFiles: true
+      }
+    }, { logger });
+
+    expect(logger.log).toHaveBeenCalledWith(expect.stringContaining('Multi-language files: beta feature'));
+    expect(console.log).not.toHaveBeenCalled();
+  });
+
   it('does not emit the beta notice when no file matches the multi-language heuristic', async () => {
     mockGlob.mockResolvedValue(['config/locales/en.yml']);
     mockReadFile.mockResolvedValue('hello: "Hello"\n');

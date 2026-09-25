@@ -339,7 +339,8 @@ export async function findTranslationFiles(
     targetLocales = config.outputLocales || [],
     includeNamespace = false,
     verbose = false,
-    returnFullResult = false
+    returnFullResult = false,
+    logger = console
   } = options;
 
   const knownLocales = [sourceLocale, ...targetLocales];
@@ -361,7 +362,7 @@ export async function findTranslationFiles(
       const singleItemBraceRegex = /\.\{([^{},]+)\}/g;
       const newPattern = originalPattern.replace(singleItemBraceRegex, '.$1');
       if (newPattern !== originalPattern && verbose) {
-        console.log(chalk.blue(`ℹ Adjusted glob pattern from "${originalPattern}" to "${newPattern}" to handle single-item brace notation.`));
+        logger.log(chalk.blue(`ℹ Adjusted glob pattern from "${originalPattern}" to "${newPattern}" to handle single-item brace notation.`));
       }
       return newPattern;
     }
@@ -376,7 +377,7 @@ export async function findTranslationFiles(
     const globPattern = path.join(fullPath, adjustedPattern);
 
     if (verbose) {
-      console.log(chalk.blue(`Searching for translation files in ${globPattern}`));
+      logger.log(chalk.blue(`Searching for translation files in ${globPattern}`));
     }
 
     let files: string[];
@@ -388,7 +389,7 @@ export async function findTranslationFiles(
       });
 
       if (verbose) {
-        console.log(chalk.blue(`Found ${files.length} files in ${translationPath}`));
+        logger.log(chalk.blue(`Found ${files.length} files in ${translationPath}`));
       }
     } catch (error: any) {
       if (verbose) {
@@ -421,7 +422,7 @@ export async function findTranslationFiles(
 
           if (detectMultiLanguage(parsedContent, knownLocales)) {
             if (!betaNoticeEmitted) {
-              console.log(chalk.blue('ℹ Multi-language files: beta feature — please report issues'));
+              logger.log(chalk.blue('ℹ Multi-language files: beta feature — please report issues'));
               betaNoticeEmitted = true;
             }
             const parsedObj = parsedContent as Record<string, unknown>;

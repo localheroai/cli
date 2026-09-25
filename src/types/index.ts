@@ -221,4 +221,5 @@ export interface TranslationFileOptions {
   includeNamespace?: boolean;
   verbose?: boolean;
   returnFullResult?: boolean;
+  logger?: { log: (message?: any, ...optionalParams: any[]) => void };
 }

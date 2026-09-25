@@ -209,6 +209,53 @@ Both modes automatically commit changes to your repository when running in GitHu
 npx @localheroai/cli ci --verbose
 ```
 
+### Check
+
+```bash
+npx @localheroai/cli check
+```
+
+Checks your translation files for missing keys, broken placeholders and structure problems. It runs offline on the files in your repo, with no Localhero.ai account, no API key and no `localhero.json` needed. Run it once to see where a repo stands, or in CI to fail a pull request that leaves translations behind.
+
+With a `localhero.json` it uses that file's paths, locales and `ignoreKeys`. Without one it finds the locale folder the way `init` does and reads the languages from file and folder names. The source language is the first of: `--source`, a gettext catalog whose `msgstr` are untranslated, a `.pot` template, `en` and the language with the most keys. `check` prints what it picked and says so when it guessed. A language only counts as a target when one of its files matches a source file. That leaves out vendored translations such as rails-i18n.
+
+For each target locale it reports:
+
+- **Missing keys**: in the source but absent or `null` in the target. Without a config, a source file the language has no file for is listed as not checked instead of counting all its keys as missing.
+- **Placeholder mismatches**: a placeholder the translation drops or adds. Covers Rails `%{name}` and `%<name>s`, printf (`%s`, `%d`, positional `%1$s`), i18next `{{name}}`, ICU `{name}` and Python `%(name)s`. Translators may reorder positional arguments. Date formats (`%b %d`) and literal percent signs are not compared.
+- **Placeholder hints**: a `zero`, `one` or `two` form that leaves out a placeholder, like `"%{count} language"` → `"1 språk"`. That is often correct. Hints never fail the run. A `few`, `many` or `other` form that drops a placeholder is a mismatch.
+- **Missing plural categories**: a Rails plural group without the forms its language needs, like Polish with only `one` and `other`. Rails falls back to `other` without raising an error.
+- **Structure mismatches**: a string in the source that is a map or array in the target, or a plural group collapsed to one string.
+- **Conflicting and duplicate keys**: a key defined with different values in several YAML files of one locale, or twice in the same file. Rails keeps one of the values and says nothing. Gettext domains, i18next namespaces and multi-language files are separate namespaces and are not compared with each other.
+- **Orphan keys**: in a target but in no source file. They are warnings only. Often they are framework translations the source never had.
+- **Empty and identical values**: an empty target string fails like a missing key. A target identical to its source is a hint, as short words and names are often the same across languages.
+
+#### Options
+
+**`--source <locale>`**: The source language. Defaults to the one in `localhero.json`, or the detected one without it.
+
+**`--locales <codes>`**: Comma-separated target locales to check. Defaults to the configured output locales, or every matching language found without a config.
+
+**`--path <dir>`**: The locale folder to scan when there is no `localhero.json`. Use it for layouts the detection misses.
+
+**`--pattern <glob>`**: The file pattern inside `--path`. Defaults to `**/*.{json,yml,yaml,po,pot}`.
+
+**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases.
+
+**`--all`**: Prints every finding instead of the first 10 per category.
+
+**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`.
+
+**`--format github`**: Prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines.
+
+In CI, pass `--source` so the gate never depends on a guess:
+
+```bash
+npx @localheroai/cli check --source en --format github
+npx @localheroai/cli check --source en --locales sv,de --fail-on any
+npx @localheroai/cli check --json > report.json
+```
+
 ### Pull / push
 
 ```bash
