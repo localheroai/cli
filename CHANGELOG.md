@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- `translate` and `ci` now fail when the project in `localhero.json` does not exist or belongs to another organization. Before, a pull request run with no missing keys printed two yellow warnings, then "No changed keys need translation", and passed; the PR's edited translations and key manifest never reached Localhero. The run now stops before doing any work with an error that names the project id and points at `projectId` in `localhero.json` and the API key's organization. Network and server errors on the review upload and key manifest calls are still warnings.
+
 ## [0.0.72] - 2026-09-25
 
 ### Fixed

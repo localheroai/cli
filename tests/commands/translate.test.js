@@ -422,6 +422,35 @@ describe('translate command', () => {
     expect(consoleOutput).not.toContain('categories ().');
   });
 
+  it('stops before any work when the project does not exist', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError('Project not found', { code: 'project_not_found' }));
+
+    await translate({}, createTranslateDeps());
+
+    const errorOutput = mockConsole.error.mock.calls.map(call => String(call[0])).join('\n');
+    const logOutput = mockConsole.log.mock.calls.map(call => String(call[0])).join('\n');
+    expect(errorOutput).toContain('✖ Project "test-project" was not found');
+    expect(errorOutput).toContain('projectId in localhero.json');
+    expect(logOutput).not.toContain('Falling back');
+    expect(fileUtils.findTranslationFiles).not.toHaveBeenCalled();
+    expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  it('keeps a 404 without the project_not_found code as a warning', async () => {
+    stubFilesForCategoryTest();
+    settingsUtils.fetchSettings.mockRejectedValue(new ApiResponseError('The request was rejected (HTTP 404).', {
+      code: 'server_error',
+      details: { status: 404 }
+    }));
+
+    await translate({}, createTranslateDeps());
+
+    const logOutput = mockConsole.log.mock.calls.map(call => String(call[0])).join('\n');
+    expect(logOutput).toContain('Could not fetch locale plural categories');
+    expect(process.exit).not.toHaveBeenCalled();
+  });
+
   it('keys the category map by the config locale spelling (zh_cn vs zh-CN)', async () => {
     stubFilesForCategoryTest();
     configUtils.getProjectConfig.mockResolvedValue({
