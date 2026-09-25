@@ -140,8 +140,14 @@ const defaultDeps: TranslationDependencies = {
   execUtils: { execSync }
 };
 
+const PROJECT_NOT_FOUND_CODE = 'project_not_found';
+
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function isProjectNotFound(error: unknown): boolean {
+  return error instanceof ApiResponseError && error.code === PROJECT_NOT_FOUND_CODE;
 }
 
 // Names the actual failure (bad key / rate limit / network / server error)
@@ -190,6 +196,7 @@ async function fetchLocalePluralCategories(
       }
     }
   } catch (error) {
+    if (isProjectNotFound(error)) throw error;
     // Without categories, missing-detection falls back to exact key matching, which
     // re-flags flat-target plurals as missing on every run and re-charges credits
     // (#432). Always warn, not just under --verbose.
@@ -226,12 +233,20 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   // Fetch per-locale CLDR plural categories so missing-detection doesn't demand a
   // `.one` form from other-only locales (#432). Best-effort: an older backend that
   // omits the field leaves the map empty, falling back to exact-name matching.
-  config.localePluralCategories = await fetchLocalePluralCategories(
-    config.projectId,
-    config.outputLocales,
-    settingsUtils,
-    console
-  );
+  // A missing project is fatal: nothing later in the run can succeed (#704).
+  try {
+    config.localePluralCategories = await fetchLocalePluralCategories(
+      config.projectId,
+      config.outputLocales,
+      settingsUtils,
+      console
+    );
+  } catch (error) {
+    if (!isProjectNotFound(error)) throw error;
+    console.error(chalk.red(`\n✖ Project "${config.projectId}" was not found. Check that projectId in localhero.json is correct and that your API key belongs to the organization that owns the project.\n`));
+    process.exit(1);
+    return;
+  }
 
   if (verbose) {
     console.log(chalk.blue('\nℹ Using configuration:'));

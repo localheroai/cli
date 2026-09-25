@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from '@jest/globals';
+import { ApiResponseError } from '../../src/types/index.js';
 
 const mockFilterByGitChanges = jest.fn<any>();
 const mockDetectTargetChanges = jest.fn<any>();
@@ -170,5 +171,21 @@ describe('translate --changed-only summary', () => {
     expect(output).toContain('Could not send 1 changed value for review');
     expect(output).toContain('status 500');
     expect(output).not.toContain('source text changed');
+  });
+
+  it('fails without sending anything or reporting success when the project does not exist', async () => {
+    mockDetectTargetChanges.mockReturnValue([targetChange('greeting')]);
+    deps.settingsUtils.fetchSettings.mockRejectedValue(
+      new ApiResponseError('Project not found', { code: 'project_not_found' })
+    );
+
+    await translate({ changedOnly: true }, deps);
+
+    const errors = mockConsole.error.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(errors).toContain('Project "demo" was not found');
+    expect(loggedLines()).not.toContain('✓');
+    expect(mockFinalizeTranslationJobs).not.toHaveBeenCalled();
+    expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    expect(process.exit).toHaveBeenCalledWith(1);
   });
 });
