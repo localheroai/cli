@@ -602,7 +602,9 @@ export async function runCheck(
     ? compareWithBase(deps, ci, config, files, current.reports, (baseFiles) => analyze(baseFiles, quiet).reports)
     : { status: null, reports: current.reports };
 
-  const failOn = options.failOn || 'missing';
+  // Compared with the base, every finding left is one the pull request caused, so all of them fail by default.
+  const compared = changeStatus !== null && 'base' in changeStatus;
+  const failOn = options.failOn ?? (compared ? 'any' : 'missing');
   // Without the diff, failing on every existing finding would block pull requests that did not cause them.
   const findingsFail =
     !(changeStatus && 'error' in changeStatus) && shouldFail(reports.map((r) => filterFindings(r, isIntroduced)), failOn);

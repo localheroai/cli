@@ -615,6 +615,14 @@ describe('check command', () => {
         files = [yamlFile('en', '  old: "Old"\n  new: "New"\n'), yamlFile('sv', '  other: "Annan"\n')];
       });
 
+      it('fails on any new problem by default, not only missing translations', async () => {
+        onBase(yamlFile('en', '  hi: "Hi %{name}"\n'), yamlFile('sv', '  hi: "Hej %{name}"\n'));
+        files = [yamlFile('en', '  hi: "Hi %{name}"\n'), yamlFile('sv', '  hi: "Hej {name}"\n')];
+
+        expect((await run()).exitCode).toBe(1);
+        expect((await run({ failOn: 'missing' })).exitCode).toBe(0);
+      });
+
       it('annotates and fails on a key the pull request added without a translation', async () => {
         await check({}, deps() as never);
 

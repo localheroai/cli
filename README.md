@@ -244,7 +244,7 @@ For each target locale it reports:
 
 **`--all`**: Prints every finding instead of the first 10 per category.
 
-**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`. In changed-only mode only new problems count.
+**`--fail-on <mode>`**: When to exit 1. `missing` fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`. The default is `missing` for a full check. When `check` compares with the base branch, only new problems count and the default is `any`: every new problem fails the pull request.
 
 **`--format <github|text>`**: `github` prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines. In GitHub Actions `github` is the default; `--format text` prints the report there instead. `--json` wins over both.
 
