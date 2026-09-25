@@ -240,21 +240,38 @@ For each target locale it reports:
 
 **`--pattern <glob>`**: The file pattern inside `--path`. Defaults to `**/*.{json,yml,yaml,po,pot}`.
 
-**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases.
+**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases. `changedOnly` is `null` in a full check. In changed-only mode it is `{ "base": "main (d260ed6)", "diffAvailable": true }` and each finding has `"introduced": true` when the base did not have it, `false` when it was already there. When the comparison failed it is `{ "base": null, "diffAvailable": false, "reason": "..." }` and findings have no `introduced`.
 
 **`--all`**: Prints every finding instead of the first 10 per category.
 
-**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`.
+**`--fail-on <mode>`**: When to exit 1. `missing` fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`. The default is `missing` for a full check. When `check` compares with the base branch, only new problems count and the default is `any`: every new problem fails the pull request.
 
-**`--format github`**: Prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines.
+**`--format <github|text>`**: `github` prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines. In GitHub Actions `github` is the default; `--format text` prints the report there instead. `--json` wins over both.
+
+**`--changed-only`**: Only reports and fails on new problems: ones the base branch did not have. `check` runs the same checks on the base versions of the files to tell. A problem that was already there is counted, not listed. It never fails the run, even when the branch edited its key. One that changed, like a placeholder mismatch that now misses a different placeholder, counts as new. The base is `translationFiles.baseBranch` from `localhero.json`, else `main` or `master`. On a GitHub pull request it is the pull request's base branch. There this mode is on by default.
+
+**`--full`**: Checks every key, also on a pull request.
 
 In CI, pass `--source` so the gate never depends on a guess:
 
 ```bash
-npx @localheroai/cli check --source en --format github
+npx @localheroai/cli check --source en
 npx @localheroai/cli check --source en --locales sv,de --fail-on any
 npx @localheroai/cli check --json > report.json
 ```
+
+#### In GitHub Actions
+
+```yaml
+- uses: actions/checkout@v7
+- run: npx @localheroai/cli check --source en
+```
+
+That is the whole setup. In GitHub Actions `check` prints annotations. On a pull request it compares with the base branch and fails only on problems the pull request introduced. Those become annotations on the pull request. `check` fetches the base commit itself, which lets the default shallow checkout work. Problems that were already there never fail the run. They go to the job summary, counted per locale and category, next to the pull request's own problems.
+
+If the comparison fails, for example when the base commit cannot be fetched, `check` says so in the log and the summary. It then checks every key without failing on what it finds. Parse errors still fail. Checking out with `fetch-depth: 0` avoids this.
+
+Other CI systems get the text report. Pass `--changed-only` there for the same gate.
 
 ### Pull / push
 

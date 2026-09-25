@@ -49,16 +49,20 @@ function matchingBrace(text: string, start: number): number {
   return -1;
 }
 
-export function extractPlaceholders(text: string): Placeholder[] {
+function matchPlaceholders(text: string): { placeholder: Placeholder; written: string }[] {
   if (typeof text !== 'string') return [];
-  const found: Placeholder[] = [];
+  const found: { placeholder: Placeholder; written: string }[] = [];
   for (const match of reduceIcuComplexArguments(text).matchAll(PLACEHOLDER_PATTERN)) {
     const [full, escaped, i18next, railsTyped, rails, python, , positionalType, printf, icu] = match;
     if (escaped) continue;
     const name = i18next ?? railsTyped ?? rails ?? python ?? positionalType ?? printf ?? icu;
-    found.push({ kind: classify(full), name });
+    found.push({ placeholder: { kind: classify(full), name }, written: full });
   }
   return found;
+}
+
+export function extractPlaceholders(text: string): Placeholder[] {
+  return matchPlaceholders(text).map(({ placeholder }) => placeholder);
 }
 
 function classify(full: string): PlaceholderKind {
@@ -95,4 +99,27 @@ export function placeholderMultiset(text: string): Map<string, number> {
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
   return counts;
+}
+
+const USUAL_SPELLING: Record<string, (name: string) => string> = {
+  i18next: (name) => `{{${name}}}`,
+  icu: (name) => `{${name}}`,
+  'rails-typed': (name) => `%<${name}>`,
+  rails: (name) => `%{${name}}`,
+  python: (name) => `%(${name})`,
+  printf: (name) => `%${name}`
+};
+
+/** Turns tokens from placeholderMultiset back into how `text` writes them, like `%{name}` for `rails:name`. */
+export function spellPlaceholders(tokens: string[], text: string): string[] {
+  const written = new Map<string, string>();
+  for (const match of matchPlaceholders(text)) {
+    const key = token(match.placeholder);
+    if (!written.has(key)) written.set(key, match.written);
+  }
+  return tokens.map((key) => {
+    const separator = key.indexOf(':');
+    const kind = key.slice(0, separator);
+    return written.get(key) ?? USUAL_SPELLING[kind]?.(key.slice(separator + 1)) ?? key;
+  });
 }

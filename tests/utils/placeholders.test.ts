@@ -1,5 +1,5 @@
 import { describe, it, expect } from '@jest/globals';
-import { extractPlaceholders, placeholderMultiset, reduceIcuComplexArguments } from '../../src/utils/placeholders.js';
+import { extractPlaceholders, placeholderMultiset, reduceIcuComplexArguments, spellPlaceholders } from '../../src/utils/placeholders.js';
 
 describe('extractPlaceholders', () => {
   it('extracts i18next/Vue/Angular double-brace placeholders', () => {
@@ -105,5 +105,27 @@ describe('printf directives', () => {
   it('ignores an escaped percent', () => {
     expect(tokens('100%% sure')).toEqual([]);
     expect(tokens('50% off')).toEqual([]);
+  });
+});
+
+describe('spellPlaceholders', () => {
+  it('writes tokens the way the text writes them', () => {
+    expect(spellPlaceholders(['rails:name', 'rails-typed:count'], 'Hi %{name}, %<count>d left')).toEqual(['%{name}', '%<count>d']);
+    expect(spellPlaceholders(['i18next:name', 'icu:n', 'python:x'], '{{ name }} {n} %(x)s')).toEqual(['{{ name }}', '{n}', '%(x)s']);
+  });
+
+  it('writes a renumbered printf token as the text numbers it', () => {
+    expect(spellPlaceholders(['printf:s'], '%2$s och %1$s')).toEqual(['%2$s']);
+  });
+
+  it('falls back to the usual spelling when the text does not contain the token', () => {
+    expect(spellPlaceholders(['rails:name', 'rails-typed:n', 'printf:d', 'i18next:a', 'icu:b', 'python:c'], '')).toEqual([
+      '%{name}',
+      '%<n>',
+      '%d',
+      '{{a}}',
+      '{b}',
+      '%(c)'
+    ]);
   });
 });
