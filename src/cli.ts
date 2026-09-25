@@ -124,7 +124,9 @@ program
   .option('--json', 'Output a machine-readable JSON report on stdout')
   .option('--all', 'Print every finding instead of capping each category')
   .option('--fail-on <mode>', 'Exit non-zero when findings exist: missing (default), placeholders, any, or none', 'missing')
-  .option('--format <format>', 'Use "github" for GitHub Actions annotation output')
+  .option('--format <format>', '"github" for GitHub Actions annotations (the default in GitHub Actions) or "text" for the report')
+  .option('--changed-only', 'Only fail on keys changed since the base branch (the default on a GitHub pull request)')
+  .option('--full', 'Check every key, also on a pull request')
   .action(wrapCommandAction((options: CheckOptions) => check(options)));
 
 program
