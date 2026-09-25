@@ -1,5 +1,6 @@
 import { execFileSync } from 'child_process';
 import path from 'path';
+import type { CiContext } from './ci-context.js';
 
 export type GitRunner = (args: string[]) => string;
 
@@ -10,7 +11,7 @@ export type ChangeBase = { ref: string; label: string } | { error: string };
 
 export interface ChangeBaseOptions {
   /** Set on a GitHub pull request run: its base branch and the merge commit GitHub checked out. */
-  pullRequest: { baseRef: string; sha?: string } | null;
+  pullRequest: CiContext['pullRequest'];
   baseBranches: string[];
 }
 

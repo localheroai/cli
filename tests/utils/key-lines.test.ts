@@ -1,7 +1,11 @@
 import { describe, it, expect } from '@jest/globals';
-import { findKeyLine, keyLineFinder } from '../../src/utils/key-lines.js';
+import { keyLineFinder } from '../../src/utils/key-lines.js';
 
 const lines = (...rows: string[]): string => `${rows.join('\n')}\n`;
+
+function findKeyLine(content: string, format: string, key: string, locale?: string): number | null {
+  return keyLineFinder(content, format, locale)(key);
+}
 
 describe('findKeyLine', () => {
   describe('yaml', () => {

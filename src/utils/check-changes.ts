@@ -64,6 +64,9 @@ function keysAtRef(git: GitRunner, ref: string, basePath: string, file: Translat
   }
 }
 
+/** The base a changed-only run compared with, or why it could not; null for a full check. */
+export type ChangeStatus = { base: string } | { error: string } | null;
+
 export interface KeyChanges {
   base: string;
   inSource: (path: string, key: string) => boolean;

@@ -1,3 +1,5 @@
+import type { ChangeStatus } from './check-changes.js';
+
 export interface SummaryProblem {
   locale: string;
   file: string;
@@ -14,8 +16,7 @@ export interface ProblemCounts {
 }
 
 export interface StepSummaryInput {
-  /** The base the change was compared with, why that failed, or null for a full check. */
-  changes: { base: string } | { error: string } | null;
+  changes: ChangeStatus;
   problems: SummaryProblem[];
   /** Problems in unchanged keys, or every problem when the comparison failed. */
   counts: { locale: string; counts: ProblemCounts }[];
@@ -32,7 +33,7 @@ const COLUMNS: [keyof ProblemCounts, string][] = [
   ['orphans', 'Orphans']
 ];
 
-function plural(count: number, word: string): string {
+export function plural(count: number, word: string): string {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
 }
 

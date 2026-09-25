@@ -37,10 +37,6 @@ export function keyLineFinder(content: string, format: string, locale?: string):
   }
 }
 
-export function findKeyLine(content: string, format: string, key: string, locale?: string): number | null {
-  return keyLineFinder(content, format, locale)(key);
-}
-
 function treeLookup(tree: KeyTree | null, locale?: string): KeyLineLookup {
   if (!tree) return NO_LINES;
   const wrapper = locale === undefined ? undefined : tree.get(locale);

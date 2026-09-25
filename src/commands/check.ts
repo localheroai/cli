@@ -38,8 +38,8 @@ import {
 } from '../utils/check-utils.js';
 import { detectCiContext, type CiContext, type Env } from '../utils/ci-context.js';
 import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js';
-import { diffAgainstBase, type ChangeInputs, type KeyChanges } from '../utils/check-changes.js';
-import { buildStepSummary, type ProblemCounts } from '../utils/check-summary.js';
+import { diffAgainstBase, type ChangeInputs, type ChangeStatus, type KeyChanges } from '../utils/check-changes.js';
+import { buildStepSummary, plural, type ProblemCounts } from '../utils/check-summary.js';
 import { spellPlaceholders } from '../utils/placeholders.js';
 import { keyLineFinder, type KeyLineLookup } from '../utils/key-lines.js';
 import type {
@@ -189,9 +189,6 @@ function targetKeysFor(
 function keysOf(targetFile: TranslationFile, targetLocale: string, sourceLocale: string): FlatMap {
   return processTargetContent(decode(targetFile, sourceLocale), targetLocale, targetFile.format);
 }
-
-/** The base a changed-only run compared with, or why it could not; null for a full check. */
-type ChangeStatus = { base: string } | { error: string } | null;
 
 interface CheckResult {
   aborted: boolean;
@@ -344,8 +341,13 @@ function filterFindings(r: LocaleReport, keep: (finding: Introduced) => boolean)
   };
 }
 
-const isIntroduced = (finding: Introduced): boolean => finding.introduced !== false;
-const isExisting = (finding: Introduced): boolean => finding.introduced === false;
+function isIntroduced(finding: Introduced): boolean {
+  return finding.introduced !== false;
+}
+
+function isExisting(finding: Introduced): boolean {
+  return finding.introduced === false;
+}
 
 function formatOf(path: string): string {
   return path.split('.').pop() ?? '';
@@ -472,7 +474,8 @@ export async function runCheck(
     { ignoreMatcher }
   );
 
-  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: withoutIgnored(sourceKeysFor(file, sourceLocale)) }));
+  const readSource = (file: TranslationFile): FlatMap => withoutIgnored(sourceKeysFor(file, sourceLocale));
+  const sourceKeyMaps = sourceFiles.map((file) => ({ file, keys: readSource(file) }));
   const totalSourceKeys = new Set<string>();
   for (const { keys } of sourceKeyMaps) {
     for (const [key, value] of Object.entries(keys)) {
@@ -490,7 +493,7 @@ export async function runCheck(
       targets: targetLocales.flatMap((locale) =>
         targetsToCompare(locale, targetFilesByLocale[locale] || [], Object.values(missing), readTarget)
       ),
-      readSource: (file) => withoutIgnored(sourceKeysFor(file, sourceLocale)),
+      readSource,
       readTarget
     })
     : { status: null, changes: null };
@@ -620,7 +623,7 @@ function lineLocator(contents: Record<string, string>): LineOf {
     const cacheKey = `${file}\u0000${locale}`;
     let find = finders.get(cacheKey);
     if (!find) {
-      find = keyLineFinder(content, file.split('.').pop() ?? '', locale);
+      find = keyLineFinder(content, formatOf(file), locale);
       finders.set(cacheKey, find);
     }
     return find(key) ?? undefined;
@@ -859,18 +862,54 @@ function problemCounts(r: LocaleReport): ProblemCounts {
   };
 }
 
-function plural(count: number, word: string): string {
-  return `${count} ${word}${count === 1 ? '' : 's'}`;
-}
-
 function unavailableMessage(error: string): string {
   return `Could not compare with the base branch: ${error}. Checked every key instead; its findings do not fail the run. In GitHub Actions, check out with fetch-depth: 0 if this keeps happening.`;
+}
+
+function unchangedKeyProblems(count: number): string {
+  return `${plural(count, 'problem')} in keys that did not change ${count === 1 ? 'is' : 'are'}`;
 }
 
 function changedOnlyJson(changes: ChangeStatus) {
   if (changes === null) return null;
   if ('error' in changes) return { base: null, diffAvailable: false, reason: changes.error };
   return { base: changes.base, diffAvailable: true };
+}
+
+function printJsonReport(con: CheckDependencies['console'], result: CheckResult): void {
+  con.log(
+    JSON.stringify({
+      sourceLocale: result.sourceLocale,
+      sourceFiles: result.sourceFiles,
+      keyCount: result.keyCount,
+      parseFailures: result.parseFailures,
+      detected: result.detected,
+      changedOnly: changedOnlyJson(result.changes),
+      locales: result.reports.map((r) => ({
+        locale: r.locale,
+        files: r.files,
+        keyCount: r.keyCount,
+        missing: r.missing,
+        empty: r.empty,
+        identical: r.identical,
+        placeholderMismatches: r.placeholderMismatches,
+        placeholderHints: r.placeholderHints,
+        missingPluralCategories: r.missingPluralCategories,
+        orphans: r.orphans,
+        structureMismatches: r.structureMismatches,
+        pluralShapeMismatches: r.pluralShapeMismatches,
+        conflictingKeys: r.conflictingKeys,
+        duplicateKeys: r.duplicateKeys,
+        missingFiles: r.missingFiles
+      }))
+    })
+  );
+}
+
+function countedInSummary(changes: ChangeStatus, reports: LocaleReport[]): LocaleReport[] {
+  if (changes === null) return [];
+  if ('error' in changes) return reports;
+  return reports.map((r) => filterFindings(r, isExisting));
 }
 
 function writeStepSummary(
@@ -880,13 +919,11 @@ function writeStepSummary(
   reports: LocaleReport[],
   sourceLocale: string
 ): void {
-  const compared = changes !== null && 'base' in changes;
   const listed = changes !== null && 'error' in changes ? [] : reports.map((r) => filterFindings(r, isIntroduced));
-  const counted = changes === null ? [] : compared ? reports.map((r) => filterFindings(r, isExisting)) : reports;
   const markdown = buildStepSummary({
     changes,
     problems: problemsIn(listed, sourceLocale),
-    counts: counted.map((r) => ({ locale: r.locale, counts: problemCounts(r) })),
+    counts: countedInSummary(changes, reports).map((r) => ({ locale: r.locale, counts: problemCounts(r) })),
     missingTranslations: reports.some((r) => missingCount(r) > 0)
   });
   try {
@@ -898,10 +935,10 @@ function writeStepSummary(
 
 export async function check(options: CheckOptions = {}, deps: CheckDependencies = defaultDeps): Promise<void> {
   const con = deps.console;
-  const { aborted, exitCode, reports, sourceLocale, sourceFiles, keyCount, parseFailures, detected, format, changes, fileContents } =
-    await runCheck(options, deps);
-  process.exitCode = exitCode;
-  if (aborted) return;
+  const result = await runCheck(options, deps);
+  const { reports, sourceLocale, keyCount, format, changes, fileContents } = result;
+  process.exitCode = result.exitCode;
+  if (result.aborted) return;
 
   const unavailable = changes !== null && 'error' in changes ? changes.error : null;
   const base = changes !== null && 'base' in changes ? changes.base : null;
@@ -911,33 +948,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
 
   if (format === 'json') {
     if (unavailable) con.error(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));
-    con.log(
-      JSON.stringify({
-        sourceLocale,
-        sourceFiles,
-        keyCount,
-        parseFailures,
-        detected,
-        changedOnly: changedOnlyJson(changes),
-        locales: reports.map((r) => ({
-          locale: r.locale,
-          files: r.files,
-          keyCount: r.keyCount,
-          missing: r.missing,
-          empty: r.empty,
-          identical: r.identical,
-          placeholderMismatches: r.placeholderMismatches,
-          placeholderHints: r.placeholderHints,
-          missingPluralCategories: r.missingPluralCategories,
-          orphans: r.orphans,
-          structureMismatches: r.structureMismatches,
-          pluralShapeMismatches: r.pluralShapeMismatches,
-          conflictingKeys: r.conflictingKeys,
-          duplicateKeys: r.duplicateKeys,
-          missingFiles: r.missingFiles
-        }))
-      })
-    );
+    printJsonReport(con, result);
   } else if (format === 'github') {
     if (unavailable) {
       con.log(`::warning::${escapeAnnotationData(unavailableMessage(unavailable))}`);
@@ -945,15 +956,13 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
       printGithubAnnotations(con, annotationsFor(introduced, sourceLocale, lineLocator(fileContents)));
     }
     if (base) {
-      const verb = existingProblems === 1 ? 'is' : 'are';
-      const where = summaryPath ? `${verb} counted in the job summary` : `${verb} not listed; run with --full to see them`;
-      con.log(`Checked the keys changed since ${base}. ${plural(existingProblems, 'problem')} in keys that did not change ${where}.`);
+      const where = summaryPath ? 'counted in the job summary' : 'not listed; run with --full to see them';
+      con.log(`Checked the keys changed since ${base}. ${unchangedKeyProblems(existingProblems)} ${where}.`);
     }
   } else if (base) {
     con.log(chalk.blue(`ℹ Checking the keys changed since ${base}.`));
     printFindings(con, introduced, Boolean(options.all));
-    const verb = existingProblems === 1 ? 'is' : 'are';
-    con.log(`\n${plural(existingProblems, 'problem')} in keys that did not change ${verb} not listed. Run with --full to see them.`);
+    con.log(`\n${unchangedKeyProblems(existingProblems)} not listed. Run with --full to see them.`);
   } else {
     if (unavailable) con.log(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));
     printHumanReport(con, reports, keyCount, Boolean(options.all));
