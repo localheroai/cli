@@ -215,43 +215,45 @@ npx @localheroai/cli ci --verbose
 npx @localheroai/cli check
 ```
 
-Audits your translation files without calling the Localhero.ai API: no API key, no network access, no credits used. Runs entirely on the files already on disk, using the same file discovery and `ignoreKeys` as `translate`, and prints which files it loaded for each locale. Good for CI when you run with `--auto-translate` off and want a failing check as the signal that a PR still needs human-reviewed translations, and just as useful as a one-off health check on your own repo.
+Checks your translation files for missing keys, broken placeholders and structure problems. It runs offline on the files in your repo, with no Localhero.ai account, no API key and no `localhero.json` needed. Run it once to see where a repo stands, or in CI to fail a pull request that leaves translations behind.
 
-Works without a Localhero.ai account or `localhero.json`. With no config it finds the locale folder the way `init` does, reads the languages from the file and folder names, and picks the source language in this order: `--source`, a gettext catalog whose `msgstr` are untranslated, a `.pot` template, `en`, and otherwise the language with the most keys. It prints what it picked; a guess is marked as one. With a `localhero.json`, its paths, locales and `ignoreKeys` are used as is.
+With a `localhero.json` it uses that file's paths, locales and `ignoreKeys`. Without one it finds the locale folder the way `init` does and reads the languages from file and folder names. The source language is the first of: `--source`, a gettext catalog whose `msgstr` are untranslated, a `.pot` template, `en` and the language with the most keys. `check` prints what it picked and says so when it guessed. A language only counts as a target when one of its files matches a source file. That leaves out vendored translations such as rails-i18n.
 
-It reports, per target locale:
+For each target locale it reports:
 
-- **Missing keys**: present in the source locale but absent or `null` in the target.
-- **Placeholder mismatches**: interpolation placeholders in the source string that are missing from the target, or added in the target but absent from the source. Covers Rails `%{name}` / `%<name>s`, printf `%s %d %1$s`, i18next/Vue/Angular `{{name}}` (including `{{- name}}` and `{{name, number}}`), ICU/React-intl `{name}`, and Python `%(name)s`. `{{name}}` is never also counted as `{name}`, and a literal `%` (followed by a space, or right after a number as in `5%off`) is never treated as a printf directive. Positional directives may be renumbered (`%1$s %2$s` → `%2$s %1$s`) but must keep their type. Inside ICU `plural`/`select` arguments only the argument name is compared, so branch text such as `{He}` is never mistaken for a placeholder.
-- **Placeholder hints**: a `zero`, `one` or `two` form that leaves out a placeholder, such as `"%{count} language"` → `"1 språk"`, or a gettext plural form without the number. This is often correct, so it is reported as a hint and never fails the run. A plural form that *adds* a placeholder, or a `few`, `many` or `other` form that drops one, is still a mismatch.
-- **Orphan keys**: present in a target locale but in none of the source locale's files, i.e. left behind after a source key was deleted. A key only counts as an orphan when no source file defines it, since Rails merges every file of a locale. Reported as warnings and never fail the run: apps often ship bundled framework translations (rails-i18n) that the source locale does not have. Extra plural forms a language needs (Arabic `msgstr[2..5]`) are not orphans.
-- **Structure and plural-shape mismatches**: a leaf that is a string on one side and a map or array on the other (reported once, not also as missing and orphan keys), or a source key with plural sub-keys (Rails `one`/`other`, i18next `_one`/`_plural`) where the target has no plural forms at all.
-- **Missing plural categories**: a Rails plural group in the target that lacks forms its language needs, such as Polish or Russian with only `one`/`other` and no `few`/`many`. Rails falls back to `other` and renders a wrong form without any error. Only categories that whole numbers up to 1000 actually use are required.
-- **Conflicting keys**: a key that two or more YAML files of the same target locale define with different values. Rails merges these files into one namespace; whichever file loads last silently wins. Identical duplicates are not reported. Gettext domains, i18next JSON namespaces and multi-language files are separate namespaces; duplicates there are ignored. In `--json` each entry is `{ key, files, values }`, where `values[i]` is the value in `files[i]`.
-- **Empty and identical-to-source values**: an empty target string is reported as a real gap; a target that is byte-identical to the source is reported separately, as a *hint*, since short words and proper nouns are legitimately identical across languages.
+- **Missing keys**: in the source but absent or `null` in the target. Without a config, a source file the language has no file for is listed as not checked instead of counting all its keys as missing.
+- **Placeholder mismatches**: a placeholder the translation drops or adds. Covers Rails `%{name}` and `%<name>s`, printf (`%s`, `%d`, positional `%1$s`), i18next `{{name}}`, ICU `{name}` and Python `%(name)s`. Translators may reorder positional arguments. Date formats (`%b %d`) and literal percent signs are not compared.
+- **Placeholder hints**: a `zero`, `one` or `two` form that leaves out a placeholder, like `"%{count} language"` → `"1 språk"`. That is often correct. Hints never fail the run. A `few`, `many` or `other` form that drops a placeholder is a mismatch.
+- **Missing plural categories**: a Rails plural group without the forms its language needs, like Polish with only `one` and `other`. Rails falls back to `other` without raising an error.
+- **Structure mismatches**: a string in the source that is a map or array in the target, or a plural group collapsed to one string.
+- **Conflicting and duplicate keys**: a key defined with different values in several YAML files of one locale, or twice in the same file. Rails keeps one of the values and says nothing. Gettext domains, i18next namespaces and multi-language files are separate namespaces and are not compared with each other.
+- **Orphan keys**: in a target but in no source file. They are warnings only. Often they are framework translations the source never had.
+- **Empty and identical values**: an empty target string fails like a missing key. A target identical to its source is a hint, as short words and names are often the same across languages.
 
 #### Options
 
 **`--source <locale>`**: The source language. Defaults to the one in `localhero.json`, or the detected one without it.
 
-**`--locales <codes>`**: Comma-separated target locales to check. Defaults to the configured output locales, or every other language found without a config.
+**`--locales <codes>`**: Comma-separated target locales to check. Defaults to the configured output locales, or every matching language found without a config.
 
-**`--path <dir>`**: The locale folder to scan when there is no `localhero.json`, for layouts the detection misses.
+**`--path <dir>`**: The locale folder to scan when there is no `localhero.json`. Use it for layouts the detection misses.
 
 **`--pattern <glob>`**: The file pattern inside `--path`. Defaults to `**/*.{json,yml,yaml,po,pot}`.
 
-**`--json`**: Print a machine-readable report on stdout (and nothing else), including the files loaded per locale and any files that could not be parsed. Stable key names, safe to aggregate across many repos.
+**`--json`**: Prints the full report as JSON on stdout and nothing else: every finding, the files loaded per locale, files that could not be parsed and what was detected without a config. Key names stay stable between releases.
 
-**`--all`**: Print every finding instead of capping each category at 10 with a "... and N more" line.
+**`--all`**: Prints every finding instead of the first 10 per category.
 
-**`--fail-on <mode>`**: Controls the exit code. `missing` (default) exits 1 when there are missing or empty keys; `placeholders` exits 1 on placeholder mismatches; `any` exits 1 on any of missing/empty/placeholders/structure/plural categories/conflicting keys; `none` always exits 0. A translation file that cannot be parsed fails every mode except `none`. Hints and orphan keys never affect the exit code.
+**`--fail-on <mode>`**: When to exit 1. `missing` (default) fails on missing or empty keys. `placeholders` fails on placeholder mismatches. `any` fails on every finding except hints, orphan keys and files not checked. `none` never fails. A file that cannot be parsed fails every mode except `none`.
 
-**`--format github`**: Emit GitHub Actions annotation lines (`::error file=...::message`) instead of the human report: `::error` for problems, `::warning` for orphans, `::notice` for hints. Locale files aren't parsed with line tracking, so annotations are file-level, not line-level.
+**`--format github`**: Prints GitHub Actions annotations instead of the report: `::error` for problems, `::warning` for orphan and duplicate keys, `::notice` for hints. At most 50, followed by a count of the rest. Annotations point at files, not lines.
+
+In CI, pass `--source` so the gate never depends on a guess:
 
 ```bash
-npx @localheroai/cli check --locales sv,de --fail-on any
+npx @localheroai/cli check --source en --format github
+npx @localheroai/cli check --source en --locales sv,de --fail-on any
 npx @localheroai/cli check --json > report.json
-npx @localheroai/cli check --format github
 ```
 
 ### Pull / push
