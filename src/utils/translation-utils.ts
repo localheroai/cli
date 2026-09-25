@@ -498,6 +498,8 @@ export function batchKeysWithMissing(
   return { batches, errors };
 }
 
+const PATH_SEPARATORS = /[\\/]/;
+
 // Only a locale that stands alone in the name is swapped: "document.en" becomes
 // "document.sv", while the "en" inside "document" or "tenant" is left alone.
 function swapLocaleInName(name: string, sourceLocale: string, targetLocale: string): string {
@@ -555,7 +557,7 @@ export function findTargetFile(
 
   if (found) return found;
 
-  const sourceDirParts = path.dirname(sourceFile.path).split(path.sep);
+  const sourceDirParts = path.dirname(sourceFile.path).split(PATH_SEPARATORS);
   const sourceFileBaseName = path.basename(sourceFile.path, path.extname(sourceFile.path));
 
   // Third fallback: Handle locale-in-path patterns (e.g., translations/sv/LC_MESSAGES/django.po)
@@ -566,15 +568,16 @@ export function findTargetFile(
     if (f.locale !== targetLocale) return false;
 
     // Handle cases where files are in different subdirectories
-    const targetDirParts = path.dirname(f.path).split(path.sep);
+    const targetDirParts = path.dirname(f.path).split(PATH_SEPARATORS);
     const targetFileBaseName = path.basename(f.path, path.extname(f.path));
 
-    if (
-      sourceFileBaseName === sourceLocale &&
-      targetFileBaseName === targetLocale &&
-      sourceDirParts.length === targetDirParts.length
-    ) {
-      return true;
+    // locales/en/en.json ↔ locales/sv/sv.json: folders may differ only where the
+    // locale sits, or countries/en.yml pairs with pressroom/sv.yml.
+    if (sourceFileBaseName === sourceLocale && targetFileBaseName === targetLocale) {
+      return sourceDirParts.length === targetDirParts.length &&
+        sourceDirParts.every((part, i) =>
+          part === targetDirParts[i] || (part === sourceLocale && targetDirParts[i] === targetLocale)
+        );
     }
 
     // Nested directory structure
