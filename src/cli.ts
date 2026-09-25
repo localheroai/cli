@@ -116,7 +116,7 @@ program
 
 program
   .command('check')
-  .description('Check translation files for missing keys, placeholder mismatches, orphans and structure issues (fully offline, no credits used)')
+  .description('Check translation files for missing keys, broken placeholders and structure issues. Runs offline, no account or localhero.json needed')
   .option('--source <locale>', 'Source locale (default: from localhero.json, else detected)')
   .option('--locales <codes>', 'Comma-separated target locales to check (default: from localhero.json, else every other locale found)')
   .option('--path <dir>', 'Locale folder to scan when there is no localhero.json')
