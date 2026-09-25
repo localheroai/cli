@@ -461,10 +461,11 @@ function analyze(files: FileSet, context: AnalysisContext): { reports: LocaleRep
         (finding.hint ? report.placeholderHints : report.placeholderMismatches).push(finding);
       }
       const structureMismatches = findStructureMismatches(sourceKeys, targetKeys);
-      const pluralShapeMismatches = findPluralShapeMismatches(sourceKeys, targetKeys);
+      // Every reshaped key hides its missing and orphan rows, reported or not (a Japanese single string).
+      const reshapedPlurals = findPluralShapeMismatches(sourceKeys, targetKeys);
       report.structureMismatches.push(...withPath(structureMismatches, targetPath));
-      report.pluralShapeMismatches.push(...withPath(pluralShapeMismatches, targetPath));
-      for (const { key } of [...structureMismatches, ...pluralShapeMismatches]) reshapedKeys.add(key);
+      report.pluralShapeMismatches.push(...withPath(findPluralShapeMismatches(sourceKeys, targetKeys, locale), targetPath));
+      for (const { key } of [...structureMismatches, ...reshapedPlurals]) reshapedKeys.add(key);
       for (const key of findPluralizedFlatKeys(sourceKeys, targetKeys)) reshapedKeys.add(key);
 
       if (targetPath) pairedTargetKeys.set(targetPath, targetKeys);

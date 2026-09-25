@@ -221,7 +221,13 @@ export interface PluralShapeMismatch {
 }
 
 /** A source plural group the target has content for but no plural forms; with no content it is simply missing. */
-export function findPluralShapeMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): PluralShapeMismatch[] {
+export function findPluralShapeMismatches(
+  sourceKeys: FlatMap,
+  targetKeys: FlatMap,
+  locale?: string
+): PluralShapeMismatch[] {
+  // Japanese or Chinese only have `other`, so a single string is the right shape there.
+  if (locale !== undefined && usedPluralCategories(locale)?.join() === 'other') return [];
   const sourceParents = pluralParentsOf(Object.keys(sourceKeys));
   const targetParents = pluralParentsOf(Object.keys(targetKeys));
   const targetKeyList = Object.keys(targetKeys);
@@ -248,6 +254,14 @@ export interface IdenticalFinding {
 }
 
 /** Identical text is only a hint, never an error: short words and proper nouns are often the same across languages. */
+const NON_TEXT = /%\{[^}]*\}|%<[^>]*>\w|\{\{[^}]*\}\}|\{[^}]*\}|%[-_0^#]?[a-zA-Z%]/g;
+
+// A delimiter, a strftime format or `false` is meant to be the same in every language.
+function isText(raw: FlatValue, value: string): boolean {
+  if (typeof raw === 'number' || typeof raw === 'boolean') return false;
+  return /\p{L}/u.test(value.replace(NON_TEXT, ''));
+}
+
 export function findEmptyAndIdentical(
   sourceKeys: FlatMap,
   targetKeys: FlatMap
@@ -262,7 +276,7 @@ export function findEmptyAndIdentical(
     const target = toStringValue(targetKeys[key]);
     if (target === '') {
       empty.push({ key, source });
-    } else if (target === source) {
+    } else if (target === source && isText(targetKeys[key], target)) {
       identical.push({ key, value: source });
     }
   }
@@ -345,12 +359,17 @@ function railsPluralGroups(keys: FlatMap): Map<string, Set<string>> {
  * Null for an unknown locale. Only categories reached by 0..1000 count: CLDR gives es/fr/it/pt
  * a `many` for 1,000,000 that rails-i18n does not implement and no one writes.
  */
+// Rails-style codes (zh_cn) and custom variants (ja_easy) fall back to their language.
 export function usedPluralCategories(locale: string): string[] | null {
-  try {
-    const rules = new Intl.PluralRules(locale);
-    const reached = new Set(Array.from({ length: 1001 }, (_, n) => rules.select(n)));
-    return rules.resolvedOptions().pluralCategories.filter((category) => reached.has(category));
-  } catch {
-    return null;
+  const candidates = [locale, locale.replace(/_/g, '-'), locale.split(/[-_]/)[0]];
+  for (const candidate of candidates) {
+    try {
+      const rules = new Intl.PluralRules(candidate);
+      const reached = new Set(Array.from({ length: 1001 }, (_, n) => rules.select(n)));
+      return rules.resolvedOptions().pluralCategories.filter((category) => reached.has(category));
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
