@@ -6,7 +6,8 @@ import {
   findPluralShapeMismatches,
   findEmptyAndIdentical,
   findMissingPluralCategories,
-  findConflictingKeys
+  findConflictingKeys,
+  usedPluralCategories
 } from '../../src/utils/check-utils.js';
 
 describe('findOrphanKeys', () => {
@@ -313,5 +314,41 @@ describe('findConflictingKeys', () => {
       { path: 'b/sv.yml', keys: { enabled: false, precision: 0 } }
     ]);
     expect(found.map((f) => f.key)).toEqual(['enabled', 'precision']);
+  });
+});
+
+describe('languages with only the other plural form', () => {
+  const source = { 'items.one': '1 item', 'items.other': '%{count} items' };
+
+  it('accepts a single string where the language has no other plural form', () => {
+    for (const locale of ['ja', 'zh_cn', 'zh-TW', 'ja_easy']) {
+      expect(findPluralShapeMismatches(source, { items: '%{count} 件' }, locale)).toEqual([]);
+    }
+  });
+
+  it('still flags a single string where the language needs several forms', () => {
+    expect(findPluralShapeMismatches(source, { items: 'saker' }, 'sv')).toEqual([{ key: 'items' }]);
+  });
+
+  it('reads underscore locales and custom variants by their language', () => {
+    expect(usedPluralCategories('zh_cn')).toEqual(['other']);
+    expect(usedPluralCategories('ja_easy')).toEqual(['other']);
+    expect(usedPluralCategories('pt_BR')).toEqual(usedPluralCategories('pt-BR'));
+  });
+});
+
+describe('identical values that are not text', () => {
+  it('does not hint about formats, numbers and booleans', () => {
+    const values = {
+      delimiter: ',',
+      format: '%n%u',
+      date: '%Y-%m-%d',
+      duration: '%{hours}%{minutes}',
+      precision: 3,
+      significant: false,
+      name: 'Exam Prep'
+    };
+
+    expect(findEmptyAndIdentical(values, { ...values }).identical).toEqual([{ key: 'name', value: 'Exam Prep' }]);
   });
 });

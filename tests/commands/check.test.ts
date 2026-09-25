@@ -122,6 +122,24 @@ describe('check command', () => {
     expect(reports[0].missing.map((f) => f.key)).toEqual(['b']);
   });
 
+  it('accepts a single string for a plural group in a language with only the other form', async () => {
+    config.outputLocales = ['ja', 'zh_cn'];
+    files = [
+      yamlFile('en', '  items:\n    one: "1 item"\n    other: "%{count} items"\n'),
+      yamlFile('ja', '  items: "%{count} 件"\n'),
+      yamlFile('zh_cn', '  items: "%{count} 项"\n')
+    ];
+
+    const { exitCode, reports } = await run({ failOn: 'any' });
+
+    expect(exitCode).toBe(0);
+    for (const r of reports) {
+      expect(r.pluralShapeMismatches).toEqual([]);
+      expect(r.missing).toEqual([]);
+      expect(r.orphans).toEqual([]);
+    }
+  });
+
   it('rejects an unknown --fail-on value', async () => {
     files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
 
