@@ -2,15 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
+
 ## [0.0.73] - 2026-09-25
 
 ### Fixed
 - `translate` and `ci` now fail when the project in `localhero.json` does not exist or belongs to another organization. Before, a pull request run with no missing keys printed two yellow warnings, then "No changed keys need translation", and passed; the PR's edited translations and key manifest never reached Localhero. The run now stops before doing any work with an error that names the project id and points at `projectId` in `localhero.json` and the API key's organization. Network and server errors on the review upload and key manifest calls are still warnings.
 
 ## [0.0.72] - 2026-09-25
-
-### Added
-- `check` command: audits translation files offline, with no API key and no credits. It reports missing keys, placeholder mismatches, structure and plural-shape mismatches, missing plural categories (e.g. Polish without `few`/`many`), orphan keys, and empty or identical values. Supports `--json`, `--format github` and `--fail-on`.
 
 ### Fixed
 - A locale file in one folder is no longer paired with an unrelated folder at the same depth. When `countries/sv.yml` did not exist, `countries/en.yml` was matched with `pressroom/sv.yml`, so `translate` wrote the Swedish country names into the pressroom file and `check` reported them missing there. Translations for a folder without a target file now go to a new file in that folder.
