@@ -6,12 +6,17 @@ import { configService, PROJECT_CONFIG_FILE } from './config.js';
 import { CommitSummary, ProjectConfig } from '../types/index.js';
 import {
   createSignedCommit,
+  fetchBranchHead,
+  fetchChangedPaths,
   StaleHeadError,
   CreateCommitInput,
   CreateCommitResult
 } from './github-graphql.js';
 
 export type CommitResult = 'no-changes' | 'new' | 'skipped';
+
+// A tip that keeps moving is a busy branch; stop chasing it and let a later run commit.
+const MAX_COMMITS_ON_NEWER_TIP = 2;
 
 /**
  * Dependencies for the GitHub service
@@ -27,6 +32,13 @@ interface GitHubDependencies {
     getProjectConfig: (basePath?: string) => Promise<ProjectConfig | null>;
   };
   createSignedCommit?: (input: CreateCommitInput) => Promise<CreateCommitResult>;
+  fetchBranchHead?: (repositoryNameWithOwner: string, branchName: string, token: string) => Promise<string>;
+  fetchChangedPaths?: (
+    repositoryNameWithOwner: string,
+    base: string,
+    head: string,
+    token: string
+  ) => Promise<string[] | null>;
   [key: string]: unknown;
 }
 
@@ -38,7 +50,9 @@ const defaultDependencies: GitHubDependencies = {
   console,
   fetchGitHubInstallationToken,
   configService,
-  createSignedCommit
+  createSignedCommit,
+  fetchBranchHead,
+  fetchChangedPaths
 };
 
 interface WorkflowOptions {
@@ -651,13 +665,15 @@ ${buildExtractStep(options)}      - name: Translate
    *
    * The new commit is stacked on the checkout's HEAD, which is what the files
    * were generated from. The mutation sends whole-file contents, so if the
-   * branch moved during the run, committing on the newer HEAD would revert
-   * that push. GitHub rejects the stale `expectedHeadOid`; we skip the commit
-   * and let the new push's run redo the work. The mutation has no amend
-   * primitive, so sync PRs keep the bot's sync trigger commit as well.
+   * branch moved during the run and the newer commits changed any of our files,
+   * committing on the newer tip would revert them. GitHub rejects the stale
+   * `expectedHeadOid`; we then commit on the newer tip only when the newer
+   * commits left all of our files alone, and otherwise skip and let a later run
+   * redo the work. The mutation has no amend primitive, so sync PRs keep the
+   * bot's sync trigger commit as well.
    *
    * Returns 'no-changes' if there are no files to commit, 'skipped' if the
-   * branch moved, otherwise 'new'.
+   * branch moved in a way we can't safely commit on top of, otherwise 'new'.
    */
   async apiCommitAndPush(params: {
     branchName: string;
@@ -680,21 +696,71 @@ ${buildExtractStep(options)}      - name: Translate
     const checkoutHead = exec('git rev-parse HEAD', { stdio: 'pipe' }).toString().trim();
     await this.warnIfCheckoutIsNotPullRequestHead(checkoutHead);
 
-    try {
-      await this.deps.createSignedCommit!({
-        repositoryNameWithOwner: repository,
+    let expectedHeadOid = checkoutHead;
+    for (let commitsOnNewerTip = 0; ; commitsOnNewerTip++) {
+      try {
+        await this.deps.createSignedCommit!({
+          repositoryNameWithOwner: repository,
+          branchName: params.branchName,
+          expectedHeadOid,
+          message: this.splitCommitMessage(params.message),
+          fileChanges: { additions },
+          token
+        });
+        return 'new';
+      } catch (error) {
+        if (!(error instanceof StaleHeadError)) throw error;
+      }
+
+      if (commitsOnNewerTip === MAX_COMMITS_ON_NEWER_TIP) return 'skipped';
+
+      const newerTip = await this.findTipSafeToCommitOn({
+        repository,
         branchName: params.branchName,
-        expectedHeadOid: checkoutHead,
-        message: this.splitCommitMessage(params.message),
-        fileChanges: { additions },
+        checkoutHead,
+        paths: additions.map(addition => addition.path),
         token
       });
-      return 'new';
-    } catch (error) {
-      if (error instanceof StaleHeadError) {
-        return 'skipped';
+      if (!newerTip) return 'skipped';
+      expectedHeadOid = newerTip;
+    }
+  },
+
+  /**
+   * The branch's current tip if every commit since the checkout left `paths`
+   * untouched, so our whole-file contents are still right on top of it.
+   * Returns null when a newer commit touched one of them or when that can't be
+   * confirmed.
+   */
+  async findTipSafeToCommitOn(params: {
+    repository: string;
+    branchName: string;
+    checkoutHead: string;
+    paths: string[];
+    token: string;
+  }): Promise<string | null> {
+    const { console: log } = this.deps;
+    const { repository, checkoutHead, token } = params;
+
+    try {
+      const tip = await this.deps.fetchBranchHead!(repository, params.branchName, token);
+      const changedPaths = await this.deps.fetchChangedPaths!(repository, checkoutHead, tip, token);
+      if (!changedPaths) {
+        log.log(`Could not get a complete list of the files changed since ${checkoutHead.slice(0, 7)}.`);
+        return null;
       }
-      throw error;
+
+      const changed = new Set(changedPaths);
+      const overlap = params.paths.find(filePath => changed.has(filePath));
+      if (overlap) {
+        log.log(`Newer commits on the branch changed ${overlap}.`);
+        return null;
+      }
+      return tip;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.log(`Could not check the newer commits on the branch: ${message}`);
+      return null;
     }
   },
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, jest } from '@jest/globals';
 import {
   createSignedCommit,
+  fetchBranchHead,
+  fetchChangedPaths,
   StaleHeadError,
   GitHubGraphQLError
 } from '../../src/utils/github-graphql.js';
@@ -143,5 +145,100 @@ describe('createSignedCommit', () => {
         { fetch: mockFetch as any }
       )
     ).rejects.toBeInstanceOf(GitHubGraphQLError);
+  });
+});
+
+describe('fetchBranchHead', () => {
+  it('returns the sha the branch ref points to', async () => {
+    const mockFetch = jest.fn(async () => jsonResponse({ object: { sha: 'd'.repeat(40) } }));
+
+    const sha = await fetchBranchHead('localheroai/test', 'feature/login', 'ghs_token', { fetch: mockFetch as any });
+
+    expect(sha).toBe('d'.repeat(40));
+    const [url, init] = mockFetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('https://api.github.com/repos/localheroai/test/git/ref/heads/feature/login');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer ghs_token');
+  });
+
+  it('throws when the ref cannot be read', async () => {
+    const mockFetch = jest.fn(async () => new Response('Not Found', { status: 404 }));
+
+    await expect(fetchBranchHead('localheroai/test', 'gone', 'ghs_token', { fetch: mockFetch as any }))
+      .rejects.toBeInstanceOf(GitHubGraphQLError);
+  });
+});
+
+describe('fetchChangedPaths', () => {
+  const BASE = 'a'.repeat(40);
+  const HEAD = 'd'.repeat(40);
+
+  function compareResponse(overrides: Record<string, unknown> = {}) {
+    return {
+      status: 'ahead',
+      total_commits: 1,
+      commits: [{ sha: HEAD }],
+      files: [{ filename: 'app/models/user.rb', status: 'modified' }],
+      ...overrides
+    };
+  }
+
+  async function changedPaths(body: unknown) {
+    const mockFetch = jest.fn(async () => jsonResponse(body));
+    const paths = await fetchChangedPaths('localheroai/test', BASE, HEAD, 'ghs_token', { fetch: mockFetch as any });
+    return { paths, mockFetch };
+  }
+
+  it('compares base...head and returns the changed paths', async () => {
+    const { paths, mockFetch } = await changedPaths(compareResponse({
+      files: [
+        { filename: 'app/models/user.rb', status: 'modified' },
+        { filename: 'config/locales/en.yml', status: 'added' }
+      ]
+    }));
+
+    expect(paths).toEqual(['app/models/user.rb', 'config/locales/en.yml']);
+    const [url] = mockFetch.mock.calls[0] as unknown as [string];
+    expect(url).toBe(`https://api.github.com/repos/localheroai/test/compare/${BASE}...${HEAD}`);
+  });
+
+  it('returns both sides of a rename', async () => {
+    const { paths } = await changedPaths(compareResponse({
+      files: [{ filename: 'config/locales/sv-SE.yml', previous_filename: 'config/locales/sv.yml', status: 'renamed' }]
+    }));
+
+    expect(paths).toEqual(['config/locales/sv-SE.yml', 'config/locales/sv.yml']);
+  });
+
+  it.each(['diverged', 'behind', 'identical'])('returns null when the head is %s', async status => {
+    const { paths } = await changedPaths(compareResponse({ status }));
+
+    expect(paths).toBeNull();
+  });
+
+  it('returns null when the files list hits the 300-file cap', async () => {
+    const files = Array.from({ length: 300 }, (_, i) => ({ filename: `src/file${i}.ts`, status: 'modified' }));
+
+    const { paths } = await changedPaths(compareResponse({ files }));
+
+    expect(paths).toBeNull();
+  });
+
+  it('returns null when the commits list is cut short', async () => {
+    const { paths } = await changedPaths(compareResponse({ total_commits: 251, commits: Array(250).fill({ sha: HEAD }) }));
+
+    expect(paths).toBeNull();
+  });
+
+  it('returns null when the files list is missing', async () => {
+    const { paths } = await changedPaths(compareResponse({ files: undefined }));
+
+    expect(paths).toBeNull();
+  });
+
+  it('throws when the compare request fails', async () => {
+    const mockFetch = jest.fn(async () => new Response('Not Found', { status: 404 }));
+
+    await expect(fetchChangedPaths('localheroai/test', BASE, HEAD, 'ghs_token', { fetch: mockFetch as any }))
+      .rejects.toBeInstanceOf(GitHubGraphQLError);
   });
 });

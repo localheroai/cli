@@ -821,12 +821,17 @@ describe('githubService', () => {
 
   describe('signed-commits mode', () => {
     const CHECKOUT_HEAD = 'b'.repeat(40);
+    const NEWER_TIP = 'd'.repeat(40);
     let mockCreateSignedCommit: jest.Mock;
+    let mockFetchBranchHead: jest.Mock;
+    let mockFetchChangedPaths: jest.Mock;
     let mockReadFile: jest.Mock;
     let mockExistsSync: jest.Mock;
 
     beforeEach(() => {
       mockCreateSignedCommit = jest.fn();
+      mockFetchBranchHead = jest.fn();
+      mockFetchChangedPaths = jest.fn();
       mockReadFile = jest.fn();
       mockExistsSync = jest.fn().mockReturnValue(true);
       mockExec.mockImplementation((cmd: string) => {
@@ -853,9 +858,14 @@ describe('githubService', () => {
         console: mockConsole,
         configService: mockConfigSvc as any,
         fetchGitHubInstallationToken: jest.fn().mockResolvedValue('ghs_app_token') as any,
-        createSignedCommit: mockCreateSignedCommit as any
+        createSignedCommit: mockCreateSignedCommit as any,
+        fetchBranchHead: mockFetchBranchHead as any,
+        fetchChangedPaths: mockFetchChangedPaths as any
       });
     });
+
+    const staleHead = (sha: string) =>
+      new StaleHeadError(`Expected branch to point to "${sha}" but it did not. Pull and try again.`);
 
     it('uses GraphQL path when github.signedCommits is true', async () => {
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -891,12 +901,12 @@ describe('githubService', () => {
       expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
     });
 
-    it('skips the sync commit without retrying when the branch moved during the run', async () => {
+    it('skips the sync commit when newer commits on the branch changed one of its files', async () => {
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
       mockReadFile.mockResolvedValue(Buffer.from('content'));
-      mockCreateSignedCommit.mockRejectedValue(
-        new StaleHeadError(`Expected branch to point to "${CHECKOUT_HEAD}" but it did not. Pull and try again.`)
-      );
+      mockCreateSignedCommit.mockRejectedValue(staleHead(CHECKOUT_HEAD));
+      mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+      mockFetchChangedPaths.mockResolvedValue(['localhero.json']);
 
       const result = await githubService.autoCommitSyncChanges(['locales/sv.yml']);
 
@@ -904,6 +914,22 @@ describe('githubService', () => {
       expect(mockCreateSignedCommit).toHaveBeenCalledTimes(1);
       expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('Branch moved during the sync; skipping commit'));
       expect(mockConsole.error).not.toHaveBeenCalled();
+    });
+
+    it('commits the sync on top of newer commits that left its files alone', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('content'));
+      mockCreateSignedCommit
+        .mockRejectedValueOnce(staleHead(CHECKOUT_HEAD))
+        .mockResolvedValueOnce({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
+      mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+      mockFetchChangedPaths.mockResolvedValue(['app/models/user.rb']);
+
+      const result = await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      expect(result).toBe('new');
+      expect(mockFetchChangedPaths).toHaveBeenCalledWith('localheroai/test-repo', CHECKOUT_HEAD, NEWER_TIP, 'ghs_app_token');
+      expect((mockCreateSignedCommit.mock.calls[1][0] as any).expectedHeadOid).toBe(NEWER_TIP);
     });
 
     it('throws other GraphQL errors instead of skipping', async () => {
@@ -999,42 +1025,145 @@ describe('githubService', () => {
         ]);
       });
 
-      it('commits on top of the checkout HEAD, not the current remote HEAD', async () => {
-        mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-        mockExec.mockImplementation((cmd: string) => {
-          if (cmd.startsWith('git ls-files')) return Buffer.from('locales/sv.yml\0');
-          if (cmd === 'git rev-parse HEAD') return Buffer.from(`${CHECKOUT_HEAD}\n`);
-          return Buffer.from('');
+      describe('when the branch moves during the run', () => {
+        const committed = { commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' };
+        const expectedHeads = () => mockCreateSignedCommit.mock.calls.map(([input]) => (input as any).expectedHeadOid);
+
+        beforeEach(() => {
+          mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+          mockExec.mockImplementation((cmd: string) => {
+            if (cmd.startsWith('git ls-files')) return Buffer.from('locales/sv.yml\0locales/nb.yml\0');
+            if (cmd === 'git rev-parse HEAD') return Buffer.from(`${CHECKOUT_HEAD}\n`);
+            return Buffer.from('');
+          });
+          mockReadFile.mockResolvedValue(Buffer.from('content'));
         });
-        mockReadFile.mockResolvedValue(Buffer.from('content'));
-        mockCreateSignedCommit.mockResolvedValue({ commitSha: 'c'.repeat(40), commitUrl: 'https://github.com/...' });
 
-        const result = await githubService.autoCommitChanges('locales/');
+        it('commits on top of the checkout HEAD without comparing when the branch has not moved', async () => {
+          mockCreateSignedCommit.mockResolvedValue(committed);
 
-        expect(result).toBe('new');
-        expect((mockCreateSignedCommit.mock.calls[0][0] as any).expectedHeadOid).toBe(CHECKOUT_HEAD);
-      });
+          const result = await githubService.autoCommitChanges('locales/');
 
-      it('skips the commit and resolves when the branch moved during the run', async () => {
-        mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-        mockExec.mockImplementation((cmd: string) => {
-          if (cmd.startsWith('git ls-files')) return Buffer.from('locales/sv.yml\0');
-          if (cmd === 'git rev-parse HEAD') return Buffer.from(`${CHECKOUT_HEAD}\n`);
-          return Buffer.from('');
+          expect(result).toBe('new');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
+          expect(mockFetchBranchHead).not.toHaveBeenCalled();
+          expect(mockFetchChangedPaths).not.toHaveBeenCalled();
         });
-        mockReadFile.mockResolvedValue(Buffer.from('content'));
-        mockCreateSignedCommit.mockRejectedValue(
-          new StaleHeadError(`Expected branch to point to "${CHECKOUT_HEAD}" but it did not. Pull and try again.`)
-        );
 
-        const result = await githubService.autoCommitChanges('locales/');
+        it('commits on top of the newer tip when the newer commits left our files alone', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD)).mockResolvedValueOnce(committed);
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          mockFetchChangedPaths.mockResolvedValue(['app/models/user.rb', 'locales/en.yml']);
 
-        expect(result).toBe('skipped');
-        expect(mockCreateSignedCommit).toHaveBeenCalledTimes(1);
-        expect(mockConsole.log).toHaveBeenCalledWith(
-          'Branch moved during the run; skipping commit. The new push triggers a fresh run.'
-        );
-        expect(mockConsole.error).not.toHaveBeenCalled();
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('new');
+          expect(mockFetchBranchHead).toHaveBeenCalledWith('localheroai/test-repo', 'feature-branch', 'ghs_app_token');
+          expect(mockFetchChangedPaths).toHaveBeenCalledWith('localheroai/test-repo', CHECKOUT_HEAD, NEWER_TIP, 'ghs_app_token');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD, NEWER_TIP]);
+        });
+
+        it('skips when a newer commit changed one of our files', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD));
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          mockFetchChangedPaths.mockResolvedValue(['app/models/user.rb', 'locales/nb.yml']);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
+          expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('locales/nb.yml'));
+          expect(mockConsole.log).toHaveBeenCalledWith(
+            'Branch moved during the run; skipping commit. The new push triggers a fresh run.'
+          );
+          expect(mockConsole.error).not.toHaveBeenCalled();
+        });
+
+        it('skips when a newer commit renamed one of our files away', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD));
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          // fetchChangedPaths reports both sides of a rename
+          mockFetchChangedPaths.mockResolvedValue(['locales/sv-SE.yml', 'locales/sv.yml']);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
+        });
+
+        it('skips when GitHub cannot give a complete, ahead-only comparison', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD));
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          mockFetchChangedPaths.mockResolvedValue(null);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
+          expect(mockConsole.error).not.toHaveBeenCalled();
+        });
+
+        it('skips when the comparison request fails', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD));
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          mockFetchChangedPaths.mockRejectedValue(new GitHubGraphQLError('GitHub API request failed: 502'));
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('502'));
+          expect(mockConsole.error).not.toHaveBeenCalled();
+        });
+
+        it('skips when the branch tip cannot be read', async () => {
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD));
+          mockFetchBranchHead.mockRejectedValue(new GitHubGraphQLError('Failed to fetch branch head: 404'));
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(mockFetchChangedPaths).not.toHaveBeenCalled();
+        });
+
+        it('re-checks against the newest tip when the branch moves again after the comparison', async () => {
+          const NEWEST_TIP = 'e'.repeat(40);
+          mockCreateSignedCommit
+            .mockRejectedValueOnce(staleHead(CHECKOUT_HEAD))
+            .mockRejectedValueOnce(staleHead(NEWER_TIP))
+            .mockResolvedValueOnce(committed);
+          mockFetchBranchHead.mockResolvedValueOnce(NEWER_TIP).mockResolvedValueOnce(NEWEST_TIP);
+          mockFetchChangedPaths.mockResolvedValue(['app/models/user.rb']);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('new');
+          expect(mockFetchChangedPaths).toHaveBeenLastCalledWith('localheroai/test-repo', CHECKOUT_HEAD, NEWEST_TIP, 'ghs_app_token');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD, NEWER_TIP, NEWEST_TIP]);
+        });
+
+        it('skips when the re-check finds that the latest commits changed one of our files', async () => {
+          const NEWEST_TIP = 'e'.repeat(40);
+          mockCreateSignedCommit.mockRejectedValueOnce(staleHead(CHECKOUT_HEAD)).mockRejectedValueOnce(staleHead(NEWER_TIP));
+          mockFetchBranchHead.mockResolvedValueOnce(NEWER_TIP).mockResolvedValueOnce(NEWEST_TIP);
+          mockFetchChangedPaths.mockResolvedValueOnce(['app/models/user.rb']).mockResolvedValueOnce(['app/models/user.rb', 'locales/sv.yml']);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(expectedHeads()).toEqual([CHECKOUT_HEAD, NEWER_TIP]);
+        });
+
+        it('gives up after two commits on a newer tip keep losing the race', async () => {
+          mockCreateSignedCommit.mockRejectedValue(staleHead(NEWER_TIP));
+          mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+          mockFetchChangedPaths.mockResolvedValue(['app/models/user.rb']);
+
+          const result = await githubService.autoCommitChanges('locales/');
+
+          expect(result).toBe('skipped');
+          expect(mockCreateSignedCommit).toHaveBeenCalledTimes(3);
+          expect(mockFetchChangedPaths).toHaveBeenCalledTimes(2);
+        });
       });
     });
 
