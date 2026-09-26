@@ -14,6 +14,20 @@ import {
 } from './github-graphql.js';
 
 export type CommitResult = 'no-changes' | 'new' | 'skipped';
+type SkippedCommit = 'skipped-overlap' | 'skipped-uncertain';
+type SignedCommitResult = Exclude<CommitResult, 'skipped'> | SkippedCommit;
+
+// Only an overlapping push is sure to start a new run: it touched locale files,
+// which every generated `paths:` filter matches.
+const TRANSLATE_SKIP_NOTICES: Record<SkippedCommit, string> = {
+  'skipped-overlap': 'Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.',
+  'skipped-uncertain': 'Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.'
+};
+// A push never re-runs a sync, whatever it touched.
+const SYNC_SKIP_NOTICES: Record<SkippedCommit, string> = {
+  'skipped-overlap': 'Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.',
+  'skipped-uncertain': 'Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.'
+};
 
 // A tip that keeps moving is a busy branch; stop chasing it and let a later run commit.
 const MAX_COMMITS_ON_NEWER_TIP = 2;
@@ -520,12 +534,14 @@ ${buildExtractStep(options)}      - name: Translate
         });
         if (result === 'no-changes') {
           log.log('No changes to commit - translations already up to date.');
-        } else if (result === 'skipped') {
-          log.log('Branch moved during the sync; skipping commit so the newer push is not overwritten.');
-        } else {
-          log.log('✓ Signed commit created and pushed to GitHub\n');
+          return result;
         }
-        return result;
+        if (result === 'new') {
+          log.log('✓ Signed commit created and pushed to GitHub\n');
+          return result;
+        }
+        log.log(SYNC_SKIP_NOTICES[result]);
+        return 'skipped';
       }
 
       this.configureGitUser();
@@ -627,12 +643,14 @@ ${buildExtractStep(options)}      - name: Translate
         });
         if (result === 'no-changes') {
           log.log('No changes to commit.');
-        } else if (result === 'skipped') {
-          log.log('Branch moved during the run; skipping commit. The new push triggers a fresh run.');
-        } else {
-          log.log('Signed commit pushed to GitHub.');
+          return result;
         }
-        return result;
+        if (result === 'new') {
+          log.log('Signed commit pushed to GitHub.');
+          return result;
+        }
+        log.log(TRANSLATE_SKIP_NOTICES[result]);
+        return 'skipped';
       }
 
       this.configureGitUser();
@@ -672,14 +690,15 @@ ${buildExtractStep(options)}      - name: Translate
    * redo the work. The mutation has no amend primitive, so sync PRs keep the
    * bot's sync trigger commit as well.
    *
-   * Returns 'no-changes' if there are no files to commit, 'skipped' if the
-   * branch moved in a way we can't safely commit on top of, otherwise 'new'.
+   * Returns 'no-changes' if there are no files to commit, 'skipped-overlap'
+   * if a newer commit touched our files, 'skipped-uncertain' if that couldn't
+   * be ruled out, otherwise 'new'.
    */
   async apiCommitAndPush(params: {
     branchName: string;
     filePaths: string[];
     message: string;
-  }): Promise<CommitResult> {
+  }): Promise<SignedCommitResult> {
     const { exec, env } = this.deps;
 
     const repository = env.GITHUB_REPOSITORY;
@@ -712,25 +731,25 @@ ${buildExtractStep(options)}      - name: Translate
         if (!(error instanceof StaleHeadError)) throw error;
       }
 
-      if (commitsOnNewerTip === MAX_COMMITS_ON_NEWER_TIP) return 'skipped';
+      if (commitsOnNewerTip === MAX_COMMITS_ON_NEWER_TIP) return 'skipped-uncertain';
 
-      const newerTip = await this.findTipSafeToCommitOn({
+      const check = await this.findTipSafeToCommitOn({
         repository,
         branchName: params.branchName,
         checkoutHead,
         paths: additions.map(addition => addition.path),
         token
       });
-      if (!newerTip) return 'skipped';
-      expectedHeadOid = newerTip;
+      if ('skipped' in check) return check.skipped;
+      expectedHeadOid = check.tip;
     }
   },
 
   /**
    * The branch's current tip if every commit since the checkout left `paths`
    * untouched, so our whole-file contents are still right on top of it.
-   * Returns null when a newer commit touched one of them or when that can't be
-   * confirmed.
+   * Otherwise why it isn't safe: a newer commit touched one of them, or that
+   * can't be ruled out.
    */
   async findTipSafeToCommitOn(params: {
     repository: string;
@@ -738,7 +757,7 @@ ${buildExtractStep(options)}      - name: Translate
     checkoutHead: string;
     paths: string[];
     token: string;
-  }): Promise<string | null> {
+  }): Promise<{ tip: string } | { skipped: SkippedCommit }> {
     const { console: log } = this.deps;
     const { repository, checkoutHead, token } = params;
 
@@ -747,20 +766,20 @@ ${buildExtractStep(options)}      - name: Translate
       const changedPaths = await this.deps.fetchChangedPaths!(repository, checkoutHead, tip, token);
       if (!changedPaths) {
         log.log(`Could not get a complete list of the files changed since ${checkoutHead.slice(0, 7)}.`);
-        return null;
+        return { skipped: 'skipped-uncertain' };
       }
 
       const changed = new Set(changedPaths);
       const overlap = params.paths.find(filePath => changed.has(filePath));
       if (overlap) {
         log.log(`Newer commits on the branch changed ${overlap}.`);
-        return null;
+        return { skipped: 'skipped-overlap' };
       }
-      return tip;
+      return { tip };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       log.log(`Could not check the newer commits on the branch: ${message}`);
-      return null;
+      return { skipped: 'skipped-uncertain' };
     }
   },
 

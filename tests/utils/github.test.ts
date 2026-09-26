@@ -864,6 +864,15 @@ describe('githubService', () => {
       });
     });
 
+    const TRANSLATE_OVERLAP_NOTICE =
+      'Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.';
+    const TRANSLATE_UNCERTAIN_NOTICE =
+      'Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.';
+    const SYNC_OVERLAP_NOTICE =
+      'Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.';
+    const SYNC_UNCERTAIN_NOTICE =
+      'Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.';
+
     const staleHead = (sha: string) =>
       new StaleHeadError(`Expected branch to point to "${sha}" but it did not. Pull and try again.`);
 
@@ -912,8 +921,21 @@ describe('githubService', () => {
 
       expect(result).toBe('skipped');
       expect(mockCreateSignedCommit).toHaveBeenCalledTimes(1);
-      expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('Branch moved during the sync; skipping commit'));
+      expect(mockConsole.log).toHaveBeenCalledWith(SYNC_OVERLAP_NOTICE);
       expect(mockConsole.error).not.toHaveBeenCalled();
+    });
+
+    it('skips the sync commit without promising a fresh run when the newer commits cannot be checked', async () => {
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockReadFile.mockResolvedValue(Buffer.from('content'));
+      mockCreateSignedCommit.mockRejectedValue(staleHead(CHECKOUT_HEAD));
+      mockFetchBranchHead.mockResolvedValue(NEWER_TIP);
+      mockFetchChangedPaths.mockResolvedValue(null);
+
+      const result = await githubService.autoCommitSyncChanges(['locales/sv.yml']);
+
+      expect(result).toBe('skipped');
+      expect(mockConsole.log).toHaveBeenCalledWith(SYNC_UNCERTAIN_NOTICE);
     });
 
     it('commits the sync on top of newer commits that left its files alone', async () => {
@@ -1073,9 +1095,7 @@ describe('githubService', () => {
           expect(result).toBe('skipped');
           expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
           expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('locales/nb.yml'));
-          expect(mockConsole.log).toHaveBeenCalledWith(
-            'Branch moved during the run; skipping commit. The new push triggers a fresh run.'
-          );
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_OVERLAP_NOTICE);
           expect(mockConsole.error).not.toHaveBeenCalled();
         });
 
@@ -1100,6 +1120,8 @@ describe('githubService', () => {
 
           expect(result).toBe('skipped');
           expect(expectedHeads()).toEqual([CHECKOUT_HEAD]);
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_UNCERTAIN_NOTICE);
+          expect(mockConsole.log).not.toHaveBeenCalledWith(TRANSLATE_OVERLAP_NOTICE);
           expect(mockConsole.error).not.toHaveBeenCalled();
         });
 
@@ -1112,6 +1134,7 @@ describe('githubService', () => {
 
           expect(result).toBe('skipped');
           expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('502'));
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_UNCERTAIN_NOTICE);
           expect(mockConsole.error).not.toHaveBeenCalled();
         });
 
@@ -1123,6 +1146,7 @@ describe('githubService', () => {
 
           expect(result).toBe('skipped');
           expect(mockFetchChangedPaths).not.toHaveBeenCalled();
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_UNCERTAIN_NOTICE);
         });
 
         it('re-checks against the newest tip when the branch moves again after the comparison', async () => {
@@ -1151,6 +1175,7 @@ describe('githubService', () => {
 
           expect(result).toBe('skipped');
           expect(expectedHeads()).toEqual([CHECKOUT_HEAD, NEWER_TIP]);
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_OVERLAP_NOTICE);
         });
 
         it('gives up after two commits on a newer tip keep losing the race', async () => {
@@ -1163,6 +1188,7 @@ describe('githubService', () => {
           expect(result).toBe('skipped');
           expect(mockCreateSignedCommit).toHaveBeenCalledTimes(3);
           expect(mockFetchChangedPaths).toHaveBeenCalledTimes(2);
+          expect(mockConsole.log).toHaveBeenCalledWith(TRANSLATE_UNCERTAIN_NOTICE);
         });
       });
     });
