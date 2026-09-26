@@ -287,6 +287,7 @@ jobs:
         with:
           ref: \${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}
           fetch-depth: 0
+          persist-credentials: false
 
 ${buildExtractStep(options)}      - name: Translate
         uses: localheroai/localhero-action@v1
