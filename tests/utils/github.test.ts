@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { parse } from 'yaml';
 import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists, fetchActionToken } from '../../src/utils/github.js';
 
 describe('githubService', () => {
@@ -118,6 +119,16 @@ describe('githubService', () => {
       expect(fileContent).toContain('api-key: ${{ secrets.LOCALHERO_API_KEY }}');
 
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');
+    });
+
+    it('checks out full history without persisting GITHUB_TOKEN so the push uses the App token', async () => {
+      await createGitHubActionFile('/project', ['locales/**']);
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      const steps = parse(fileContent).jobs.translate.steps as Array<{ uses?: string; with?: Record<string, unknown> }>;
+      const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+
+      expect(checkout?.with).toMatchObject({ 'fetch-depth': 0, 'persist-credentials': false });
     });
 
     it('handles directory paths without patterns correctly', async () => {
