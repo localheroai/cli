@@ -22,8 +22,9 @@ import {
   BatchResult,
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
-import { autoCommitChanges, buildMakemessagesCommand, type CommitResult } from '../utils/github.js';
-import { detectTargetChanges, MAX_TOTAL_CHANGES, type TargetChangeFile } from '../utils/target-changes.js';
+import { autoCommitChanges, buildMakemessagesCommand, MISSING_BRANCH_ERROR, MISSING_TOKEN_ERROR, type CommitResult } from '../utils/github.js';
+import { escapeAnnotationData } from '../utils/ci-context.js';
+import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
@@ -150,6 +151,17 @@ const PROJECT_NOT_FOUND_CODE = 'project_not_found';
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+const COMMIT_FAILURE_FIXES: Record<string, string> = {
+  [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
+};
+const NOT_A_PULL_REQUEST_WARNING = '::warning::Translations were not committed: this is not a pull request run. Only pull_request runs commit translations.';
+const PUSH_PERMISSION_FIX = 'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.';
+
+function commitFailedAnnotation(reason: string): string {
+  const fix = COMMIT_FAILURE_FIXES[reason] ?? PUSH_PERMISSION_FIX;
+  return `::error::${escapeAnnotationData(`Translations were not committed: ${reason}. ${fix}`)}`;
 }
 
 function isProjectNotFound(error: unknown): boolean {
@@ -427,7 +439,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         inBranch = result === 'new';
       } catch (error) {
         const err = error as Error;
-        console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+        if (process.env.GITHUB_ACTIONS !== 'true') {
+          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+        } else if (err.message === MISSING_BRANCH_ERROR) {
+          console.log(NOT_A_PULL_REQUEST_WARNING);
+        } else {
+          console.log(commitFailedAnnotation(err.message));
+          process.exitCode = 1;
+        }
       }
     }
 
@@ -470,11 +489,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   if (options.changedOnly) {
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
-    const detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);
-    if (detectedChanges === null) {
-      console.log(chalk.yellow(`Alignment skipped: this PR has more than ${MAX_TOTAL_CHANGES.toLocaleString('en-US')} translation changes`));
-    }
-    targetChanges = detectedChanges ?? [];
+    targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
     const alignmentCandidates = collectAlignmentCandidates(targetChanges, sourceFiles, targetFilesByLocale, config, !!verbose);
 
     const filtered = filterByGitChanges(

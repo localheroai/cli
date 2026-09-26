@@ -15,3 +15,7 @@ export function detectCiContext(env: Env): CiContext {
     stepSummaryPath: env.GITHUB_STEP_SUMMARY || null
   };
 }
+
+export function escapeAnnotationData(text: string): string {
+  return text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
