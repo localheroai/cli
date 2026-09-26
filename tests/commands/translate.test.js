@@ -1427,16 +1427,17 @@ describe('translate command', () => {
       expect(process.exitCode).toBe(1);
     });
 
-    it('fails the run and says commits need a pull request run when there is no head branch', async () => {
+    it('warns without failing when there is no head branch, since only pull_request runs commit', async () => {
       gitUtils.autoCommitChanges.mockRejectedValue(new Error('Could not determine branch name from GITHUB_HEAD_REF'));
 
       await translate({}, createTranslateDeps());
 
-      expect(errorAnnotations()).toEqual([
-        '::error::Translations were not committed: Could not determine branch name from GITHUB_HEAD_REF. ' +
-        'Translations are only committed on pull_request runs. Run the workflow from a pull request, or pass --skip-commit.'
+      const warnings = mockConsole.log.mock.calls.map(call => String(call[0])).filter(line => line.startsWith('::warning::'));
+      expect(errorAnnotations()).toEqual([]);
+      expect(warnings).toEqual([
+        '::warning::Translations were not committed: this is not a pull request run. Only pull_request runs commit translations.'
       ]);
-      expect(process.exitCode).toBe(1);
+      expect(process.exitCode).not.toBe(1);
     });
 
     it('fails the run and points at the push permission when the push is rejected', async () => {

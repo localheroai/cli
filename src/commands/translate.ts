@@ -154,9 +154,9 @@ function pluralize(count: number, noun: string): string {
 }
 
 const COMMIT_FAILURE_FIXES: Record<string, string> = {
-  [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.',
-  [MISSING_BRANCH_ERROR]: 'Translations are only committed on pull_request runs. Run the workflow from a pull request, or pass --skip-commit.'
+  [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
 };
+const NOT_A_PULL_REQUEST_WARNING = '::warning::Translations were not committed: this is not a pull request run. Only pull_request runs commit translations.';
 const PUSH_PERMISSION_FIX = 'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.';
 
 function commitFailedAnnotation(reason: string): string {
@@ -439,11 +439,13 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         inBranch = result === 'new';
       } catch (error) {
         const err = error as Error;
-        if (process.env.GITHUB_ACTIONS === 'true') {
+        if (process.env.GITHUB_ACTIONS !== 'true') {
+          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+        } else if (err.message === MISSING_BRANCH_ERROR) {
+          console.log(NOT_A_PULL_REQUEST_WARNING);
+        } else {
           console.log(commitFailedAnnotation(err.message));
           process.exitCode = 1;
-        } else {
-          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
         }
       }
     }
