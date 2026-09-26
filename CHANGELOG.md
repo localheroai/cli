@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- When a pull request rewords a source text, `translate --changed-only` (and `ci`) now updates the existing translations of it in the same run and commits them together with any new translations. Localhero decides per language whether a translation needs to change. Translations that already fit are left alone, as are translations someone edited in the pull request. The aligned values are then sent to Localhero for review on the pull request. The run log shows per language how many translations were aligned, already fit or were skipped, with the reason for each skip. This works for YAML and JSON files, multi-language files included; PO files are not aligned. It runs only for projects that have alignment turned on in Localhero, and other projects see no change. `postTranslateCommand` also runs when a run only wrote aligned values.
+
 ### Fixed
 - With signed commits (`github.signedCommits: true`), a push to the branch while a run was in progress could be overwritten. The CLI committed its files on top of the newer push, so an edit in that push to one of the same translation files was silently reverted to the version the run started from. The CLI now checks what the newer commits changed. If they left the files it is about to commit alone (for example a code-only push), it commits on top of them as before. If they changed any of those files, or GitHub can't give a complete answer (a force-push, a very large push, an API error), it skips the commit and exits successfully. The notice says which case it was: a push that changed translation files starts a fresh run on its own; otherwise re-run the workflow. A sync from Localhero that is skipped this way is not marked as completed; sync again to commit it. The plain `git push` path is unchanged.
 
