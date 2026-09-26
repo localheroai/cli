@@ -36,7 +36,7 @@ import {
   type IdenticalFinding,
   type ConflictingKey
 } from '../utils/check-utils.js';
-import { detectCiContext, type CiContext, type Env } from '../utils/ci-context.js';
+import { detectCiContext, escapeAnnotationData, type CiContext, type Env } from '../utils/ci-context.js';
 import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js';
 import { baseFileSet, DUPLICATE_KEY_ERROR, type ChangeStatus, type FileSet } from '../utils/check-changes.js';
 import { buildStepSummary, plural, type ProblemCounts } from '../utils/check-summary.js';
@@ -785,10 +785,6 @@ function printFindings(con: CheckDependencies['console'], reports: LocaleReport[
     printList(con, `Not checked: no ${r.locale} file for`, r.missingFiles, (m) => m, all);
     printList(con, 'Identical to source (hint)', r.identical, (m) => `${m.key}: "${truncate(m.value)}"`, all);
   }
-}
-
-function escapeAnnotationData(text: string): string {
-  return text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
 }
 
 function escapeAnnotationProperty(text: string): string {

@@ -1354,4 +1354,129 @@ describe('translate command', () => {
       expect(logged.some(line => line.includes('Ignored'))).toBe(false);
     });
   });
+
+  describe('when the auto-commit fails', () => {
+    const originalGithubActions = process.env.GITHUB_ACTIONS;
+
+    function stubOneTranslatedKey() {
+      translationUtils.findMissingTranslationsByLocale.mockReturnValue({
+        missing: {
+          'fr:locales/en.json': {
+            locale: 'fr',
+            path: 'locales/en.json',
+            targetPath: 'locales/fr.json',
+            keys: { hello: { value: 'Hello', sourceKey: 'hello' } },
+            keyCount: 1
+          }
+        },
+        removed: []
+      });
+      translationUtils.batchKeysWithMissing.mockReturnValue({
+        batches: [{
+          sourceFilePath: 'locales/en.json',
+          sourceFile: { path: 'locales/en.json', format: 'json', content: 'test' },
+          localeEntries: ['fr:locales/en.json'],
+          locales: ['fr']
+        }],
+        errors: []
+      });
+      fileUtils.findTranslationFiles.mockResolvedValue({
+        sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+        targetFilesByLocale: { fr: [{ path: 'locales/fr.json', locale: 'fr' }] },
+        allFiles: [
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' }
+        ]
+      });
+      translationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-123', language: { code: 'fr' } }]
+      });
+      translationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: { data: { hello: 'Bonjour' } },
+        language: { code: 'fr' }
+      });
+    }
+
+    function errorAnnotations() {
+      return mockConsole.log.mock.calls.map(call => String(call[0])).filter(line => line.startsWith('::error::'));
+    }
+
+    beforeEach(() => {
+      process.env.GITHUB_ACTIONS = 'true';
+      stubOneTranslatedKey();
+    });
+
+    afterEach(() => {
+      if (originalGithubActions === undefined) {
+        delete process.env.GITHUB_ACTIONS;
+      } else {
+        process.env.GITHUB_ACTIONS = originalGithubActions;
+      }
+    });
+
+    it('fails the run and says how to pass GITHUB_TOKEN when it is not set', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new Error('GITHUB_TOKEN is not set'));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([
+        '::error::Translations were not committed: GITHUB_TOKEN is not set. ' +
+        'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
+      ]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails the run and says commits need a pull request run when there is no head branch', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new Error('Could not determine branch name from GITHUB_HEAD_REF'));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([
+        '::error::Translations were not committed: Could not determine branch name from GITHUB_HEAD_REF. ' +
+        'Translations are only committed on pull_request runs. Run the workflow from a pull request, or pass --skip-commit.'
+      ]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails the run and points at the push permission when the push is rejected', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new Error('Command failed: git push origin HEAD:feature\nremote: Permission denied'));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([
+        '::error::Translations were not committed: Command failed: git push origin HEAD:feature%0Aremote: Permission denied. ' +
+        'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.'
+      ]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it.each([['skipped'], ['no-changes']])('passes when the commit result is %s', async (commitResult) => {
+      gitUtils.autoCommitChanges.mockResolvedValue(commitResult);
+
+      await translate({}, createTranslateDeps());
+
+      expect(gitUtils.autoCommitChanges).toHaveBeenCalled();
+      expect(errorAnnotations()).toEqual([]);
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('passes under --skip-commit', async () => {
+      await translate({ skipCommit: true }, createTranslateDeps());
+
+      expect(gitUtils.autoCommitChanges).not.toHaveBeenCalled();
+      expect(process.exitCode).toBeUndefined();
+    });
+
+    it('only warns outside GitHub Actions', async () => {
+      delete process.env.GITHUB_ACTIONS;
+      gitUtils.autoCommitChanges.mockRejectedValue(new Error('GITHUB_TOKEN is not set'));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([]);
+      expect(mockConsole.warn.mock.calls.map(call => String(call[0])).join('\n')).toContain('Could not auto-commit changes: GITHUB_TOKEN is not set');
+      expect(process.exitCode).toBeUndefined();
+    });
+  });
 });

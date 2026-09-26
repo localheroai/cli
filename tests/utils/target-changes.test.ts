@@ -219,6 +219,24 @@ describe('detectTargetChanges — ingestion hardening', () => {
     expect(paired?.changes).toHaveLength(600);
   });
 
+  test('says the base branch was not found instead of blaming the cap', () => {
+    const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      mockExecSync.mockImplementation((cmd: any) => {
+        if (cmd === 'git rev-parse --git-dir') return '';
+        throw new Error('fatal: Needed a single revision');
+      });
+
+      const developConfig = { ...config, translationFiles: { ...config.translationFiles, baseBranch: 'develop' } };
+      expect(detectTargetChanges(sourceFiles, targetFilesByLocale, developConfig, false)).toBeNull();
+      const logged = spy.mock.calls.map(args => String(args[0])).join('\n');
+      expect(logged).toContain("Skipping translation ingestion and alignment: base branch 'develop' not found");
+      expect(logged).not.toContain('more than');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   test('cap suppression is reported without verbose', () => {
     const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -230,7 +248,7 @@ describe('detectTargetChanges — ingestion hardening', () => {
 
       expect(detectTargetChanges(sourceFiles, targetFilesByLocale, config, false)).toBeNull();
       const logged = spy.mock.calls.map(args => String(args[0])).join('\n');
-      expect(logged).toContain('more than 1000 changed values');
+      expect(logged).toContain('Skipping translation ingestion and alignment: more than 1000 changed values');
     } finally {
       spy.mockRestore();
     }

@@ -910,13 +910,13 @@ describe('githubService', () => {
     });
 
     const TRANSLATE_OVERLAP_NOTICE =
-      'Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.';
+      '::warning::Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.';
     const TRANSLATE_UNCERTAIN_NOTICE =
-      'Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.';
+      '::warning::Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.';
     const SYNC_OVERLAP_NOTICE =
-      'Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.';
+      '::warning::Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.';
     const SYNC_UNCERTAIN_NOTICE =
-      'Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.';
+      '::warning::Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.';
 
     const staleHead = (sha: string) =>
       new StaleHeadError(`Expected branch to point to "${sha}" but it did not. Pull and try again.`);
