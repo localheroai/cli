@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { glob, escape } from 'glob';
 import { findFirstExistingPath, findFirstGettextCatalogPath, getDirectoryContents, DirectoryContents } from './files.js';
 
 interface ProjectTypeConfig {
@@ -19,6 +20,8 @@ interface ProjectTypeConfig {
     sourceCodePaths?: string[];
   };
   commonPaths?: string[];
+  // Extractor configs whose `output:` names the locale directory exactly.
+  outputConfigFiles?: string[];
 }
 
 type ProjectTypes = Record<string, ProjectTypeConfig>;
@@ -62,7 +65,9 @@ export const PROJECT_TYPES: ProjectTypes = {
     ]
   },
   rails: {
-    directIndicators: ['config/application.rb', 'Gemfile'],
+    // Not Gemfile: React Native and other JS apps ship one for CocoaPods and fastlane.
+    // A Ruby project without config/application.rb is still found by the generic scan.
+    directIndicators: ['config/application.rb'],
     defaults: {
       translationPath: 'config/locales/',
       filePattern: '**/*.{yml,yaml}'
@@ -105,7 +110,6 @@ export const PROJECT_TYPES: ProjectTypes = {
     ]
   },
   nextjs: {
-    directIndicators: ['next.config.js', 'next.config.mjs'],
     packageCheck: {
       requires: ['next'],
       oneOf: ['next-i18next', 'next-translate']
@@ -137,7 +141,7 @@ export const PROJECT_TYPES: ProjectTypes = {
     ]
   },
   i18next: {
-    directIndicators: ['i18next.config.js', 'i18n.js', 'i18n/index.js'],
+    directIndicators: ['i18next.config.ts', 'i18next.config.js', 'i18n.js', 'i18n/index.js'],
     packageCheck: {
       requires: ['i18next']
     },
@@ -145,8 +149,20 @@ export const PROJECT_TYPES: ProjectTypes = {
       translationPath: 'public/locales/',
       filePattern: '**/*.json'
     },
+    outputConfigFiles: [
+      'i18next.config.ts',
+      'i18next.config.js',
+      'i18next.config.mjs',
+      'i18next-parser.config.js',
+      'i18next-parser.config.mjs',
+      'i18next-parser.config.cjs',
+      'i18next-parser.config.ts'
+    ],
     commonPaths: [
       'public/locales',
+      'app/i18n/locales',
+      'src/app/i18n/locales',
+      'src/i18n/locales',
       'src/locales',
       'locales',
       'src/i18n',
@@ -295,6 +311,35 @@ async function detectFramework(config: ProjectTypeConfig): Promise<boolean> {
   return false;
 }
 
+const OUTPUT_PATTERN = /\boutput\s*:\s*['"`]([^'"`]+)['"`]/;
+const OUTPUT_PLACEHOLDER = /\{\{|\$[A-Z]/;
+const COMMENTS = /\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm;
+const PATTERN_SCAN_IGNORE = ['**/node_modules/**', '**/.git/**', '**/vendor/**', '**/dist/**', '**/build/**'];
+
+// The directory before the first language or namespace placeholder in an
+// i18next-cli (`{{language}}`) or i18next-parser (`$LOCALE`) output template.
+function localeDirFromOutputTemplate(template: string): string | null {
+  const segments = template.replace(/^\.[\\/]/, '').split(/[\\/]/);
+  const firstDynamic = segments.findIndex(segment => OUTPUT_PLACEHOLDER.test(segment));
+  if (firstDynamic <= 0) return null;
+  return segments.slice(0, firstDynamic).join('/');
+}
+
+async function translationPathFromOutputConfig(configFiles: string[]): Promise<string | null> {
+  for (const file of configFiles) {
+    let content: string;
+    try {
+      content = await fs.readFile(file, 'utf8');
+    } catch {
+      continue;
+    }
+    const template = content.replace(COMMENTS, '').match(OUTPUT_PATTERN)?.[1];
+    const localeDir = template ? localeDirFromOutputTemplate(template) : null;
+    if (localeDir && await findFirstExistingPath([localeDir])) return localeDir;
+  }
+  return null;
+}
+
 export function buildFilePatternFromContents(contents: DirectoryContents): string {
   const formats: string[] = [];
   if (contents.jsonFiles.length > 0) formats.push('json');
@@ -310,12 +355,43 @@ export function buildFilePatternFromContents(contents: DirectoryContents): strin
   return `**/*.{${formats.join(',')}}`;
 }
 
+// The pattern for a directory the user chose over the detected one, read from the
+// files actually in it. Null when it holds no translation files to go by.
+export async function filePatternForDirectory(dir: string): Promise<string | null> {
+  const root = dir.replace(/\/+$/, '');
+  const files = await glob(`${escape(root)}/**/*.{json,yml,yaml,po,pot}`, { ignore: PATTERN_SCAN_IGNORE });
+  if (files.length === 0) return null;
+
+  const pattern = buildFilePatternFromContents({
+    files,
+    jsonFiles: files.filter(f => f.endsWith('.json')),
+    yamlFiles: files.filter(f => f.endsWith('.yml') || f.endsWith('.yaml')),
+    poFiles: files.filter(f => f.endsWith('.po') || f.endsWith('.pot'))
+  });
+  const hasPot = files.some(f => f.endsWith('.pot'));
+  return hasPot && pattern === '**/*.po' ? '**/*.{po,pot}' : pattern;
+}
+
 export async function detectProjectType(): Promise<ProjectDetectionResult> {
   for (const [type, config] of Object.entries(PROJECT_TYPES)) {
     if (!config.directIndicators?.length && !config.packageCheck) continue;
 
     const isFramework = await detectFramework(config);
     if (!isFramework) continue;
+
+    const configuredPath = config.outputConfigFiles
+      ? await translationPathFromOutputConfig(config.outputConfigFiles)
+      : null;
+    if (configuredPath) {
+      return {
+        type,
+        defaults: {
+          ...config.defaults,
+          translationPath: `${configuredPath}/`,
+          commonPaths: config.commonPaths
+        }
+      };
+    }
 
     if (config.commonPaths) {
       // For gettext projects the catalog check is authoritative: falling back to a
