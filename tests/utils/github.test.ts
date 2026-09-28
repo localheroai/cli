@@ -176,14 +176,19 @@ describe('githubService', () => {
       expect(fileContent).toContain('python manage.py makemessages --keep-pot --all');
     });
 
-    it('skips extraction on sync and dispatch runs', async () => {
+    it('skips extraction on sync runs and on our own translation commits', async () => {
       await createGitHubActionFile('/project', ['locale/**'], undefined, {
         extractor: 'django',
-        locales: ['sv']
+        locales: ['sv'],
+        pythonInstall: 'uv sync'
       });
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
-      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+      const conditions = fileContent.match(/^\s+if: .*$/gm) ?? [];
+      expect(conditions.length).toBe(3);
+      for (const condition of conditions) {
+        expect(condition.trim()).toBe("if: github.event_name == 'pull_request' && github.actor != 'localhero-ai[bot]'");
+      }
     });
 
     it('uses uv when the project has a uv lockfile', async () => {
@@ -248,7 +253,7 @@ describe('githubService', () => {
       expect(fileContent).toContain('uses: erlef/setup-beam@v1');
       expect(fileContent).toContain('mix deps.get');
       expect(fileContent).toContain('mix gettext.extract --merge');
-      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+      expect(fileContent).toContain("if: github.event_name == 'pull_request' && github.actor != 'localhero-ai[bot]'");
       expect(fileContent.indexOf('gettext.extract')).toBeLessThan(
         fileContent.indexOf('uses: localheroai/localhero-action@v1')
       );

@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+- The workflow `localhero init` generates for Django and Phoenix skips the extract step (and its setup) on Localhero's own translation commits. The follow-up run on those commits no longer spends time on `makemessages` or `mix gettext.extract` before the action skips itself.
+
 ## [0.0.74] - 2026-09-25
 
 ### Added
