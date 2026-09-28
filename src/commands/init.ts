@@ -10,7 +10,7 @@ import { login } from './login.js';
 import { importService, ImportResult } from '../utils/import-service.js';
 import { createGitHubActionFile, workflowExists, buildMakemessagesCommand, PHOENIX_ELIXIR_VERSION, PHOENIX_OTP_VERSION, DJANGO_PYTHON_VERSION } from '../utils/github.js';
 import { directoryExists, isValidLocale, stripPotCreationDate } from '../utils/files.js';
-import { PROJECT_TYPES, detectProjectType, type ProjectDetectionResult } from '../utils/project-detection.js';
+import { PROJECT_TYPES, detectProjectType, filePatternForDirectory, type ProjectDetectionResult } from '../utils/project-detection.js';
 import { ProjectConfig as BaseProjectConfig, CustomLocale } from '../types/index.js';
 import { verifyApiKey } from '../api/auth.js';
 import { Spinner } from '../utils/spinner.js';
@@ -784,7 +784,7 @@ async function collectInputsInteractive(
     hint: dirHint
   });
 
-  const filePattern = projectDefaults.defaults.filePattern;
+  const filePattern = await filePatternFor(translationPath, projectDefaults);
 
   const defaultIgnorePaths = projectDefaults.defaults.ignorePaths || [];
   const ignorePathsRaw = await promptService.input({
@@ -806,13 +806,21 @@ async function collectInputsInteractive(
   };
 }
 
+// A directory other than the detected one gets its pattern from the files in it,
+// so a wrong guess (YAML for a Rails-looking repo) is not saved alongside a JSON path.
+async function filePatternFor(translationPath: string | undefined, projectDefaults: ProjectDetectionResult): Promise<string> {
+  const { translationPath: detectedPath, filePattern } = projectDefaults.defaults;
+  if (!translationPath || normalizeTrailingSlash(translationPath) === detectedPath) return filePattern;
+  return (await filePatternForDirectory(translationPath)) ?? filePattern;
+}
+
 async function collectInputsFromFlags(
   options: InitOptions,
   projectDefaults: ProjectDetectionResult,
   projectService: { createProject: typeof createProject; listProjects: typeof listProjects },
   console: Console
 ): Promise<RawInitInputs> {
-  const filePattern = options.pattern ?? projectDefaults.defaults.filePattern;
+  const filePattern = options.pattern ?? await filePatternFor(options.path, projectDefaults);
   const ignorePaths = options.ignore !== undefined
     ? parseCsv(options.ignore)
     : (projectDefaults.defaults.ignorePaths ?? []);

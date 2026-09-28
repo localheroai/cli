@@ -163,6 +163,47 @@ describe('init command', () => {
     expect(allConsoleOutput).toContain('https://localhero.ai/organizations/123');
   });
 
+  it('derives the file pattern from the directory typed instead of the detected default', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const originalCwd = process.cwd();
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'init-pattern-'));
+    mkdirSync(path.join(dir, 'config/locales'), { recursive: true });
+    writeFileSync(path.join(dir, 'config/application.rb'), '');
+    writeFileSync(path.join(dir, 'config/locales/en.yml'), 'en:\n  hi: Hi\n');
+    mkdirSync(path.join(dir, 'frontend/locales/en'), { recursive: true });
+    writeFileSync(path.join(dir, 'frontend/locales/en/common.json'), '{}');
+    process.chdir(dir);
+
+    try {
+      configUtils.getProjectConfig.mockResolvedValue(null);
+      authUtils.checkAuth.mockResolvedValue(true);
+      projectApi.listProjects.mockResolvedValue([]);
+      promptService.selectProject.mockResolvedValue({ choice: 'new' });
+      promptService.input
+        .mockResolvedValueOnce('en')
+        .mockResolvedValueOnce('fr')
+        .mockResolvedValueOnce('test-project')
+        .mockResolvedValueOnce('frontend/locales/')
+        .mockResolvedValueOnce('');
+      projectApi.createProject.mockResolvedValue({ id: 'proj_123', name: 'test-project', url: 'https://localhero.ai/x' });
+      promptService.confirm.mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+
+      await init(createInitDeps({ basePath: dir }));
+
+      expect(configUtils.saveProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          translationFiles: expect.objectContaining({ paths: ['frontend/locales/'], pattern: '**/*.json' })
+        }),
+        expect.any(String)
+      );
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('handles project creation failure gracefully', async () => {
     configUtils.getProjectConfig.mockResolvedValue(null);
     authUtils.checkAuth.mockResolvedValue(true);
