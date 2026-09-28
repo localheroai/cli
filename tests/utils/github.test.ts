@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { parse } from 'yaml';
 import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists, fetchActionToken } from '../../src/utils/github.js';
 import { GitHubGraphQLError, StaleHeadError } from '../../src/utils/github-graphql.js';
 
@@ -121,6 +122,16 @@ describe('githubService', () => {
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');
     });
 
+    it('checks out full history without persisting GITHUB_TOKEN so the push uses the App token', async () => {
+      await createGitHubActionFile('/project', ['locales/**']);
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+      const steps = parse(fileContent).jobs.translate.steps as Array<{ uses?: string; with?: Record<string, unknown> }>;
+      const checkout = steps.find((step) => step.uses?.startsWith('actions/checkout@'));
+
+      expect(checkout?.with).toMatchObject({ 'fetch-depth': 0, 'persist-credentials': false });
+    });
+
     it('handles directory paths without patterns correctly', async () => {
       await createGitHubActionFile('/project', ['locales', 'translations/', 'src/i18n']);
 
@@ -177,14 +188,19 @@ describe('githubService', () => {
       expect(fileContent).toContain('python manage.py makemessages --keep-pot --all');
     });
 
-    it('skips extraction on sync and dispatch runs', async () => {
+    it('skips extraction on sync runs and on our own translation commits', async () => {
       await createGitHubActionFile('/project', ['locale/**'], undefined, {
         extractor: 'django',
-        locales: ['sv']
+        locales: ['sv'],
+        pythonInstall: 'uv sync'
       });
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
-      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+      const conditions = fileContent.match(/^\s+if: .*$/gm) ?? [];
+      expect(conditions.length).toBe(3);
+      for (const condition of conditions) {
+        expect(condition.trim()).toBe("if: github.event_name == 'pull_request' && github.actor != 'localhero-ai[bot]'");
+      }
     });
 
     it('uses uv when the project has a uv lockfile', async () => {
@@ -249,7 +265,7 @@ describe('githubService', () => {
       expect(fileContent).toContain('uses: erlef/setup-beam@v1');
       expect(fileContent).toContain('mix deps.get');
       expect(fileContent).toContain('mix gettext.extract --merge');
-      expect(fileContent).toContain("if: github.event_name == 'pull_request'");
+      expect(fileContent).toContain("if: github.event_name == 'pull_request' && github.actor != 'localhero-ai[bot]'");
       expect(fileContent.indexOf('gettext.extract')).toBeLessThan(
         fileContent.indexOf('uses: localheroai/localhero-action@v1')
       );

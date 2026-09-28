@@ -139,21 +139,23 @@ export const PHOENIX_OTP_VERSION = '28';
 // workflow has to extract them first. Without this a PR that only touches source
 // code runs green and translates nothing. Extraction is skipped on sync and dispatch
 // runs, where the Action writes reviewed translations back and extraction would
-// fight it.
+// fight it, and on our own translation commits, which need none.
+const EXTRACT_CONDITION = "github.event_name == 'pull_request' && github.actor != 'localhero-ai[bot]'";
+
 // actions/setup-python provides python and pip, nothing else, so a project using
 // uv, poetry or pipenv needs that tool installed before the install command runs.
 const PYTHON_TOOL_SETUP: Record<string, string> = {
   uv: `      - uses: astral-sh/setup-uv@v5
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
 
 `,
   poetry: `      - name: Install poetry
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
         run: pipx install poetry
 
 `,
   pipenv: `      - name: Install pipenv
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
         run: pipx install pipenv
 
 `
@@ -166,12 +168,12 @@ function buildPythonToolSetup(pythonInstall: string): string {
 
 function buildDjangoExtractStep(locales?: string[], pythonInstall: string = PIP_INSTALL): string {
   return `      - uses: actions/setup-python@v5
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
         with:
           python-version: "${DJANGO_PYTHON_VERSION}"
 
 ${buildPythonToolSetup(pythonInstall)}      - name: Extract messages
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
         run: |
           sudo apt-get install -y -qq gettext
           ${pythonInstall}
@@ -191,13 +193,13 @@ function buildPhoenixExtractStep(workingDirectory?: string): string {
     ? `\n        working-directory: ${workingDirectory}`
     : '';
   return `      - uses: erlef/setup-beam@v1
-        if: github.event_name == 'pull_request'
+        if: ${EXTRACT_CONDITION}
         with:
           elixir-version: "${PHOENIX_ELIXIR_VERSION}"
           otp-version: "${PHOENIX_OTP_VERSION}"
 
       - name: Extract messages
-        if: github.event_name == 'pull_request'${workingDirectoryLine}
+        if: ${EXTRACT_CONDITION}${workingDirectoryLine}
         run: |
           mix deps.get
           mix gettext.extract --merge
@@ -315,6 +317,7 @@ jobs:
         with:
           ref: \${{ github.event.client_payload.branch || github.head_ref || github.ref_name }}
           fetch-depth: 0
+          persist-credentials: false
 
 ${buildExtractStep(options)}      - name: Translate
         uses: localheroai/localhero-action@v1
