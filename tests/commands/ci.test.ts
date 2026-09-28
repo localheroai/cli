@@ -560,6 +560,23 @@ describe('ci command', () => {
       expect(deps.syncApi.completeSyncUpdate).not.toHaveBeenCalled();
     });
 
+    it('fails and leaves the sync update open when the commit fails', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      mockEnv.LOCALHERO_SYNC_VERSION = '3';
+      const deps = buildSyncDeps();
+      deps.githubUtils.autoCommitSyncChanges.mockRejectedValue(new Error('GITHUB_TOKEN is not set'));
+      const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+      try {
+        await ci({}, deps);
+
+        expect(exit).toHaveBeenCalledWith(1);
+        expect(deps.syncApi.completeSyncUpdate).not.toHaveBeenCalled();
+      } finally {
+        exit.mockRestore();
+      }
+    });
+
     it('maps file_references to metadata.source_references for .po files', async () => {
       mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
       mockConfigUtils.getValidProjectConfig = jest.fn().mockResolvedValue({

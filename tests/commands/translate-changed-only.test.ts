@@ -306,6 +306,7 @@ describe('translate --changed-only aligning reworded source texts', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    process.exitCode = undefined;
     if (originalGithubActions === undefined) {
       delete process.env.GITHUB_ACTIONS;
     } else {
@@ -337,13 +338,13 @@ describe('translate --changed-only aligning reworded source texts', () => {
     });
   }
 
-  it('says alignment was skipped when the PR has too many changes to diff', async () => {
+  it('carries on without alignment candidates when change detection returns null', async () => {
     mockDetectTargetChanges.mockReturnValue(null);
 
     await translate({ changedOnly: true }, deps);
 
     expect(mockCollectAlignmentCandidates.mock.calls[0][0]).toEqual([]);
-    expect(loggedLines()).toContain('Alignment skipped: this PR has more than 1,000 translation changes');
+    expect(loggedLines()).not.toContain('more than 1,000');
     expect(loggedLines()).toContain('No changed keys need translation');
   });
 
@@ -505,13 +506,14 @@ describe('translate --changed-only aligning reworded source texts', () => {
     expect(alignedImports()).toHaveLength(0);
   });
 
-  it('does not stage aligned values when the commit fails', async () => {
+  it('fails the run and does not stage aligned values when the commit fails', async () => {
     deps.gitUtils.autoCommitChanges.mockRejectedValue(new Error('push rejected'));
 
     await translate({ changedOnly: true }, deps);
 
     expect(alignedImports()).toHaveLength(0);
-    expect(mockConsole.warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('push rejected');
+    expect(loggedLines()).toContain('::error::Translations were not committed: push rejected.');
+    expect(process.exitCode).toBe(1);
   });
 
   it('stages aligned values right after writing under --skip-commit', async () => {

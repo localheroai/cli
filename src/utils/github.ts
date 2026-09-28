@@ -14,6 +14,8 @@ import {
 } from './github-graphql.js';
 
 export type CommitResult = 'no-changes' | 'new' | 'skipped';
+export const MISSING_TOKEN_ERROR = 'GITHUB_TOKEN is not set';
+export const MISSING_BRANCH_ERROR = 'Could not determine branch name from GITHUB_HEAD_REF';
 type SkippedCommit = 'skipped-overlap' | 'skipped-uncertain';
 type SignedCommitResult = Exclude<CommitResult, 'skipped'> | SkippedCommit;
 
@@ -353,7 +355,7 @@ ${buildExtractStep(options)}      - name: Translate
   getBranchName(): string {
     const branchName = this.deps.env.GITHUB_HEAD_REF;
     if (!branchName) {
-      throw new Error('Could not determine branch name from GITHUB_HEAD_REF');
+      throw new Error(MISSING_BRANCH_ERROR);
     }
     return branchName;
   },
@@ -474,7 +476,7 @@ ${buildExtractStep(options)}      - name: Translate
     const finalToken = appToken || env.GITHUB_TOKEN;
 
     if (!finalToken) {
-      throw new Error('GITHUB_TOKEN is not set');
+      throw new Error(MISSING_TOKEN_ERROR);
     }
 
     if (appToken) {
@@ -540,7 +542,7 @@ ${buildExtractStep(options)}      - name: Translate
           log.log('✓ Signed commit created and pushed to GitHub\n');
           return result;
         }
-        log.log(SYNC_SKIP_NOTICES[result]);
+        log.log(`::warning::${SYNC_SKIP_NOTICES[result]}`);
         return 'skipped';
       }
 
@@ -657,7 +659,7 @@ ${buildExtractStep(options)}      - name: Translate
           log.log('Signed commit pushed to GitHub.');
           return result;
         }
-        log.log(TRANSLATE_SKIP_NOTICES[result]);
+        log.log(`::warning::${TRANSLATE_SKIP_NOTICES[result]}`);
         return 'skipped';
       }
 
