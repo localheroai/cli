@@ -23,7 +23,7 @@ import {
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
 import { autoCommitChanges, buildMakemessagesCommand } from '../utils/github.js';
-import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
+import { detectTargetChanges, resetUnreadableFiles, getUnreadableFiles, type TargetChangeFile } from '../utils/target-changes.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
@@ -398,6 +398,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   let removedManifest: Record<string, any> | null = null;
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
+    resetUnreadableFiles();
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
     targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
@@ -416,7 +417,19 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           await sendFinalize(manifest, jobGroupId, removedManifest);
         }
         await sendPullRequestImport(targetChanges, jobGroupId);
-        console.log(chalk.green('✓ No changed keys need translation'));
+
+        // Reporting success here while files went unread is how a run that
+        // could not see a single locale file still went green (#779).
+        const unreadable = getUnreadableFiles();
+        if (unreadable.length > 0) {
+          console.error(chalk.red(`\n\u2716 Could not read ${unreadable.length} translation file${unreadable.length === 1 ? '' : 's'}:\n`));
+          unreadable.forEach(file => console.error(chalk.yellow(`  ${file}`)));
+          console.error(chalk.yellow('\nNothing was translated. Check that the paths in localhero.json are correct relative to that file.\n'));
+          process.exitCode = 1;
+          return;
+        }
+
+        console.log(chalk.green('\u2713 No changed keys need translation'));
         return;
       }
       missingByLocale = filtered;

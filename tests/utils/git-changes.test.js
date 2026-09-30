@@ -45,6 +45,14 @@ function setupGitMock({
       return '';
     }
 
+    // Deleted-file paths arrive repo-root-relative and get trimmed back to the
+    // working directory. These tests run at the repository root, so the prefix
+    // is empty and paths pass through unchanged.
+    if (cmd === 'git rev-parse --show-toplevel') {
+      if (!inRepo) throw new Error('not a git repository');
+      return `${process.cwd()}\n`;
+    }
+
     if (cmd.includes('git rev-parse --verify')) {
       if (!branchExists) throw new Error('branch not found');
       return '';
@@ -63,8 +71,12 @@ function setupGitMock({
       if (throwOnShow) throw new Error('File does not exist in base branch');
       if (showByPath) {
         const match = cmd.match(/git show [^:]+:"([^"]+)"/);
-        if (match && Object.prototype.hasOwnProperty.call(showByPath, match[1])) {
-          const value = showByPath[match[1]];
+        // Paths are passed to git as "./x" so that git resolves them against the
+        // working directory rather than the repository root. Git treats "./x"
+        // and "x" as the same path; the fixture keys are written without it.
+        const shown = match && match[1].replace(/^\.\//, '');
+        if (shown && Object.prototype.hasOwnProperty.call(showByPath, shown)) {
+          const value = showByPath[shown];
           if (value === null) throw new Error('File does not exist in base branch');
           return value;
         }
