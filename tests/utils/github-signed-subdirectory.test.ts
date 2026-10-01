@@ -60,6 +60,10 @@ describe('signed commits from a subdirectory', () => {
 
     // A monorepo runs the CLI from the app directory, as a matrix job does.
     process.chdir(nodePath.join(repo, 'apps', 'portal'));
+
+    // After the repo and cwd exist: wire() captures neither, but a test that
+    // re-wires with different mocks calls it again itself.
+    wire();
   });
 
   afterEach(() => {
@@ -161,6 +165,33 @@ describe('signed commits from a subdirectory', () => {
     rmSync(outside, { force: true });
   });
 
+  // A path that does not exist used to claim its destination before the
+  // existence check, so the real file mapping to the same place was skipped and
+  // silently left out of the commit.
+  it('still sends the file when an earlier path maps to it but does not exist', async () => {
+    writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');
+
+    await githubService.apiCommitAndPush({
+      branchName: 'feature',
+      filePaths: ['missing/../public/locales/de.json', 'public/locales/de.json'],
+      message: 'Update translations'
+    });
+
+    const sent = createSignedCommit.mock.calls[0][0];
+    expect(sent.fileChanges.additions).toHaveLength(1);
+    expect(sent.fileChanges.additions[0].path).toBe('apps/portal/public/locales/de.json');
+  });
+
+  it('refuses a drive-qualified path, which is not absolute but is not ours either', async () => {
+    await expect(
+      githubService.apiCommitAndPush({
+        branchName: 'feature',
+        filePaths: ['C:locales/de.json'],
+        message: 'Update translations'
+      })
+    ).rejects.toThrow(/outside the repository/i);
+  });
+
   it('sends one addition when the same file arrives spelled two ways', async () => {
     writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');
 
@@ -174,5 +205,4 @@ describe('signed commits from a subdirectory', () => {
     expect(sent.fileChanges.additions).toHaveLength(1);
   });
 
-  beforeEach(() => wire());
 });

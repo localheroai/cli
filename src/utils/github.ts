@@ -858,7 +858,9 @@ ${buildExtractStep(options)}      - name: Translate
     // The real path module, not this.deps.path: these are pure string
     // operations with nothing to stub, and injecting them would make every
     // caller's test mock responsible for knowing about posix normalisation.
-    if (path.isAbsolute(filePath)) {
+    // `C:foo` is drive-relative, not absolute, so isAbsolute misses it: it would
+    // read against drive C's current directory and send `apps/portal/C:foo`.
+    if (path.isAbsolute(filePath) || /^[A-Za-z]:/.test(filePath)) {
       throw new Error(`${filePath} is outside the repository: expected a path relative to localhero.json`);
     }
 
@@ -882,12 +884,15 @@ ${buildExtractStep(options)}      - name: Translate
     for (const filePath of filePaths) {
       const repoPath = this.toRepositoryPath(filePath, prefix);
       if (seen.has(repoPath)) continue;
-      seen.add(repoPath);
 
       // Read from where the file actually is; send where the API expects it.
+      // The destination is claimed only once a file has really been read: a
+      // path that does not exist must not reserve a destination and crowd out
+      // the file that does, which silently drops it from the commit.
       if (!fs.existsSync(filePath)) continue;
 
       const buffer = await fs.readFile(filePath);
+      seen.add(repoPath);
       additions.push({
         path: repoPath,
         contents: Buffer.from(buffer).toString('base64')
