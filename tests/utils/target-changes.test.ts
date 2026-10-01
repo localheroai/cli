@@ -502,4 +502,5 @@ describe('detectTargetChanges — source pass', () => {
     const result = detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
     expect(result).toBeNull();
   });
+
 });

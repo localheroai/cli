@@ -1,10 +1,12 @@
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
+import nodePath from 'path';
 import chalk from 'chalk';
 import type { TranslationFile, ProjectConfig, KeyIdentifier } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations, extractLocaleFromPath } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
+import { recordUnreadableFile } from './unreadable-files.js';
 
 type FileWithPath = { path: string };
 
@@ -37,7 +39,7 @@ export function hasFileChanged(file: FileWithPath, baseBranch: string): boolean 
     if (!resolvedRef) {
       return true;
     }
-    const sanitizedPath = sanitizeGitPath(file.path);
+    const sanitizedPath = gitShowPath(file.path);
     const oldContent = execSync(`git show ${resolvedRef}:"${sanitizedPath}"`, {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
@@ -314,6 +316,26 @@ function sanitizeGitPath(path: string): string {
 }
 
 /**
+ * Path for a `git show <ref>:<path>` argument.
+ *
+ * Git resolves that path from the repository root, while every path the CLI
+ * holds is relative to localhero.json, i.e. to the working directory. In a
+ * monorepo the two differ, git finds nothing, and the run skips every file
+ * while still reporting success (#779). A leading "./" makes git resolve
+ * against the working directory instead.
+ */
+function gitShowPath(filePath: string): string {
+  const relative = nodePath.isAbsolute(filePath)
+    ? nodePath.relative(process.cwd(), filePath).split(nodePath.sep).join('/')
+    : filePath;
+  const sanitized = sanitizeGitPath(relative);
+  return sanitized.startsWith('./') || sanitized.startsWith('../')
+    ? sanitized
+    : `./${sanitized}`;
+}
+
+
+/**
  * Check if a branch exists (local or remote)
  * Tries multiple resolution strategies to handle various git scenarios
  */
@@ -399,7 +421,7 @@ export function diffFileKeys(
   resolvedRef: string,
   verbose: boolean
 ): FileDiff | null {
-  const sanitizedPath = sanitizeGitPath(file.path);
+  const sanitizedPath = gitShowPath(file.path);
   const isPo = file.format === 'po' || file.format === 'pot';
 
   let oldFlat: Record<string, any> = {};
@@ -509,6 +531,7 @@ function getChangedKeys(
         }
       }
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping ${file.path}: ${err.message}`));
@@ -590,6 +613,7 @@ export function diffSourceFilesPerFile(
         result.set(file.path, { added, removed });
       }
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping ${file.path} from manifest: ${err.message}`));
@@ -614,6 +638,7 @@ export function diffSourceFilesPerFile(
 
       result.set(file.path, { added: [], removed });
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping deleted ${file.path}: ${err.message}`));
@@ -625,7 +650,7 @@ export function diffSourceFilesPerFile(
 }
 
 function readOldFlat(file: TranslationFile, resolvedRef: string, verbose: boolean): Record<string, any> | null {
-  const sanitizedPath = sanitizeGitPath(file.path);
+  const sanitizedPath = gitShowPath(file.path);
   const isPo = file.format === 'po' || file.format === 'pot';
 
   try {
@@ -668,7 +693,11 @@ export function enumerateDeletedSourceFiles(
 
   let deletedPaths: string[] = [];
   try {
-    const out = execSync(`git diff --diff-filter=D --name-only ${resolvedRef}..HEAD`, {
+    // --relative makes git print paths relative to the working directory and
+    // drop anything outside it, which is what the configured paths are relative
+    // to. Without it a monorepo compared repo-root-relative output against
+    // cwd-relative config and silently matched nothing (#779).
+    const out = execSync(`git diff --diff-filter=D --name-only --relative ${resolvedRef}..HEAD`, {
       encoding: 'utf-8',
       maxBuffer: 10 * 1024 * 1024,
       stdio: ['pipe', 'pipe', 'ignore']
@@ -715,7 +744,7 @@ export function enumerateDeletedSourceFiles(
     if (multiLanguageEnabled) {
       try {
         const oldContent = execSync(
-          `git show ${resolvedRef}:"${sanitizeGitPath(deletedPath)}"`,
+          `git show ${resolvedRef}:"${gitShowPath(deletedPath)}"`,
           { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'] }
         );
         const parsed = parseFile(oldContent, format, deletedPath);

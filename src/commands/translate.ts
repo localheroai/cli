@@ -25,6 +25,7 @@ import {
 import { autoCommitChanges, buildMakemessagesCommand, MISSING_BRANCH_ERROR, MISSING_TOKEN_ERROR, type CommitResult } from '../utils/github.js';
 import { escapeAnnotationData } from '../utils/ci-context.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
+import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
@@ -162,6 +163,17 @@ const PUSH_PERMISSION_FIX = 'Check that the workflow grants `permissions: conten
 function commitFailedAnnotation(reason: string): string {
   const fix = COMMIT_FAILURE_FIXES[reason] ?? PUSH_PERMISSION_FIX;
   return `::error::${escapeAnnotationData(`Translations were not committed: ${reason}. ${fix}`)}`;
+}
+
+/**
+ * A file we were configured to read but could not is a failure, not a note.
+ * Reporting success over it is how a run that saw none of its files still
+ * went green (#779).
+ */
+function reportUnreadableFiles(unreadable: string[]): void {
+  console.error(chalk.red(`\n\u2716 Could not read ${pluralize(unreadable.length, 'translation file')}:\n`));
+  unreadable.forEach(file => console.error(chalk.yellow(`  ${file}`)));
+  console.error(chalk.yellow('\nNothing was sent for translation. Check that the paths in localhero.json resolve from the directory holding that file.\n'));
 }
 
 function isProjectNotFound(error: unknown): boolean {
@@ -487,6 +499,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   let removedManifest: Record<string, any> | null = null;
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
+    resetUnreadableFiles();
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
     targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
@@ -498,6 +511,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       config,
       !!verbose
     );
+
+    // Before anything is sent: a run that could not read its files knows only
+    // part of the story, and finalizing on a partial manifest would record that
+    // partial view as the truth (#779).
+    const unreadable = getUnreadableFiles();
+    if (unreadable.length > 0) {
+      reportUnreadableFiles(unreadable);
+      process.exitCode = 1;
+      return;
+    }
 
     if (filtered !== null) {
       alignment = await alignRewordedSourceTexts(alignmentCandidates, config);
