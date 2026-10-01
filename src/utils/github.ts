@@ -617,7 +617,10 @@ ${buildExtractStep(options)}      - name: Translate
   /**
    * Enumerate files in the working tree that differ from HEAD. Used by the
    * signed-commits path to know which files to send to the GraphQL API.
-   * Returns repo-relative paths.
+   *
+   * Returns paths relative to the WORKING DIRECTORY, not the repository root:
+   * `git ls-files` prints them that way unless --full-name is passed. The
+   * commit API wants repository paths, which is readFilesAsAdditions's job.
    */
   listChangedFiles(filesPath?: string): string[] {
     const { exec } = this.deps;
@@ -822,20 +825,95 @@ ${buildExtractStep(options)}      - name: Translate
     );
   },
 
+  /**
+   * Where the working directory sits inside the repository, "" at the root and
+   * "apps/portal/" below it. --show-prefix rather than --show-toplevel plus a
+   * relative(): it is already forward-slashed on every platform and immune to
+   * the symlinked-cwd question.
+   *
+   * A git failure propagates. Falling back to "" would send a subdirectory's
+   * files to the repository root, which is the bug this exists to prevent.
+   */
+  repositoryPrefix(): string {
+    const { exec } = this.deps;
+    // Only the trailing newline (\r\n on a Windows runner): a directory name may
+    // legitimately begin with whitespace, and trim() would corrupt it.
+    return exec('git rev-parse --show-prefix', { stdio: 'pipe' })
+      .toString()
+      .replace(/\r?\n$/, '');
+  },
+
+  /**
+   * A path as GitHub's commit API wants it: relative to the repository root.
+   *
+   * Everything else in the CLI speaks working-directory paths, because that is
+   * what localhero.json's paths are relative to. createCommitOnBranch resolves
+   * additions[].path from the repository root instead, so a run from a
+   * subdirectory wrote its files to the wrong place and reported success (#791).
+   *
+   * Absolutes are resolved before prefixing, never after: "apps/portal/" plus
+   * "/tmp/x" normalises to "apps/portal/tmp/x", which is neither absolute nor
+   * escaping, so a check that ran afterwards would pass it and upload one
+   * file's bytes to an unrelated path.
+   */
+  toRepositoryPath(filePath: string, prefix: string): string {
+    // The real path module, not this.deps.path: these are pure string
+    // operations with nothing to stub, and injecting them would make every
+    // caller's test mock responsible for knowing about posix normalisation.
+    // An absolute path under the working directory is legitimate: the sync path
+    // produces them (commands/ci.ts resolves each file and keeps the ones that
+    // do not escape cwd). Relativise rather than reject, so the error below is
+    // reserved for paths that genuinely escape.
+    let local = filePath;
+    if (path.isAbsolute(filePath)) {
+      local = path.relative(process.cwd(), filePath);
+      // relative() can hand back another absolute path, so the result is not
+      // relative just because the input was.
+      if (path.isAbsolute(local)) {
+        throw new Error(`${filePath} is outside the repository`);
+      }
+    }
+
+    const repoPath = path.posix.normalize(`${prefix}${local.split(path.sep).join('/')}`);
+
+    if (repoPath === '..' || repoPath.startsWith('../')) {
+      throw new Error(`${filePath} is outside the repository`);
+    }
+
+    // '', '.', './' and anything ending in '..' all resolve to the directory
+    // itself rather than naming a file. node's normalize keeps a trailing slash,
+    // so both spellings have to be checked; left alone they pass existsSync and
+    // die in readFile with a bare EISDIR.
+    const directory = prefix === '' ? '.' : prefix.replace(/\/$/, '');
+    if (repoPath === directory || repoPath === `${directory}/` || repoPath.endsWith('/')) {
+      throw new Error(`${filePath} is a directory, not a file to commit`);
+    }
+
+    return repoPath;
+  },
+
   async readFilesAsAdditions(filePaths: string[]): Promise<{ path: string; contents: string }[]> {
     const { fs } = this.deps;
+    const prefix = this.repositoryPrefix();
+    // Keyed on the destination: "x" and "./x" are different strings that name
+    // the same file, and would otherwise be sent as two additions for one path.
     const seen = new Set<string>();
     const additions: { path: string; contents: string }[] = [];
 
     for (const filePath of filePaths) {
-      if (seen.has(filePath)) continue;
-      seen.add(filePath);
+      const repoPath = this.toRepositoryPath(filePath, prefix);
+      if (seen.has(repoPath)) continue;
 
+      // Read from where the file actually is; send where the API expects it.
+      // The destination is claimed only once a file has really been read: a
+      // path that does not exist must not reserve a destination and crowd out
+      // the file that does, which silently drops it from the commit.
       if (!fs.existsSync(filePath)) continue;
 
       const buffer = await fs.readFile(filePath);
+      seen.add(repoPath);
       additions.push({
-        path: filePath,
+        path: repoPath,
         contents: Buffer.from(buffer).toString('base64')
       });
     }
