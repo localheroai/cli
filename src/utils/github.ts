@@ -617,7 +617,10 @@ ${buildExtractStep(options)}      - name: Translate
   /**
    * Enumerate files in the working tree that differ from HEAD. Used by the
    * signed-commits path to know which files to send to the GraphQL API.
-   * Returns repo-relative paths.
+   *
+   * Returns paths relative to the WORKING DIRECTORY, not the repository root:
+   * `git ls-files` prints them that way unless --full-name is passed. The
+   * commit API wants repository paths, which is readFilesAsAdditions's job.
    */
   listChangedFiles(filesPath?: string): string[] {
     const { exec } = this.deps;
@@ -822,20 +825,71 @@ ${buildExtractStep(options)}      - name: Translate
     );
   },
 
+  /**
+   * Where the working directory sits inside the repository, "" at the root and
+   * "apps/portal/" below it. --show-prefix rather than --show-toplevel plus a
+   * relative(): it is already forward-slashed on every platform and immune to
+   * the symlinked-cwd question.
+   *
+   * A git failure propagates. Falling back to "" would send a subdirectory's
+   * files to the repository root, which is the bug this exists to prevent.
+   */
+  repositoryPrefix(): string {
+    const { exec } = this.deps;
+    // Only the trailing newline: a directory name may legitimately start with
+    // whitespace, and trim() would corrupt it.
+    return exec('git rev-parse --show-prefix', { stdio: 'pipe' }).toString().replace(/\n$/, '');
+  },
+
+  /**
+   * A path as GitHub's commit API wants it: relative to the repository root.
+   *
+   * Everything else in the CLI speaks working-directory paths, because that is
+   * what localhero.json's paths are relative to. createCommitOnBranch resolves
+   * additions[].path from the repository root instead, so a run from a
+   * subdirectory wrote its files to the wrong place and reported success (#791).
+   *
+   * Absolutes are rejected before prefixing, not after: "apps/portal/" plus
+   * "/tmp/x" normalises to "apps/portal/tmp/x", which is neither absolute nor
+   * escaping, so a check that ran afterwards would pass it and upload one
+   * file's bytes to an unrelated path.
+   */
+  toRepositoryPath(filePath: string, prefix: string): string {
+    // The real path module, not this.deps.path: these are pure string
+    // operations with nothing to stub, and injecting them would make every
+    // caller's test mock responsible for knowing about posix normalisation.
+    if (path.isAbsolute(filePath)) {
+      throw new Error(`${filePath} is outside the repository: expected a path relative to localhero.json`);
+    }
+
+    const repoPath = path.posix.normalize(`${prefix}${filePath.split(path.sep).join('/')}`);
+    // normalize('') is '.', never '', so the empty case is covered by this.
+    if (repoPath === '.' || repoPath === '..' || repoPath.startsWith('../')) {
+      throw new Error(`${filePath} is outside the repository`);
+    }
+
+    return repoPath;
+  },
+
   async readFilesAsAdditions(filePaths: string[]): Promise<{ path: string; contents: string }[]> {
     const { fs } = this.deps;
+    const prefix = this.repositoryPrefix();
+    // Keyed on the destination: "x" and "./x" are different strings that name
+    // the same file, and would otherwise be sent as two additions for one path.
     const seen = new Set<string>();
     const additions: { path: string; contents: string }[] = [];
 
     for (const filePath of filePaths) {
-      if (seen.has(filePath)) continue;
-      seen.add(filePath);
+      const repoPath = this.toRepositoryPath(filePath, prefix);
+      if (seen.has(repoPath)) continue;
+      seen.add(repoPath);
 
+      // Read from where the file actually is; send where the API expects it.
       if (!fs.existsSync(filePath)) continue;
 
       const buffer = await fs.readFile(filePath);
       additions.push({
-        path: filePath,
+        path: repoPath,
         contents: Buffer.from(buffer).toString('base64')
       });
     }
