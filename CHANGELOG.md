@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.75] - 2026-10-01
+
 ### Added
 - When a pull request rewords a source text, `translate --changed-only` (and `ci`) now updates the existing translations of it in the same run and commits them together with any new translations. Localhero decides per language whether a translation needs to change. Translations that already fit are left alone, as are translations someone edited in the pull request. The aligned values are then sent to Localhero for review on the pull request. The run log shows per language how many translations were aligned, already fit or were skipped, with the reason for each skip. This works for YAML and JSON files, multi-language files included; PO files are not aligned. It runs only for projects that have alignment turned on in Localhero, and other projects see no change. `postTranslateCommand` also runs when a run only wrote aligned values.
 
@@ -12,6 +14,7 @@ All notable changes to this project will be documented in this file.
 - The workflow `localhero init` generates checks out with `persist-credentials: false`. With the Localhero GitHub App installed, translation commits are then pushed as the App, so your other workflows run on them and the action skips its own follow-up run. Without the App nothing changes.
 
 ### Fixed
+- With signed commits (`github.signedCommits: true`), a project whose `localhero.json` is not at the repository root committed its files to the wrong path and reported success. GitHub's commit API resolves paths from the repository root while the config's paths are relative to the config file, so in a monorepo the translations landed in a parallel tree at the root and the real files were never updated. The same mismatch silently disabled the protection against overwriting a push that landed mid-run: the overlap check compared the two path forms, never matched, and reported "safe".
 - `ci` and `translate --changed-only` now work when `localhero.json` is not at the repository root, which is the normal layout in a monorepo where each app is its own project. `git show <ref>:<path>` resolves paths from the repository root while the config's paths are relative to the config file, so every translation file was skipped and the run still reported "No changed keys need translation" and exited 0.
 - A file the run was configured to read but could not now fails the run instead of being a note on stdout. This covers both target files and source files; a gettext project whose source catalog could not be read previously reported success.
 - Deleted source files are detected again from a subdirectory. `git diff --name-only` prints repository-root-relative paths, which never matched the configured paths.
