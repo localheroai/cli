@@ -14,7 +14,7 @@ import {
   getManifestForFinalize,
   getRemovedKeysManifestForFinalize
 } from '../utils/git-changes.js';
-import { getCurrentBranch } from '../utils/git.js';
+import { getCurrentBranch, getHeadSha } from '../utils/git.js';
 import {
   findMissingTranslations,
   batchKeysWithMissing,
@@ -22,7 +22,8 @@ import {
   BatchResult,
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
-import { autoCommitChanges, buildMakemessagesCommand, type CommitResult } from '../utils/github.js';
+import { autoCommitChanges, buildMakemessagesCommand, MISSING_BRANCH_ERROR, MISSING_TOKEN_ERROR, type CommitResult } from '../utils/github.js';
+import { escapeAnnotationData } from '../utils/ci-context.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
@@ -30,10 +31,20 @@ import { summarizeImport, type ImportSummary } from '../utils/import-summary.js'
 import { processTranslationBatches } from '../utils/translation-processor.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
+import { collectAlignmentCandidates, type AlignmentCandidate } from '../utils/alignment-candidates.js';
+import {
+  runSourceAlignment,
+  reportSourceAlignment,
+  summarizeAlignedCells,
+  type SourceAlignmentResult
+} from '../utils/source-alignment.js';
+import { sendAlignedImport } from '../utils/aligned-import.js';
+import { keepAlignedCellsOnDisk } from '../utils/aligned-values-on-disk.js';
 import type {
   TranslationResult
 } from '../utils/translation-processor.js';
 import type {
+  CommitSummary,
   ProjectConfig,
   TranslationConfig,
   TranslationFileOptions,
@@ -112,11 +123,7 @@ interface TranslationDependencies {
     };
   };
   gitUtils: {
-    autoCommitChanges: (paths: string, translationSummary?: {
-      keysTranslated: number;
-      languages: string[];
-      viewUrl?: string;
-    }) => Promise<CommitResult>;
+    autoCommitChanges: (paths: string, translationSummary?: CommitSummary) => Promise<CommitResult>;
   };
   execUtils: {
     execSync: (command: string, options?: any) => Buffer | string;
@@ -145,6 +152,17 @@ const PROJECT_NOT_FOUND_CODE = 'project_not_found';
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+const COMMIT_FAILURE_FIXES: Record<string, string> = {
+  [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
+};
+const NOT_A_PULL_REQUEST_WARNING = '::warning::Translations were not committed: this is not a pull request run. Only pull_request runs commit translations.';
+const PUSH_PERMISSION_FIX = 'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.';
+
+function commitFailedAnnotation(reason: string): string {
+  const fix = COMMIT_FAILURE_FIXES[reason] ?? PUSH_PERMISSION_FIX;
+  return `::error::${escapeAnnotationData(`Translations were not committed: ${reason}. ${fix}`)}`;
 }
 
 /**
@@ -312,11 +330,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
   const projectId = config.projectId;
   const sourceLocale = config.sourceLocale;
+  const translationPaths = config.translationFiles.paths.join(' ');
+  const jobGroupId = nanoid();
+  let alignment: SourceAlignmentResult | null = null;
 
-  async function sendPullRequestImport(
-    targetChanges: TargetChangeFile[],
-    jobGroupId: string
-  ): Promise<void> {
+  async function sendPullRequestImport(targetChanges: TargetChangeFile[]): Promise<void> {
     if (targetChanges.length === 0) return;
 
     const branch = await getCurrentBranch();
@@ -350,14 +368,13 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     for (const skipped of importResult.skipped) {
       console.log(chalk.yellow(`  Skipped ${skipped.path}: ${skipped.key} (${skipped.reason})`));
     }
-    if (summary.sourceTextsImported > 0) {
+    if (summary.sourceTextsImported > 0 && !alignment?.enabled) {
       console.log(chalk.blue(`ℹ ${pluralize(summary.sourceTextsImported, 'source text')} changed. Existing translations were kept; review or align them from the Localhero comment on the PR.`));
     }
   }
 
   async function sendFinalize(
     manifest: Record<string, any>,
-    jobGroupId: string,
     removedManifest: Record<string, any> | null
   ): Promise<void> {
     try {
@@ -378,6 +395,78 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         console.log(chalk.dim(`Finalize call skipped: ${(err as Error).message}`));
       }
     }
+  }
+
+  async function alignRewordedSourceTexts(
+    candidates: AlignmentCandidate[],
+    projectConfig: ProjectConfig
+  ): Promise<SourceAlignmentResult | null> {
+    if (candidates.length === 0) return null;
+
+    const branch = await getCurrentBranch();
+    if (!branch) return null;
+
+    const headSha = await getHeadSha();
+    const result = await runSourceAlignment(
+      candidates,
+      { projectId, branch, jobGroupId, ...(headSha && { headSha }) },
+      { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
+    );
+    reportSourceAlignment(result, console);
+    return result;
+  }
+
+  function runPostTranslateCommand(command: string | undefined): void {
+    if (!command) return;
+
+    try {
+      if (verbose) {
+        console.log(chalk.blue(`\nℹ Executing postTranslateCommand: ${command}`));
+      }
+      execUtils.execSync(command, { stdio: verbose ? 'inherit' : 'pipe' });
+      if (verbose) {
+        console.log(chalk.green('✓ postTranslateCommand completed successfully'));
+      }
+    } catch (error) {
+      const err = error as Error;
+      console.warn(chalk.yellow(`\nℹ postTranslateCommand failed: ${err.message}`));
+    }
+  }
+
+  // Aligned values are staged on the PR only once they are in the branch: after a
+  // commit that landed, or right after writing when the pipeline commits itself.
+  async function commitChanges(summary: CommitSummary): Promise<void> {
+    const alignedCells = keepAlignedCellsOnDisk(alignment?.alignedCells ?? [], sourceLocale, console);
+    let inBranch = false;
+
+    if (options.skipCommit) {
+      inBranch = process.env.GITHUB_ACTIONS === 'true';
+    } else {
+      try {
+        const result = await gitUtils.autoCommitChanges(translationPaths, {
+          ...summary,
+          ...summarizeAlignedCells(alignedCells),
+          viewUrl: summary.viewUrl || alignment?.shortUrl || undefined
+        });
+        inBranch = result === 'new';
+      } catch (error) {
+        const err = error as Error;
+        if (process.env.GITHUB_ACTIONS !== 'true') {
+          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
+        } else if (err.message === MISSING_BRANCH_ERROR) {
+          console.log(NOT_A_PULL_REQUEST_WARNING);
+        } else {
+          console.log(commitFailedAnnotation(err.message));
+          process.exitCode = 1;
+        }
+      }
+    }
+
+    if (!inBranch || alignedCells.length === 0) return;
+
+    const branch = await getCurrentBranch();
+    if (!branch) return;
+    await sendAlignedImport(alignedCells, { projectId, branch, jobGroupId }, { console });
   }
 
   if (options.changedOnly && !isGitAvailable()) {
@@ -414,6 +503,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
     targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
+    const alignmentCandidates = collectAlignmentCandidates(targetChanges, sourceFiles, targetFilesByLocale, config, !!verbose);
 
     const filtered = filterByGitChanges(
       sourceFiles,
@@ -433,14 +523,18 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
 
     if (filtered !== null) {
-      if (Object.keys(filtered).length === 0) {
-        const jobGroupId = nanoid();
-        if (manifest !== null) {
-          await sendFinalize(manifest, jobGroupId, removedManifest);
-        }
-        await sendPullRequestImport(targetChanges, jobGroupId);
+      alignment = await alignRewordedSourceTexts(alignmentCandidates, config);
 
-        console.log(chalk.green('\u2713 No changed keys need translation'));
+      if (Object.keys(filtered).length === 0) {
+        if (manifest !== null) {
+          await sendFinalize(manifest, removedManifest);
+        }
+        await sendPullRequestImport(targetChanges);
+        if (alignment?.alignedCells.length) {
+          runPostTranslateCommand(config.postTranslateCommand);
+          await commitChanges({ keysTranslated: 0, languages: [] });
+        }
+        console.log(chalk.green('✓ No changed keys need translation'));
         return;
       }
       missingByLocale = filtered;
@@ -492,7 +586,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   try {
-    const jobGroupId = nanoid();
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
       missingByLocale as any,
@@ -503,10 +596,10 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     );
 
     if (manifest !== null) {
-      await sendFinalize(manifest, jobGroupId, removedManifest);
+      await sendFinalize(manifest, removedManifest);
     }
 
-    await sendPullRequestImport(targetChanges, jobGroupId);
+    await sendPullRequestImport(targetChanges);
 
     const translatedLocales = new Set(translationResult.languages);
     const onlySkipped = translationResult.skippedLanguages.filter((locale) => !translatedLocales.has(locale));
@@ -540,34 +633,15 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         const jobIdsParam = translationResult.allJobIds.join(',');
         console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
       }
+    }
 
-      if (config.postTranslateCommand) {
-        try {
-          if (verbose) {
-            console.log(chalk.blue(`\nℹ Executing postTranslateCommand: ${config.postTranslateCommand}`));
-          }
-          execUtils.execSync(config.postTranslateCommand, { stdio: verbose ? 'inherit' : 'pipe' });
-          if (verbose) {
-            console.log(chalk.green('✓ postTranslateCommand completed successfully'));
-          }
-        } catch (error) {
-          const err = error as Error;
-          console.warn(chalk.yellow(`\nℹ postTranslateCommand failed: ${err.message}`));
-        }
-      }
-
-      if (!options.skipCommit) {
-        try {
-          await gitUtils.autoCommitChanges(config.translationFiles.paths.join(' '), {
-            keysTranslated: translationResult.uniqueKeysTranslated.size,
-            languages: translationResult.languages,
-            viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
-          });
-        } catch (error) {
-          const err = error as Error;
-          console.warn(chalk.yellow(`\nℹ Could not auto-commit changes: ${err.message}`));
-        }
-      }
+    if (translationResult.uniqueKeysTranslated.size > 0 || alignment?.alignedCells.length) {
+      runPostTranslateCommand(config.postTranslateCommand);
+      await commitChanges({
+        keysTranslated: translationResult.uniqueKeysTranslated.size,
+        languages: translationResult.languages,
+        viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
+      });
     }
 
     if (translationResult.failedLanguages.length > 0 && translationResult.uniqueKeysTranslated.size === 0) {

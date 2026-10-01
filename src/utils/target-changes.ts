@@ -16,8 +16,9 @@ export interface TargetChange {
   key: string;
   status: 'added' | 'updated';
   value: string;
-  old_value?: string;
+  old_value?: string | null;
   source_value?: string;
+  aligned_source?: string;
 }
 
 export interface TargetChangeFile {
@@ -47,12 +48,13 @@ export function detectTargetChanges(
   ignoreMatcher?: (keyName: string) => boolean
 ): TargetChangeFile[] | null {
   if (!isGitAvailable()) {
-    return null;
+    return skipIngestion('git is not available');
   }
 
-  const resolvedRef = resolveCompareRef(getBaseBranch(config), verbose);
+  const baseBranch = getBaseBranch(config);
+  const resolvedRef = resolveCompareRef(baseBranch, verbose);
   if (!resolvedRef) {
-    return null;
+    return skipIngestion(`base branch '${baseBranch}' not found`);
   }
 
   const result: TargetChangeFile[] = [];
@@ -74,8 +76,7 @@ export function detectTargetChanges(
 
       totalChanges += changes.length;
       if (totalChanges > MAX_TOTAL_CHANGES) {
-        console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
-        return null;
+        return skipIngestion(`more than ${MAX_TOTAL_CHANGES} changed values`);
       }
 
       result.push({
@@ -102,8 +103,7 @@ export function detectTargetChanges(
 
     totalChanges += updatedChanges.length;
     if (totalChanges > MAX_TOTAL_CHANGES) {
-      console.log(chalk.yellow(`Skipping translation ingestion: more than ${MAX_TOTAL_CHANGES} changed values`));
-      return null;
+      return skipIngestion(`more than ${MAX_TOTAL_CHANGES} changed values`);
     }
 
     result.push({
@@ -118,6 +118,11 @@ export function detectTargetChanges(
   }
 
   return result;
+}
+
+function skipIngestion(reason: string): null {
+  console.log(chalk.yellow(`Skipping translation ingestion and alignment: ${reason}`));
+  return null;
 }
 
 function detectFileChanges(

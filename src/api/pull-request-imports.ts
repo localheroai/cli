@@ -22,6 +22,16 @@ export interface PullRequestImportResponse {
   job_group?: { id: string; short_url: string };
 }
 
+export class PullRequestImportError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'PullRequestImportError';
+    this.status = status;
+  }
+}
+
 export async function createPullRequestImport(
   params: PullRequestImportParams
 ): Promise<PullRequestImportResponse> {
@@ -42,7 +52,7 @@ export async function createPullRequestImport(
   });
 
   if (!response.ok) {
-    throw new Error(`Translation ingestion failed with status ${response.status}`);
+    throw new PullRequestImportError(`Translation ingestion failed with status ${response.status}`, response.status);
   }
 
   return response.json() as Promise<PullRequestImportResponse>;

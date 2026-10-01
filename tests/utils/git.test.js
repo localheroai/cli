@@ -1,5 +1,5 @@
 import { jest } from '@jest/globals';
-import { gitService, updateGitignore, getCurrentBranch } from '../../src/utils/git.js';
+import { gitService, updateGitignore, getCurrentBranch, getHeadSha } from '../../src/utils/git.js';
 
 describe('git module', () => {
     let mockFs;
@@ -130,6 +130,21 @@ describe('git module', () => {
 
             expect(result).toBe(null);
             expect(mockExec).toHaveBeenCalledWith('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+        });
+    });
+
+    describe('getHeadSha', () => {
+        it('returns the checked-out commit', async () => {
+            mockExec.mockResolvedValue({ stdout: 'abc123\n' });
+
+            expect(await getHeadSha()).toBe('abc123');
+            expect(mockExec).toHaveBeenCalledWith('git', ['rev-parse', 'HEAD']);
+        });
+
+        it('returns null when git command fails', async () => {
+            mockExec.mockRejectedValue(new Error('Not a git repository'));
+
+            expect(await getHeadSha()).toBe(null);
         });
     });
 });

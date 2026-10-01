@@ -435,6 +435,51 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
+    it('mentions keys aligned to reworded source texts', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json', {
+        keysTranslated: 3,
+        languages: ['de', 'fr'],
+        keysAligned: 2,
+        alignedLanguages: ['de'],
+        viewUrl: 'https://localhero.ai/r/abc123'
+      });
+
+      const expectedMessage = 'Update translations\n\n3 keys in de, fr\nAligned 2 keys in de to reworded source texts\n\nhttps://localhero.ai/r/abc123';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
+    it('describes a commit with only aligned keys', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json', {
+        keysTranslated: 0,
+        languages: [],
+        keysAligned: 1,
+        alignedLanguages: ['de', 'fr']
+      });
+
+      const expectedMessage = 'Update translations\n\nAligned 1 key in de, fr to reworded source texts';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
     it('includes co-author trailer when GITHUB_ACTOR is set', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
@@ -881,13 +926,13 @@ describe('githubService', () => {
     });
 
     const TRANSLATE_OVERLAP_NOTICE =
-      'Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.';
+      '::warning::Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.';
     const TRANSLATE_UNCERTAIN_NOTICE =
-      'Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.';
+      '::warning::Branch changed during the run; skipping commit to avoid overwriting newer work. Re-run the workflow to commit the translations.';
     const SYNC_OVERLAP_NOTICE =
-      'Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.';
+      '::warning::Branch changed during the sync and touched these translation files; skipping commit. Sync again from Localhero to commit the translations.';
     const SYNC_UNCERTAIN_NOTICE =
-      'Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.';
+      '::warning::Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.';
 
     const staleHead = (sha: string) =>
       new StaleHeadError(`Expected branch to point to "${sha}" but it did not. Pull and try again.`);

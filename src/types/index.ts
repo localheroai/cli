@@ -154,6 +154,8 @@ export interface GitHubInstallationTokenResponse {
 export interface CommitSummary {
   keysTranslated: number;
   languages: string[];
+  keysAligned?: number;
+  alignedLanguages?: string[];
   viewUrl?: string;
 }
 
