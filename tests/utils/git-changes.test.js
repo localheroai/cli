@@ -63,8 +63,12 @@ function setupGitMock({
       if (throwOnShow) throw new Error('File does not exist in base branch');
       if (showByPath) {
         const match = cmd.match(/git show [^:]+:"([^"]+)"/);
-        if (match && Object.prototype.hasOwnProperty.call(showByPath, match[1])) {
-          const value = showByPath[match[1]];
+        // Paths are passed to git as "./x" so that git resolves them against the
+        // working directory rather than the repository root. Git treats "./x"
+        // and "x" as the same path; the fixture keys are written without it.
+        const shown = match && match[1].replace(/^\.\//, '');
+        if (shown && Object.prototype.hasOwnProperty.call(showByPath, shown)) {
+          const value = showByPath[shown];
           if (value === null) throw new Error('File does not exist in base branch');
           return value;
         }

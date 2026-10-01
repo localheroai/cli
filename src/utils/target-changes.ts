@@ -10,6 +10,7 @@ import {
 } from './git-changes.js';
 import { parseFile, flattenTranslations } from './files.js';
 import { findTargetFile } from './translation-utils.js';
+import { recordUnreadableFile } from './unreadable-files.js';
 
 export interface TargetChange {
   key: string;
@@ -151,6 +152,7 @@ function detectFileChanges(
 
     return changes;
   } catch (error) {
+    recordUnreadableFile(targetFile.path);
     console.log(chalk.yellow(`  Skipping ${targetFile.path} from translation ingestion: ${(error as Error).message}`));
     return [];
   }
