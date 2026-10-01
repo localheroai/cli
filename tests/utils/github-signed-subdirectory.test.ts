@@ -182,14 +182,71 @@ describe('signed commits from a subdirectory', () => {
     expect(sent.fileChanges.additions[0].path).toBe('apps/portal/public/locales/de.json');
   });
 
-  it('refuses a drive-qualified path, which is not absolute but is not ours either', async () => {
+  // On posix a colon is a legal filename character, so `C:locales/de.json` is
+  // just a file that does not exist here and is skipped, not an error. The
+  // drive-relative rejection only applies on Windows, where such a path would
+  // read against that drive's current directory.
+  it('treats a drive-qualified path as an ordinary filename on posix', async () => {
+    const result = await githubService.apiCommitAndPush({
+      branchName: 'feature',
+      filePaths: ['C:locales/de.json'],
+      message: 'Update translations'
+    });
+
+    expect(result).toBe('no-changes');
+  });
+
+  it('refuses a path that escapes the repository upwards', async () => {
+    writeFileSync(nodePath.join(repo, 'escaped.json'), '{"a":"A"}');
+
     await expect(
       githubService.apiCommitAndPush({
         branchName: 'feature',
-        filePaths: ['C:locales/de.json'],
+        filePaths: ['../../../escaped.json'],
         message: 'Update translations'
       })
     ).rejects.toThrow(/outside the repository/i);
+  });
+
+  it('accepts an absolute path that lies inside the working directory', async () => {
+    // commands/ci.ts resolves each synced file to an absolute path and keeps
+    // the ones that do not escape cwd, so these reach the commit as absolutes.
+    const absolute = nodePath.join(process.cwd(), 'public', 'locales', 'de.json');
+    writeFileSync(absolute, '{"a":"B"}');
+
+    await githubService.apiCommitAndPush({
+      branchName: 'feature',
+      filePaths: [absolute],
+      message: 'Update translations'
+    });
+
+    const sent = createSignedCommit.mock.calls[0][0];
+    expect(sent.fileChanges.additions[0].path).toBe('apps/portal/public/locales/de.json');
+  });
+
+  // git answers --show-prefix with an empty string and exit 0 when it cannot see
+  // the work tree (GIT_DIR set without GIT_WORK_TREE, a bare repo, cwd inside
+  // .git). Taken at face value from a subdirectory that commits to the
+  // repository root, silently, which is this whole bug.
+  it('refuses to commit when GIT_DIR hides where this directory sits', async () => {
+    writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');
+    wire({
+      env: {
+        GITHUB_REPOSITORY: 'acme/monorepo',
+        GITHUB_ACTIONS: 'true',
+        GIT_DIR: nodePath.join(repo, '.git')
+      } as any,
+      exec: ((cmd: string, opts: any) =>
+        execSync(cmd, { ...opts, stdio: 'pipe', env: { ...process.env, GIT_DIR: nodePath.join(repo, '.git') } })) as any
+    });
+
+    await expect(
+      githubService.apiCommitAndPush({
+        branchName: 'feature',
+        filePaths: ['public/locales/de.json'],
+        message: 'Update translations'
+      })
+    ).rejects.toThrow(/GIT_WORK_TREE/i);
   });
 
   it('sends one addition when the same file arrives spelled two ways', async () => {

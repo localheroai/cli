@@ -835,10 +835,26 @@ ${buildExtractStep(options)}      - name: Translate
    * files to the repository root, which is the bug this exists to prevent.
    */
   repositoryPrefix(): string {
-    const { exec } = this.deps;
-    // Only the trailing newline: a directory name may legitimately start with
-    // whitespace, and trim() would corrupt it.
-    return exec('git rev-parse --show-prefix', { stdio: 'pipe' }).toString().replace(/\n$/, '');
+    const { exec, env } = this.deps;
+    // Only the trailing newline (\r\n on a Windows runner): a directory name may
+    // legitimately begin with whitespace, and trim() would corrupt it.
+    const prefix = exec('git rev-parse --show-prefix', { stdio: 'pipe' })
+      .toString()
+      .replace(/\r?\n$/, '');
+
+    // GIT_DIR without GIT_WORK_TREE makes git treat the working directory as the
+    // repository root: --show-prefix answers "" with exit 0, and taking that at
+    // face value from a subdirectory commits every file to the real root, which
+    // is the bug this function exists to prevent. Refuse rather than guess.
+    if (prefix === '' && env.GIT_DIR && !env.GIT_WORK_TREE) {
+      throw new Error(
+        'GIT_DIR is set without GIT_WORK_TREE, so git cannot say where this directory ' +
+        'sits in the repository. Set GIT_WORK_TREE as well, or unset GIT_DIR, so ' +
+        'translations are committed to the right paths.'
+      );
+    }
+
+    return prefix;
   },
 
   /**
@@ -849,7 +865,7 @@ ${buildExtractStep(options)}      - name: Translate
    * additions[].path from the repository root instead, so a run from a
    * subdirectory wrote its files to the wrong place and reported success (#791).
    *
-   * Absolutes are rejected before prefixing, not after: "apps/portal/" plus
+   * Absolutes are resolved before prefixing, never after: "apps/portal/" plus
    * "/tmp/x" normalises to "apps/portal/tmp/x", which is neither absolute nor
    * escaping, so a check that ran afterwards would pass it and upload one
    * file's bytes to an unrelated path.
@@ -858,15 +874,25 @@ ${buildExtractStep(options)}      - name: Translate
     // The real path module, not this.deps.path: these are pure string
     // operations with nothing to stub, and injecting them would make every
     // caller's test mock responsible for knowing about posix normalisation.
-    // `C:foo` is drive-relative, not absolute, so isAbsolute misses it: it would
-    // read against drive C's current directory and send `apps/portal/C:foo`.
-    if (path.isAbsolute(filePath) || /^[A-Za-z]:/.test(filePath)) {
-      throw new Error(`${filePath} is outside the repository: expected a path relative to localhero.json`);
+    // `C:foo` is drive-relative rather than absolute, so isAbsolute misses it on
+    // Windows: it would read against drive C's current directory and send
+    // `apps/portal/C:foo` as the destination.
+    if (/^[A-Za-z]:(?![\\/])/.test(filePath) && path.sep === '\\') {
+      throw new Error(`${filePath} is not a path inside the repository`);
     }
 
-    const repoPath = path.posix.normalize(`${prefix}${filePath.split(path.sep).join('/')}`);
-    // normalize('') is '.', never '', so the empty case is covered by this.
-    if (repoPath === '.' || repoPath === '..' || repoPath.startsWith('../')) {
+    // An absolute path under the working directory is legitimate: the sync path
+    // produces them (commands/ci.ts resolves each file and keeps the ones that
+    // do not escape cwd). Relativise rather than reject, so the error below is
+    // reserved for paths that genuinely escape.
+    const local = path.isAbsolute(filePath)
+      ? path.relative(process.cwd(), filePath)
+      : filePath;
+
+    const repoPath = path.posix.normalize(`${prefix}${local.split(path.sep).join('/')}`);
+    // normalize() turns '' into '.' and leaves './' as './', so test the
+    // directory-ish forms explicitly rather than relying on one of them.
+    if (repoPath === '.' || repoPath === './' || repoPath === '..' || repoPath.startsWith('../')) {
       throw new Error(`${filePath} is outside the repository`);
     }
 
