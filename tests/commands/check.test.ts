@@ -86,8 +86,16 @@ describe('check command', () => {
     return runCheck(options, deps() as never);
   }
 
+  // chalk emits ANSI codes when a developer's shell sets FORCE_COLOR, which
+  // splits a styled heading from the plain text an assertion looks for. The
+  // tests are about what the report says, not how it is painted.
+  function stripAnsi(text: string): string {
+    // eslint-disable-next-line no-control-regex
+    return text.replace(/\u001B\[[0-9;]*m/g, '');
+  }
+
   function printed(): string {
-    return mockConsole.log.mock.calls.map((call) => String(call[0])).join('\n');
+    return stripAnsi(mockConsole.log.mock.calls.map((call) => String(call[0])).join('\n'));
   }
 
   it('exits 1 on a missing key and 0 when complete', async () => {
@@ -620,7 +628,7 @@ describe('check command', () => {
     }
 
     function summary(): string {
-      return appendFile.mock.calls.map((call) => String(call[1])).join('');
+      return stripAnsi(appendFile.mock.calls.map((call) => String(call[1])).join(''));
     }
 
     beforeEach(() => {
