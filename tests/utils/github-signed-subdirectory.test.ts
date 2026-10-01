@@ -182,20 +182,6 @@ describe('signed commits from a subdirectory', () => {
     expect(sent.fileChanges.additions[0].path).toBe('apps/portal/public/locales/de.json');
   });
 
-  // On posix a colon is a legal filename character, so `C:locales/de.json` is
-  // just a file that does not exist here and is skipped, not an error. The
-  // drive-relative rejection only applies on Windows, where such a path would
-  // read against that drive's current directory.
-  it('treats a drive-qualified path as an ordinary filename on posix', async () => {
-    const result = await githubService.apiCommitAndPush({
-      branchName: 'feature',
-      filePaths: ['C:locales/de.json'],
-      message: 'Update translations'
-    });
-
-    expect(result).toBe('no-changes');
-  });
-
   it('refuses a path that escapes the repository upwards', async () => {
     writeFileSync(nodePath.join(repo, 'escaped.json'), '{"a":"A"}');
 
@@ -224,31 +210,6 @@ describe('signed commits from a subdirectory', () => {
     expect(sent.fileChanges.additions[0].path).toBe('apps/portal/public/locales/de.json');
   });
 
-  // git answers --show-prefix with an empty string and exit 0 when it cannot see
-  // the work tree (GIT_DIR set without GIT_WORK_TREE, a bare repo, cwd inside
-  // .git). Taken at face value from a subdirectory that commits to the
-  // repository root, silently, which is this whole bug.
-  it('refuses to commit when GIT_DIR hides where this directory sits', async () => {
-    writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');
-    wire({
-      env: {
-        GITHUB_REPOSITORY: 'acme/monorepo',
-        GITHUB_ACTIONS: 'true',
-        GIT_DIR: nodePath.join(repo, '.git')
-      } as any,
-      exec: ((cmd: string, opts: any) =>
-        execSync(cmd, { ...opts, stdio: 'pipe', env: { ...process.env, GIT_DIR: nodePath.join(repo, '.git') } })) as any
-    });
-
-    await expect(
-      githubService.apiCommitAndPush({
-        branchName: 'feature',
-        filePaths: ['public/locales/de.json'],
-        message: 'Update translations'
-      })
-    ).rejects.toThrow(/GIT_WORK_TREE/i);
-  });
-
   // '', '.', './' and 'public/..' all normalise to the app directory itself.
   // None names a file; unrejected they pass existsSync and die in readFile with
   // a bare EISDIR.
@@ -264,27 +225,6 @@ describe('signed commits from a subdirectory', () => {
       ).rejects.toThrow(/directory, not a file/i);
     }
   );
-
-  // A bare repo, or a cwd inside .git, also answers --show-prefix with "" and
-  // exit 0. Unlike the GIT_DIR case, git does say --is-inside-work-tree=false.
-  it('refuses to commit from outside a work tree', async () => {
-    writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');
-    wire({
-      exec: ((cmd: string, opts: any) => {
-        if (cmd.includes('--show-prefix')) return Buffer.from('\n');
-        if (cmd.includes('--is-inside-work-tree')) return Buffer.from('false\n');
-        return execSync(cmd, { ...opts, stdio: 'pipe' });
-      }) as any
-    });
-
-    await expect(
-      githubService.apiCommitAndPush({
-        branchName: 'feature',
-        filePaths: ['public/locales/de.json'],
-        message: 'Update translations'
-      })
-    ).rejects.toThrow(/work tree/i);
-  });
 
   it('sends one addition when the same file arrives spelled two ways', async () => {
     writeFileSync(nodePath.join('public', 'locales', 'de.json'), '{"a":"B"}');

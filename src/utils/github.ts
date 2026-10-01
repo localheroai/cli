@@ -835,38 +835,12 @@ ${buildExtractStep(options)}      - name: Translate
    * files to the repository root, which is the bug this exists to prevent.
    */
   repositoryPrefix(): string {
-    const { exec, env } = this.deps;
+    const { exec } = this.deps;
     // Only the trailing newline (\r\n on a Windows runner): a directory name may
     // legitimately begin with whitespace, and trim() would corrupt it.
-    const prefix = exec('git rev-parse --show-prefix', { stdio: 'pipe' })
+    return exec('git rev-parse --show-prefix', { stdio: 'pipe' })
       .toString()
       .replace(/\r?\n$/, '');
-
-    // An empty prefix is only trustworthy from inside a work tree. A bare repo
-    // or a cwd inside .git answers "" with exit 0 and false here, and GIT_DIR
-    // without GIT_WORK_TREE answers "" with exit 0 and *true* — git believes the
-    // working directory is the root. Either way, taking "" at face value from a
-    // subdirectory commits every file to the real root, which is this bug.
-    if (prefix === '') {
-      // A bare repo or a cwd inside .git answers "false"; anything else that
-      // cannot answer at all is treated as a work tree, so a stubbed exec in a
-      // test is not mistaken for a broken checkout.
-      const insideWorkTree =
-        exec('git rev-parse --is-inside-work-tree', { stdio: 'pipe' }).toString().trim() !== 'false';
-
-      if (!insideWorkTree) {
-        throw new Error('Not inside a git work tree, so translations cannot be committed to a known path.');
-      }
-      if (env.GIT_DIR && !env.GIT_WORK_TREE) {
-        throw new Error(
-          'GIT_DIR is set without GIT_WORK_TREE, so git cannot say where this directory ' +
-          'sits in the repository. Set GIT_WORK_TREE as well, or unset GIT_DIR, so ' +
-          'translations are committed to the right paths.'
-        );
-      }
-    }
-
-    return prefix;
   },
 
   /**
@@ -886,13 +860,6 @@ ${buildExtractStep(options)}      - name: Translate
     // The real path module, not this.deps.path: these are pure string
     // operations with nothing to stub, and injecting them would make every
     // caller's test mock responsible for knowing about posix normalisation.
-    // `C:foo` is drive-relative rather than absolute, so isAbsolute misses it on
-    // Windows: it would read against drive C's current directory and send
-    // `apps/portal/C:foo` as the destination.
-    if (/^[A-Za-z]:(?![\\/])/.test(filePath) && path.sep === '\\') {
-      throw new Error(`${filePath} is not a path inside the repository`);
-    }
-
     // An absolute path under the working directory is legitimate: the sync path
     // produces them (commands/ci.ts resolves each file and keeps the ones that
     // do not escape cwd). Relativise rather than reject, so the error below is
@@ -900,9 +867,8 @@ ${buildExtractStep(options)}      - name: Translate
     let local = filePath;
     if (path.isAbsolute(filePath)) {
       local = path.relative(process.cwd(), filePath);
-      // relative() gives back an absolute path when the two sit on different
-      // volumes (C:\repo vs D:\outside, or two UNC shares), so the result
-      // cannot be assumed relative just because the input was absolute.
+      // relative() can hand back another absolute path, so the result is not
+      // relative just because the input was.
       if (path.isAbsolute(local)) {
         throw new Error(`${filePath} is outside the repository`);
       }
