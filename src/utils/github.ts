@@ -842,16 +842,28 @@ ${buildExtractStep(options)}      - name: Translate
       .toString()
       .replace(/\r?\n$/, '');
 
-    // GIT_DIR without GIT_WORK_TREE makes git treat the working directory as the
-    // repository root: --show-prefix answers "" with exit 0, and taking that at
-    // face value from a subdirectory commits every file to the real root, which
-    // is the bug this function exists to prevent. Refuse rather than guess.
-    if (prefix === '' && env.GIT_DIR && !env.GIT_WORK_TREE) {
-      throw new Error(
-        'GIT_DIR is set without GIT_WORK_TREE, so git cannot say where this directory ' +
-        'sits in the repository. Set GIT_WORK_TREE as well, or unset GIT_DIR, so ' +
-        'translations are committed to the right paths.'
-      );
+    // An empty prefix is only trustworthy from inside a work tree. A bare repo
+    // or a cwd inside .git answers "" with exit 0 and false here, and GIT_DIR
+    // without GIT_WORK_TREE answers "" with exit 0 and *true* — git believes the
+    // working directory is the root. Either way, taking "" at face value from a
+    // subdirectory commits every file to the real root, which is this bug.
+    if (prefix === '') {
+      // A bare repo or a cwd inside .git answers "false"; anything else that
+      // cannot answer at all is treated as a work tree, so a stubbed exec in a
+      // test is not mistaken for a broken checkout.
+      const insideWorkTree =
+        exec('git rev-parse --is-inside-work-tree', { stdio: 'pipe' }).toString().trim() !== 'false';
+
+      if (!insideWorkTree) {
+        throw new Error('Not inside a git work tree, so translations cannot be committed to a known path.');
+      }
+      if (env.GIT_DIR && !env.GIT_WORK_TREE) {
+        throw new Error(
+          'GIT_DIR is set without GIT_WORK_TREE, so git cannot say where this directory ' +
+          'sits in the repository. Set GIT_WORK_TREE as well, or unset GIT_DIR, so ' +
+          'translations are committed to the right paths.'
+        );
+      }
     }
 
     return prefix;
@@ -885,15 +897,30 @@ ${buildExtractStep(options)}      - name: Translate
     // produces them (commands/ci.ts resolves each file and keeps the ones that
     // do not escape cwd). Relativise rather than reject, so the error below is
     // reserved for paths that genuinely escape.
-    const local = path.isAbsolute(filePath)
-      ? path.relative(process.cwd(), filePath)
-      : filePath;
+    let local = filePath;
+    if (path.isAbsolute(filePath)) {
+      local = path.relative(process.cwd(), filePath);
+      // relative() gives back an absolute path when the two sit on different
+      // volumes (C:\repo vs D:\outside, or two UNC shares), so the result
+      // cannot be assumed relative just because the input was absolute.
+      if (path.isAbsolute(local)) {
+        throw new Error(`${filePath} is outside the repository`);
+      }
+    }
 
     const repoPath = path.posix.normalize(`${prefix}${local.split(path.sep).join('/')}`);
-    // normalize() turns '' into '.' and leaves './' as './', so test the
-    // directory-ish forms explicitly rather than relying on one of them.
-    if (repoPath === '.' || repoPath === './' || repoPath === '..' || repoPath.startsWith('../')) {
+
+    if (repoPath === '..' || repoPath.startsWith('../')) {
       throw new Error(`${filePath} is outside the repository`);
+    }
+
+    // '', '.', './' and anything ending in '..' all resolve to the directory
+    // itself rather than naming a file. node's normalize keeps a trailing slash,
+    // so both spellings have to be checked; left alone they pass existsSync and
+    // die in readFile with a bare EISDIR.
+    const directory = prefix === '' ? '.' : prefix.replace(/\/$/, '');
+    if (repoPath === directory || repoPath === `${directory}/` || repoPath.endsWith('/')) {
+      throw new Error(`${filePath} is a directory, not a file to commit`);
     }
 
     return repoPath;
