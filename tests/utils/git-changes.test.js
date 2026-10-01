@@ -45,14 +45,6 @@ function setupGitMock({
       return '';
     }
 
-    // Deleted-file paths arrive repo-root-relative and get trimmed back to the
-    // working directory. These tests run at the repository root, so the prefix
-    // is empty and paths pass through unchanged.
-    if (cmd === 'git rev-parse --show-toplevel') {
-      if (!inRepo) throw new Error('not a git repository');
-      return `${process.cwd()}\n`;
-    }
-
     if (cmd.includes('git rev-parse --verify')) {
       if (!branchExists) throw new Error('branch not found');
       return '';

@@ -10,6 +10,7 @@ import {
 } from './git-changes.js';
 import { parseFile, flattenTranslations } from './files.js';
 import { findTargetFile } from './translation-utils.js';
+import { recordUnreadableFile } from './unreadable-files.js';
 
 export interface TargetChange {
   key: string;
@@ -17,24 +18,6 @@ export interface TargetChange {
   value: string;
   old_value?: string;
   source_value?: string;
-}
-
-/**
- * Files this run was configured to read but could not.
- *
- * A skip used to be a line on stdout and nothing more, so a run that failed to
- * read every one of its files still printed "No changed keys need translation"
- * and exited 0 (#779). Callers read this to tell "nothing to do" apart from
- * "could not look".
- */
-const unreadableFiles: string[] = [];
-
-export function resetUnreadableFiles(): void {
-  unreadableFiles.length = 0;
-}
-
-export function getUnreadableFiles(): string[] {
-  return [...unreadableFiles];
 }
 
 export interface TargetChangeFile {
@@ -169,7 +152,7 @@ function detectFileChanges(
 
     return changes;
   } catch (error) {
-    unreadableFiles.push(targetFile.path);
+    recordUnreadableFile(targetFile.path);
     console.log(chalk.yellow(`  Skipping ${targetFile.path} from translation ingestion: ${(error as Error).message}`));
     return [];
   }

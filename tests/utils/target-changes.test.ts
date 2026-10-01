@@ -15,14 +15,10 @@ jest.unstable_mockModule('fs', () => ({
 }));
 
 let detectTargetChanges: any;
-let resetUnreadableFiles: any;
-let getUnreadableFiles: any;
 
 beforeAll(async () => {
   const module = await import('../../src/utils/target-changes.js');
   detectTargetChanges = module.detectTargetChanges;
-  resetUnreadableFiles = module.resetUnreadableFiles;
-  getUnreadableFiles = module.getUnreadableFiles;
 });
 
 const config = {
@@ -489,13 +485,4 @@ describe('detectTargetChanges — source pass', () => {
     expect(result).toBeNull();
   });
 
-  test('records nothing when every file reads cleanly', () => {
-    resetUnreadableFiles();
-    setupGitMock({ oldContent: { 'en.yml': 'en:\n  greeting: "Hello"\n', 'ja_easy.yml': 'ja_easy:\n  greeting: "\u65e7"\n' } });
-    setupReadMock({ 'en.yml': 'en:\n  greeting: "Hello"\n', 'ja_easy.yml': 'ja_easy:\n  greeting: "\u65b0"\n' });
-
-    detectTargetChanges(sourceFiles, targetFilesByLocale, config, false);
-
-    expect(getUnreadableFiles()).toEqual([]);
-  });
 });

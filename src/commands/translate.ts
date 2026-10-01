@@ -23,7 +23,8 @@ import {
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
 import { autoCommitChanges, buildMakemessagesCommand } from '../utils/github.js';
-import { detectTargetChanges, resetUnreadableFiles, getUnreadableFiles, type TargetChangeFile } from '../utils/target-changes.js';
+import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
+import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import { processTranslationBatches } from '../utils/translation-processor.js';
@@ -144,6 +145,17 @@ const PROJECT_NOT_FOUND_CODE = 'project_not_found';
 
 function pluralize(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * A file we were configured to read but could not is a failure, not a note.
+ * Reporting success over it is how a run that saw none of its files still
+ * went green (#779).
+ */
+function reportUnreadableFiles(unreadable: string[]): void {
+  console.error(chalk.red(`\n\u2716 Could not read ${pluralize(unreadable.length, 'translation file')}:\n`));
+  unreadable.forEach(file => console.error(chalk.yellow(`  ${file}`)));
+  console.error(chalk.yellow('\nNothing was sent for translation. Check that the paths in localhero.json resolve from the directory holding that file.\n'));
 }
 
 function isProjectNotFound(error: unknown): boolean {
@@ -410,6 +422,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       !!verbose
     );
 
+    // Before anything is sent: a run that could not read its files knows only
+    // part of the story, and finalizing on a partial manifest would record that
+    // partial view as the truth (#779).
+    const unreadable = getUnreadableFiles();
+    if (unreadable.length > 0) {
+      reportUnreadableFiles(unreadable);
+      process.exitCode = 1;
+      return;
+    }
+
     if (filtered !== null) {
       if (Object.keys(filtered).length === 0) {
         const jobGroupId = nanoid();
@@ -417,17 +439,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
           await sendFinalize(manifest, jobGroupId, removedManifest);
         }
         await sendPullRequestImport(targetChanges, jobGroupId);
-
-        // Reporting success here while files went unread is how a run that
-        // could not see a single locale file still went green (#779).
-        const unreadable = getUnreadableFiles();
-        if (unreadable.length > 0) {
-          console.error(chalk.red(`\n\u2716 Could not read ${unreadable.length} translation file${unreadable.length === 1 ? '' : 's'}:\n`));
-          unreadable.forEach(file => console.error(chalk.yellow(`  ${file}`)));
-          console.error(chalk.yellow('\nNothing was translated. Check that the paths in localhero.json are correct relative to that file.\n'));
-          process.exitCode = 1;
-          return;
-        }
 
         console.log(chalk.green('\u2713 No changed keys need translation'));
         return;

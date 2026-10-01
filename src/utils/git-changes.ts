@@ -6,6 +6,7 @@ import type { TranslationFile, ProjectConfig, KeyIdentifier } from '../types/ind
 import type { MissingLocaleEntry } from './translation-utils.js';
 import { parseFile, flattenTranslations, extractLocaleFromPath } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
+import { recordUnreadableFile } from './unreadable-files.js';
 
 type FileWithPath = { path: string };
 
@@ -530,6 +531,7 @@ function getChangedKeys(
         }
       }
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping ${file.path}: ${err.message}`));
@@ -611,6 +613,7 @@ export function diffSourceFilesPerFile(
         result.set(file.path, { added, removed });
       }
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping ${file.path} from manifest: ${err.message}`));
@@ -635,6 +638,7 @@ export function diffSourceFilesPerFile(
 
       result.set(file.path, { added: [], removed });
     } catch (error) {
+      recordUnreadableFile(file.path);
       if (verbose) {
         const err = error as Error;
         console.log(chalk.dim(`  Skipping deleted ${file.path}: ${err.message}`));
