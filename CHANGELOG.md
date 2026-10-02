@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- `check` run without a `localhero.json` now ends its plain-text report with one line saying Localhero.ai can fill missing translations, with a link. It only appears when translations are missing. `--json`, `--format github` and projects with a `localhero.json` are unchanged.
+
 ## [0.0.75] - 2026-10-01
 
 ### Added

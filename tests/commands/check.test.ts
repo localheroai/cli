@@ -440,9 +440,34 @@ describe('check command', () => {
     expect(printed()).toContain('sv: config/locales/sv.yml');
   });
 
+  it('does not point a project with localhero.json at Localhero', async () => {
+    files = [yamlFile('en', '  a: "A"\n  b: "B"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+
+    await check({}, deps() as never);
+
+    expect(printed()).not.toContain('https://localhero.ai');
+  });
+
   describe('without localhero.json', () => {
     beforeEach(() => {
       noConfig = true;
+    });
+
+    it('ends the report with where to get missing translations filled', async () => {
+      files = [yamlFile('en', '  a: "A"\n  b: "B"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+
+      await check({}, deps() as never);
+
+      const lastLine = stripAnsi(String(mockConsole.log.mock.calls.at(-1)?.[0]));
+      expect(lastLine).toContain('Localhero.ai can fill missing translations automatically: https://localhero.ai');
+    });
+
+    it('leaves out the pointer when nothing is missing', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n  old: "x"\n')];
+
+      await check({}, deps() as never);
+
+      expect(printed()).not.toContain('https://localhero.ai');
     });
 
     it('detects the locale folder and languages, with en as the source', async () => {

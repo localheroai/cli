@@ -23,6 +23,8 @@ export interface StepSummaryInput {
   missingTranslations: boolean;
 }
 
+export const FILL_MISSING_POINTER = 'Localhero.ai can fill missing translations automatically: https://localhero.ai';
+
 const MAX_LISTED_PROBLEMS = 50;
 const COLUMNS: [keyof ProblemCounts, string][] = [
   ['missing', 'Missing'],
@@ -92,7 +94,7 @@ export function buildStepSummary(input: StepSummaryInput): string {
     lines.push('### Problems found', '', ...table);
   }
   if (input.missingTranslations) {
-    lines.push('Localhero.ai can fill missing translations automatically: https://localhero.ai', '');
+    lines.push(FILL_MISSING_POINTER, '');
   }
   return lines.join('\n');
 }
