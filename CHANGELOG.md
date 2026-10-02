@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `check` run without a `localhero.json` reads a Rails YAML file by its root key, as Rails does. A file named for one locale whose root key names another (`sr.yml` starting with `sr-Latn:`) had every key reported as an orphan and every source key as missing. Its keys are now checked, and the report says once which file defines which locale. Applies only when the source YAML files are wrapped in the source locale. A target whose root key is the source locale is still reported, since Rails would load it as the source language.
+
 ## [0.0.76] - 2026-10-02
 
 ### Changed

@@ -1,5 +1,6 @@
 import chalk from 'chalk';
 import { appendFileSync } from 'fs';
+import { stringify as stringifyYaml } from 'yaml';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles, parseFile, flattenTranslations, extractLocaleFromPath } from '../utils/files.js';
 import { findDuplicateYamlKeys, dedupeYaml } from '../utils/yaml-duplicates.js';
@@ -41,6 +42,7 @@ import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js
 import { baseFileSet, DUPLICATE_KEY_ERROR, type ChangeStatus, type FileSet } from '../utils/check-changes.js';
 import { buildStepSummary, FILL_MISSING_POINTER, plural, type ProblemCounts } from '../utils/check-summary.js';
 import { spellPlaceholders } from '../utils/placeholders.js';
+import { isLanguage } from '../utils/locale-detection.js';
 import { keyLineFinder, type KeyLineLookup } from '../utils/key-lines.js';
 import type {
   TranslationConfig,
@@ -171,6 +173,55 @@ function sourceKeysFor(sourceFile: TranslationFile, sourceLocale: string): FlatM
 
 function isYaml(file: TranslationFile): boolean {
   return file.format === 'yml' || file.format === 'yaml';
+}
+
+interface RootKeyMismatch {
+  path: string;
+  fileLocale: string;
+  rootKey: string;
+}
+
+// Rails loads a YAML file as the locale its root key names, whatever the file is called.
+function withRootKeyAsLocale(file: TranslationFile, sourceLocale: string): { file: TranslationFile; rootKey: string } | null {
+  if (!isYaml(file) || file.multiLanguage) return null;
+  const parsed = decode(file, sourceLocale);
+  if (!parsed || typeof parsed !== 'object') return null;
+  const roots = Object.keys(parsed);
+  const [rootKey] = roots;
+  const tree = parsed[rootKey];
+  if (roots.length !== 1 || rootKey === file.locale || rootKey === sourceLocale || !isLanguage(rootKey)) return null;
+  if (!tree || typeof tree !== 'object' || Array.isArray(tree)) return null;
+  const content = Buffer.from(stringifyYaml({ [file.locale]: tree })).toString('base64');
+  return { file: { ...file, content }, rootKey };
+}
+
+// Only a project that wraps its source YAML in the locale, as Rails does, names locales by root key.
+function wrapsYamlInLocale(sourceFiles: TranslationFile[], sourceLocale: string): boolean {
+  const yamlSources = sourceFiles.filter(isYaml);
+  return yamlSources.length > 0 && yamlSources.every((file) => {
+    const parsed = decode(file, sourceLocale);
+    return Boolean(parsed) && typeof parsed === 'object' && Object.keys(parsed).join() === sourceLocale;
+  });
+}
+
+function alignRootKeys(
+  { sourceFiles, targetFilesByLocale }: Pick<FileSet, 'sourceFiles' | 'targetFilesByLocale'>,
+  sourceLocale: string
+): { targetFilesByLocale: Record<string, TranslationFile[]>; mismatches: RootKeyMismatch[] } {
+  if (!wrapsYamlInLocale(sourceFiles, sourceLocale)) return { targetFilesByLocale, mismatches: [] };
+  const mismatches: RootKeyMismatch[] = [];
+  const aligned = Object.fromEntries(
+    Object.entries(targetFilesByLocale).map(([locale, files]) => [
+      locale,
+      files.map((file) => {
+        const rerooted = withRootKeyAsLocale(file, sourceLocale);
+        if (!rerooted) return file;
+        mismatches.push({ path: file.path, fileLocale: file.locale, rootKey: rerooted.rootKey });
+        return rerooted.file;
+      })
+    ])
+  );
+  return { targetFilesByLocale: aligned, mismatches };
 }
 
 function targetKeysFor(
@@ -561,10 +612,14 @@ export async function runCheck(
   const parseFailures = (discovered.parseFailures ?? []).filter((f) => !recoveredPaths.has(f.path));
   const allFiles = [...discovered.allFiles, ...recovered.files];
   const sourceFiles = [...discovered.sourceFiles, ...recovered.files.filter((f) => f.locale === sourceLocale)];
-  const targetFilesByLocale: Record<string, TranslationFile[]> = { ...discovered.targetFilesByLocale };
+  const loadedTargets: Record<string, TranslationFile[]> = { ...discovered.targetFilesByLocale };
   for (const file of recovered.files.filter((f) => f.locale !== sourceLocale)) {
-    targetFilesByLocale[file.locale] = [...(targetFilesByLocale[file.locale] ?? []), file];
+    loadedTargets[file.locale] = [...(loadedTargets[file.locale] ?? []), file];
   }
+  // Without a config, check reads a file the way Rails loads it; with one, the way translate does.
+  const { targetFilesByLocale, mismatches } = detected
+    ? alignRootKeys({ sourceFiles, targetFilesByLocale: loadedTargets }, sourceLocale)
+    : { targetFilesByLocale: loadedTargets, mismatches: [] };
   const filesFor = (locale: string) => (targetFilesByLocale[locale] || []).map((f) => f.path);
 
   if (format === 'text') {
@@ -573,6 +628,9 @@ export async function runCheck(
     if (targetLocales.length === 0 && !detected) console.log(chalk.blue('ℹ Target locales: none configured'));
     for (const locale of targetLocales) {
       console.log(chalk.blue(`ℹ ${locale}: ${filesFor(locale).join(', ') || 'no files found'}`));
+    }
+    for (const { path, fileLocale, rootKey } of mismatches) {
+      console.log(chalk.blue(`ℹ ${path} is named for ${fileLocale} but defines ${rootKey}, the locale Rails loads it as. Checked it as ${fileLocale}.`));
     }
   }
 
@@ -599,8 +657,10 @@ export async function runCheck(
   const current = analyze(files, context);
   const changedOnly = !options.full && (options.changedOnly || ci.pullRequest !== null);
   const quiet = { ...context, console: { log: SILENT.log, error: SILENT.log } };
+  const alignedBase = (baseFiles: FileSet): FileSet =>
+    detected ? { ...baseFiles, targetFilesByLocale: alignRootKeys(baseFiles, sourceLocale).targetFilesByLocale } : baseFiles;
   const { status: changeStatus, reports } = changedOnly
-    ? compareWithBase(deps, ci, config, files, current.reports, (baseFiles) => analyze(baseFiles, quiet).reports)
+    ? compareWithBase(deps, ci, config, files, current.reports, (baseFiles) => analyze(alignedBase(baseFiles), quiet).reports)
     : { status: null, reports: current.reports };
 
   // Compared with the base, every finding left is one the pull request caused, so all of them fail by default.
