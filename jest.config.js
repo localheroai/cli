@@ -8,5 +8,6 @@ export default {
   testMatch: [
     '**/tests/**/*.test.ts',
     '**/tests/**/*.test.js'
-  ]
+  ],
+  testPathIgnorePatterns: ['/node_modules/', '/.claude/']
 };
