@@ -70,7 +70,8 @@ describe('check command', () => {
       },
       projectDetection: { detectProjectType: jest.fn(async () => projectType) },
       fsUtils: {
-        listFiles: jest.fn(async () => files.map((f) => f.path)),
+        listFiles: jest.fn(async (_paths: string[], _pattern: string, _ignore: string[]) => files.map((f) => f.path)),
+        findLocaleDirs: jest.fn(async (): Promise<string[]> => []),
         readFile: jest.fn(async (filePath: string) => {
           const file = files.find((f) => f.path === filePath);
           return rawContents[filePath] ?? Buffer.from(file?.content ?? '', 'base64').toString('utf8');
@@ -661,7 +662,103 @@ describe('check command', () => {
         reason: 'en',
         paths: ['config/locales/'],
         pattern: '**/*.{yml,yaml}',
-        excluded: []
+        excluded: [],
+        otherPaths: []
+      });
+    });
+
+    describe('when the default folder holds no translations', () => {
+      function inFolders(dirs: string[]) {
+        const checkDeps = deps();
+        checkDeps.fsUtils.findLocaleDirs.mockResolvedValue(dirs);
+        checkDeps.fsUtils.listFiles.mockImplementation(async (paths: string[]) =>
+          files.map((f) => f.path).filter((filePath) => paths.some((dir) => filePath.startsWith(dir)))
+        );
+        return checkDeps;
+      }
+
+      it('checks a locale folder nested in a package', async () => {
+        files = [yamlFile('en', '  a: "A"\n  b: "B"\n', 'packages/app/locales'), yamlFile('sv', '  a: "A-sv"\n', 'packages/app/locales')];
+
+        const { reports, detected } = await runCheck({}, inFolders(['packages/app/locales/']) as never);
+
+        expect(detected?.paths).toEqual(['packages/app/locales/']);
+        expect(reports[0].missing.map((m) => m.key)).toEqual(['b']);
+      });
+
+      it('checks the folder with the most languages and names the others', async () => {
+        files = [
+          yamlFile('en', '  a: "A"\n', 'apps/one/locales'),
+          yamlFile('sv', '  a: "A-sv"\n', 'apps/one/locales'),
+          yamlFile('en', '  b: "B"\n', 'apps/two/locales'),
+          yamlFile('sv', '', 'apps/two/locales'),
+          yamlFile('de', '  b: "B-de"\n', 'apps/two/locales')
+        ];
+
+        const { detected } = await runCheck({}, inFolders(['apps/one/locales/', 'apps/two/locales/']) as never);
+
+        expect(detected?.paths).toEqual(['apps/two/locales/']);
+        expect(detected?.otherPaths).toEqual(['apps/one/locales/']);
+        expect(printed()).toContain('Also found apps/one/locales/');
+      });
+      it('leaves out a folder with one language and no template', async () => {
+        files = [
+          yamlFile('en', '  a: "A"\n', 'apps/one/locales'),
+          yamlFile('sv', '  a: "A-sv"\n', 'apps/one/locales'),
+          yamlFile('en', '  b: "B"\n', 'docs/locales')
+        ];
+
+        const { detected } = await runCheck({}, inFolders(['apps/one/locales/', 'docs/locales/']) as never);
+
+        expect(detected?.paths).toEqual(['apps/one/locales/']);
+      });
+
+      it('keeps a gettext folder with a template and one language', async () => {
+        files = [
+          { ...poFile('en', 'msgid "Hello"\nmsgstr ""\n', 'web/translations/django.pot'), format: 'pot' },
+          poFile('sv', 'msgid "Hello"\nmsgstr "Hej"\n', 'web/translations/sv/LC_MESSAGES/django.po')
+        ];
+
+        const { detected, reports } = await runCheck({}, inFolders(['web/translations/']) as never);
+
+        expect(detected?.paths).toEqual(['web/translations/']);
+        expect(reports.map((r) => r.locale)).toEqual(['sv']);
+      });
+
+      it('looks for nested folders when --source names the source language', async () => {
+        files = [yamlFile('en', '  a: "A"\n', 'packages/app/locales'), yamlFile('sv', '  a: "A-sv"\n', 'packages/app/locales')];
+
+        const { detected, exitCode } = await runCheck({ source: 'en' }, inFolders(['packages/app/locales/']) as never);
+
+        expect(detected?.paths).toEqual(['packages/app/locales/']);
+        expect(exitCode).toBe(0);
+      });
+
+      it('searches nested folders with the --pattern given', async () => {
+        files = [yamlFile('en', '  a: "A"\n', 'packages/app/locales'), yamlFile('sv', '  a: "A-sv"\n', 'packages/app/locales')];
+        const checkDeps = inFolders(['packages/app/locales/']);
+
+        const { detected } = await runCheck({ pattern: '**/*.yml' }, checkDeps as never);
+
+        expect(detected?.pattern).toBe('**/*.yml');
+        expect(checkDeps.fsUtils.listFiles).toHaveBeenCalledWith(['packages/app/locales/'], '**/*.yml', []);
+      });
+
+      it('ignores a folder nested inside another one it checks', async () => {
+        files = [yamlFile('en', '  a: "A"\n', 'app/locales'), yamlFile('sv', '  a: "A-sv"\n', 'app/locales'), yamlFile('en', '  a: "A"\n', 'app/locales/legacy/locales'), yamlFile('sv', '  a: "A-sv"\n', 'app/locales/legacy/locales')];
+
+        const { detected } = await runCheck({}, inFolders(['app/locales/', 'app/locales/legacy/locales/']) as never);
+
+        expect(detected?.paths).toEqual(['app/locales/']);
+      });
+
+      it('does not search when the default folder has translations', async () => {
+        files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+        const checkDeps = deps();
+
+        await runCheck({}, checkDeps as never);
+
+        expect(checkDeps.fsUtils.findLocaleDirs).not.toHaveBeenCalled();
       });
     });
   });
