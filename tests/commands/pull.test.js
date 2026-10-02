@@ -412,6 +412,115 @@ describe('pull command', () => {
       expect(translations.map(t => t.key)).toEqual(['item', 'item__plural_1']);
     });
 
+    it('should keep YAML plural categories the backend generated for the locale', async () => {
+      // The source group only has one/other; Polish also renders few/many.
+      // Those come back from the server and must survive the filter.
+      mockGitUtils.isGitAvailable.mockReturnValue(true);
+      mockGitUtils.getChangedKeysForProject.mockReturnValue(
+        new Set(['milestone_count.one', 'milestone_count.other'])
+      );
+
+      const mockUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'config/locales/pl.yml',
+              languages: [{
+                code: 'pl',
+                translations: [
+                  { key: 'milestone_count.one', value: '1 kamien' },
+                  { key: 'milestone_count.few', value: '%{count} kamienie' },
+                  { key: 'milestone_count.many', value: '%{count} kamieni' },
+                  { key: 'milestone_count.other', value: '%{count} kamienia' },
+                  { key: 'other.key', value: 'inny' }
+                ]
+              }]
+            }
+          ],
+          deleted_keys: []
+        }
+      };
+
+      mockSyncService.checkForUpdates.mockResolvedValue({
+        hasUpdates: true,
+        updates: mockUpdates
+      });
+
+      mockSyncService.applyUpdates.mockResolvedValue({
+        totalUpdates: 4,
+        totalDeleted: 0
+      });
+
+      const deps = createPullDeps({
+        gitUtils: mockGitUtils,
+        configUtils: mockConfigUtils,
+        fileUtils: mockFileUtils
+      });
+
+      await pull({ changedOnly: true }, deps);
+
+      const actualUpdates = mockSyncService.applyUpdates.mock.calls[0][0];
+      const translations = actualUpdates.updates.files[0].languages[0].translations;
+
+      expect(translations.map(t => t.key)).toEqual([
+        'milestone_count.one',
+        'milestone_count.few',
+        'milestone_count.many',
+        'milestone_count.other'
+      ]);
+    });
+
+    it('should not pull a lone dotted key that only looks like a plural category', async () => {
+      mockGitUtils.isGitAvailable.mockReturnValue(true);
+      mockGitUtils.getChangedKeysForProject.mockReturnValue(
+        new Set(['greeting', 'errors.other'])
+      );
+
+      const mockUpdates = {
+        updates: {
+          files: [
+            {
+              path: 'config/locales/pl.yml',
+              languages: [{
+                code: 'pl',
+                translations: [
+                  { key: 'greeting', value: 'Czesc' },
+                  { key: 'errors.other', value: 'Blad' },
+                  { key: 'errors.detail', value: 'Szczegoly' }
+                ]
+              }]
+            }
+          ],
+          deleted_keys: []
+        }
+      };
+
+      mockSyncService.checkForUpdates.mockResolvedValue({
+        hasUpdates: true,
+        updates: mockUpdates
+      });
+
+      mockSyncService.applyUpdates.mockResolvedValue({
+        totalUpdates: 2,
+        totalDeleted: 0
+      });
+
+      const deps = createPullDeps({
+        gitUtils: mockGitUtils,
+        configUtils: mockConfigUtils,
+        fileUtils: mockFileUtils
+      });
+
+      await pull({ changedOnly: true }, deps);
+
+      const actualUpdates = mockSyncService.applyUpdates.mock.calls[0][0];
+      const translations = actualUpdates.updates.files[0].languages[0].translations;
+
+      // errors.other has no sibling category among the changed keys, so
+      // errors.detail must not ride along with it.
+      expect(translations.map(t => t.key)).toEqual(['greeting', 'errors.other']);
+    });
+
     it('should handle deleted keys filtering', async () => {
       mockGitUtils.isGitAvailable.mockReturnValue(true);
       mockGitUtils.getChangedKeysForProject.mockReturnValue(

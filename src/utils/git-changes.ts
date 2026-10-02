@@ -4,6 +4,7 @@ import nodePath from 'path';
 import chalk from 'chalk';
 import type { TranslationFile, ProjectConfig, KeyIdentifier } from '../types/index.js';
 import type { MissingLocaleEntry } from './translation-utils.js';
+import { splitPluralKey, yamlPluralGroupBasesFromKeys } from './translation-utils.js';
 import { parseFile, flattenTranslations, extractLocaleFromPath } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
 import { recordUnreadableFile } from './unreadable-files.js';
@@ -911,6 +912,23 @@ export function getRemovedKeysManifestForFinalize(
 }
 
 /**
+ * A missing key is a changed plural variant when its group had any category
+ * change in the same file. Two suffix conventions exist: gettext's
+ * `__plural_N` and the CLDR category YAML/JSON nests under a base.
+ */
+function isChangedPluralVariant(
+  key: string,
+  baseChangedKeys: Set<string>,
+  yamlPluralBases: Set<string>
+): boolean {
+  const gettextBase = key.replace(PLURAL_SUFFIX_REGEX, '');
+  if (gettextBase !== key && baseChangedKeys.has(gettextBase)) return true;
+
+  const parsed = splitPluralKey(key);
+  return parsed !== null && yamlPluralBases.has(parsed.base);
+}
+
+/**
  * Filter missing translations by changed keys, scoped per source file.
  *
  * The scoping is critical: a flat (file-agnostic) match would let a key
@@ -933,8 +951,13 @@ function filterMissing(
   // Pre-compute the base-key set (plural-stripped) per file. Cheap, and
   // keeps the inner loop free of repeated regex work.
   const baseChangedKeysByFile = new Map<string, Set<string>>();
+  // The gettext regex above only matches `__plural_N`, so a YAML group
+  // (`count.one` / `count.few`) needs its own base set: the CLDR-category
+  // bases among the changed keys of that same file.
+  const yamlPluralBasesByFile = new Map<string, Set<string>>();
   for (const [filePath, keys] of changedKeysByFile.entries()) {
     baseChangedKeysByFile.set(filePath, extractBaseKeys(keys));
+    yamlPluralBasesByFile.set(filePath, yamlPluralGroupBasesFromKeys(keys));
   }
 
   for (const [localeKey, entry] of Object.entries(missingByLocale)) {
@@ -942,6 +965,7 @@ function filterMissing(
     if (!changedKeysForThisFile) continue;
 
     const baseChangedKeysForThisFile = baseChangedKeysByFile.get(entry.path) ?? new Set<string>();
+    const yamlPluralBasesForThisFile = yamlPluralBasesByFile.get(entry.path) ?? new Set<string>();
 
     const filteredKeys: Record<string, any> = {};
     let count = 0;
@@ -950,13 +974,9 @@ function filterMissing(
       if (changedKeysForThisFile.has(key)) {
         filteredKeys[key] = details;
         count++;
-      } else {
-        // Plural variant: include only if base key changed IN THIS FILE.
-        const baseKey = key.replace(PLURAL_SUFFIX_REGEX, '');
-        if (baseKey !== key && baseChangedKeysForThisFile.has(baseKey)) {
-          filteredKeys[key] = details;
-          count++;
-        }
+      } else if (isChangedPluralVariant(key, baseChangedKeysForThisFile, yamlPluralBasesForThisFile)) {
+        filteredKeys[key] = details;
+        count++;
       }
     }
 
