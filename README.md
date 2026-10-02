@@ -27,25 +27,7 @@ $ npx skills add localheroai/agent-skill
 
 The init wizard detects your framework, configures your translation paths, and optionally sets up the GitHub Action. The [project setup guide](https://localhero.ai/docs/setup) walks through each step, including how locale codes are matched to your filenames.
 
-## Check your locale files (free, no account)
-
-`check` reads your locale files and reports what is broken. It needs no account, no API key and no `localhero.json`. Your files are never uploaded anywhere. It works on any clone, including a repository you don't own.
-
-```bash
-npx @localheroai/cli check
-```
-
-It reports:
-- keys the source language has and a target language is missing
-- empty values
-- placeholders that don't match the source, such as `%{count}` or `{{name}}` dropped from a translation
-- plural forms a language needs but doesn't have, like Polish without `few` and `many`
-- keys defined with different values in two YAML files
-- orphaned keys the source no longer has
-
-It reads Rails YAML, JSON and gettext `.po`/`.pot` files. Without a `localhero.json` it finds the locale folder by itself; point it somewhere else with `--path`. In GitHub Actions on a pull request it annotates the changed lines and fails only on problems the branch introduced. `--json` gives a machine-readable report. It finds structural problems in the files; it doesn't judge whether a translation reads well.
-
-More in the [check docs](https://localhero.ai/docs/check).
+No account yet? `npx @localheroai/cli check` finds missing keys, broken placeholders and missing plural forms in your locale files, free and offline. See [Check](#check).
 
 ## Why Localhero.ai
 
@@ -124,14 +106,6 @@ Patterns are exact names or trailing wildcards (`foo.*`, recursive). Matches are
 ## Commands
 
 Every command and flag is documented in the [CLI reference](https://localhero.ai/docs/cli-reference).
-
-### Check
-
-```bash
-npx @localheroai/cli check
-```
-
-Audits your locale files offline, with no account or API key. See [Check your locale files](#check-your-locale-files-free-no-account).
 
 ### Initialize a Project
 
