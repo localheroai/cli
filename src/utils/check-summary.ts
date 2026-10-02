@@ -23,7 +23,7 @@ export interface StepSummaryInput {
   missingTranslations: boolean;
 }
 
-export const FILL_MISSING_POINTER = 'Localhero.ai can fill missing translations automatically: https://localhero.ai';
+export const FILL_MISSING_POINTER = 'Localhero.ai can fill missing translations automatically: https://localhero.ai/cli';
 
 const MAX_LISTED_PROBLEMS = 50;
 const COLUMNS: [keyof ProblemCounts, string][] = [

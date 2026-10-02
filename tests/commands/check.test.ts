@@ -459,7 +459,7 @@ describe('check command', () => {
       await check({}, deps() as never);
 
       const lastLine = stripAnsi(String(mockConsole.log.mock.calls.at(-1)?.[0]));
-      expect(lastLine).toContain('Localhero.ai can fill missing translations automatically: https://localhero.ai');
+      expect(lastLine).toContain('Localhero.ai can fill missing translations automatically: https://localhero.ai/cli');
     });
 
     it('leaves out the pointer when nothing is missing', async () => {
@@ -749,7 +749,7 @@ describe('check command', () => {
         expect(appendFile).toHaveBeenCalledWith('/summary.md', expect.any(String));
         expect(summary()).toContain('Missing translation for "new" (locale sv) in `config/locales/sv.yml`');
         expect(summary()).toContain('| sv | 1 | 0 | 0 | 0 | 0 | 1 |');
-        expect(summary()).toContain('https://localhero.ai');
+        expect(summary()).toContain('https://localhero.ai/cli');
       });
 
       it('passes when the pull request adds no problems', async () => {

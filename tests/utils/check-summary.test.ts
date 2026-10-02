@@ -24,7 +24,7 @@ describe('buildStepSummary', () => {
     expect(markdown).toContain('### Existing problems');
     expect(markdown).toContain('| sv | 3 | 0 | 0 | 0 | 0 | 1 |');
     expect(markdown).not.toContain('| de |');
-    expect(markdown).toContain('Localhero.ai can fill missing translations automatically: https://localhero.ai\n');
+    expect(markdown).toContain('Localhero.ai can fill missing translations automatically: https://localhero.ai/cli\n');
   });
 
   it('says when the change adds no problems and leaves out the Localhero.ai line without missing translations', () => {
