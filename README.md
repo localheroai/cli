@@ -27,6 +27,8 @@ $ npx skills add localheroai/agent-skill
 
 The init wizard detects your framework, configures your translation paths, and optionally sets up the GitHub Action. The [project setup guide](https://localhero.ai/docs/setup) walks through each step, including how locale codes are matched to your filenames.
 
+No account yet? `npx @localheroai/cli check` finds missing keys, broken placeholders and missing plural forms in your locale files, free and offline. See [Check](#check).
+
 ## Why Localhero.ai
 
 Most translation tools bolt on after the fact. You write code, then
