@@ -919,8 +919,13 @@ describe('check command', () => {
       const { exitCode, reports } = await run();
 
       expect(exitCode).toBe(1);
-      expect(reports[0].missing.length).toBeGreaterThan(0);
-      expect(reports[0].missing.every((m) => m.introduced)).toBe(true);
+      expect(reports[0].missing.map((m) => [m.key, m.introduced])).toEqual([
+        ['items.one', true],
+        ['files.few', false],
+        ['files.many', false],
+        ['items.few', true],
+        ['items.many', true]
+      ]);
       expect(reports[0].missingPluralCategories).toEqual([expect.objectContaining({ key: 'files', introduced: false })]);
     });
 

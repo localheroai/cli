@@ -378,6 +378,7 @@ export async function updateYamlFile(
   }
 
   const canSplice = !hasUnsupportedValueShape(translations) && doc.contents && yaml.isMap(doc.contents);
+  let fallbackReason = 'could not be spliced';
 
   if (canSplice) {
     const { output, applied } = spliceYamlUpdate(source, doc, translations, languageCode, options.indent);
@@ -390,12 +391,13 @@ export async function updateYamlFile(
           created: false
         };
       }
-      console.warn(
-        `Warning: splice-writer output for ${filePath} ${validation.reason}; falling back to full-document rewrite.`
-      );
+      fallbackReason = `splice-writer output ${validation.reason}`;
     }
   }
 
+  console.warn(
+    `Warning: ${filePath} ${fallbackReason}; falling back to full-document rewrite, comments and layout may change.`
+  );
   await updateYamlTranslations(doc, translations, languageCode);
   await writeYamlFile(filePath, doc.toString({
     indent: options.indent,

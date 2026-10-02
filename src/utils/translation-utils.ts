@@ -125,10 +125,68 @@ function isPluralForm(key: string, sourceKeys: Record<string, any>): boolean {
   );
 }
 
+// Bases whose direct children in the source are all CLDR categories, at least
+// two of them, and nothing nested: the rule the backend importer uses to stamp a
+// Rails plural group (CldrPlurals.plural_group?).
+function yamlPluralGroupBases(sourceKeys: Record<string, any>): Set<string> {
+  const categoriesByBase = new Map<string, string[]>();
+  const disqualified = new Set<string>();
+
+  for (const key of Object.keys(sourceKeys)) {
+    const parts = key.split('.');
+    for (let depth = 1; depth < parts.length - 1; depth++) {
+      disqualified.add(parts.slice(0, depth).join('.'));
+    }
+    if (parts.length < 2) continue;
+
+    const base = parts.slice(0, -1).join('.');
+    const child = parts[parts.length - 1];
+    if (!CLDR_CATEGORIES.includes(child)) {
+      disqualified.add(base);
+      continue;
+    }
+    categoriesByBase.set(base, [...(categoriesByBase.get(base) ?? []), child]);
+  }
+
+  const bases = new Set<string>();
+  for (const [base, categories] of categoriesByBase) {
+    if (!disqualified.has(base) && categories.length >= 2) bases.add(base);
+  }
+  return bases;
+}
+
+// The same rule read from the parsed YAML tree, which unlike flattened keys
+// can tell a nested `foo: { one:, other: }` from literal `"foo.one"` keys.
+export function yamlPluralGroupBasesFromTree(node: unknown, prefix = ''): Set<string> {
+  const bases = new Set<string>();
+  if (!node || typeof node !== 'object' || Array.isArray(node)) return bases;
+
+  const entries = Object.entries(node as Record<string, unknown>);
+  const isGroup = prefix !== '' && entries.length >= 2 && entries.every(
+    ([key, value]) => CLDR_CATEGORIES.includes(key) && (value === null || typeof value !== 'object')
+  );
+  if (isGroup) {
+    bases.add(prefix);
+    return bases;
+  }
+
+  for (const [key, value] of entries) {
+    for (const base of yamlPluralGroupBasesFromTree(value, prefix ? `${prefix}.${key}` : key)) {
+      bases.add(base);
+    }
+  }
+  return bases;
+}
+
+function yamlPluralMetadata(base: string, category: string) {
+  return { plural: true, plural_format: 'yaml', plural_category: category, plural_base: base };
+}
+
 export function findMissingTranslations(
   sourceKeys: Record<string, any>,
   targetKeys: Record<string, any>,
-  localeCategories?: string[]
+  localeCategories?: string[],
+  sourcePluralBases?: Set<string>
 ): TranslationKeysResult {
   const missingKeys: Record<string, SourceKeyDetails> = {};
   const skippedKeys: Record<string, SkippedKeyDetails> = {};
@@ -259,6 +317,59 @@ export function findMissingTranslations(
     }
   }
 
+  // Request the plural categories this locale needs that the SOURCE group does
+  // not have (#636). English writes one/other; Polish also renders few and many,
+  // and the loop above can only iterate keys the source already contains. Without
+  // this the backend generates the categories but the Action never asks for them,
+  // so pl.yml keeps two forms and Rails falls back to `other`.
+  //
+  // Only fires when the settings endpoint supplied localeCategories: a JSON
+  // source gets `undefined` and behaves exactly as before.
+  if (localeCategories) {
+    const pluralBases = sourcePluralBases ?? yamlPluralGroupBases(sourceKeys);
+
+    // Stamp real plural forms the way the importer does, so a group that first
+    // reaches the backend through translate (a new group in a PR) is recognised
+    // as one and its target-only categories can be generated.
+    for (const [key, entry] of Object.entries(missingKeys)) {
+      const parsed = splitPluralKey(key);
+      if (!parsed || !pluralBases.has(parsed.base)) continue;
+
+      entry.metadata = { ...(entry.metadata ?? {}), ...yamlPluralMetadata(parsed.base, parsed.category) };
+    }
+
+    const seenBases = new Set<string>();
+
+    for (const key of Object.keys(sourceKeys)) {
+      const parsed = splitPluralKey(key);
+      if (!parsed || !pluralBases.has(parsed.base)) continue;
+      if (seenBases.has(parsed.base)) continue;
+      seenBases.add(parsed.base);
+
+      const otherKey = `${parsed.base}.other`;
+      const otherDetails = sourceKeys[otherKey];
+      if (otherDetails === undefined) continue;
+
+      const otherValue =
+        typeof otherDetails === 'object' && otherDetails !== null && 'value' in otherDetails
+          ? otherDetails.value
+          : otherDetails;
+      if (typeof otherValue !== 'string' || otherValue.trim() === '') continue;
+
+      for (const category of localeCategories) {
+        const synthesised = `${parsed.base}.${category}`;
+        if (synthesised in sourceKeys) continue;
+        if (synthesised in missingKeys || synthesised in skippedKeys) continue;
+        if (hasValue(targetKeys[synthesised])) continue;
+
+        missingKeys[synthesised] = {
+          value: otherValue,
+          sourceKey: otherKey
+        };
+      }
+    }
+  }
+
   return { missingKeys, skippedKeys };
 }
 
@@ -293,13 +404,11 @@ export function findMissingTranslationsByLocale(
     const sourceContentRaw = Buffer.from(sourceFile.content, 'base64').toString();
     const sourceContent = parseFile(sourceContentRaw, sourceFile.format, sourceFile.path);
     const sourceWrapper = sourceContent[config.sourceLocale];
-    const sourceKeys = flattenTranslations(
-      sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
-        ? sourceWrapper
-        : sourceContent,
-      '',
-      sourceFile.format
-    );
+    const sourceTree = sourceWrapper && typeof sourceWrapper === 'object' && !Array.isArray(sourceWrapper)
+      ? sourceWrapper
+      : sourceContent;
+    const sourceKeys = flattenTranslations(sourceTree, '', sourceFile.format);
+    const sourcePluralBases = yamlPluralGroupBasesFromTree(sourceTree);
 
     let effectiveSourceKeys = sourceKeys;
     if (matcher) {
@@ -317,7 +426,8 @@ export function findMissingTranslationsByLocale(
         sourceFile,
         config.sourceLocale,
         matcher,
-        config.localePluralCategories?.[targetLocale]
+        config.localePluralCategories?.[targetLocale],
+        sourcePluralBases
       );
 
       if (result.targetRemoved && result.targetRemoved.length > 0) {
@@ -684,7 +794,8 @@ export function processLocaleTranslations(
   sourceFile: TranslationFile,
   sourceLocale: string,
   matcher?: (keyName: string) => boolean,
-  localeCategories?: string[]
+  localeCategories?: string[],
+  sourcePluralBases?: Set<string>
 ): ProcessLocaleResult & { targetRemoved?: string[] } {
   try {
     const targetFile = findTargetFile(targetFiles, targetLocale, sourceFile, sourceLocale);
@@ -766,7 +877,8 @@ export function processLocaleTranslations(
       const result = findMissingTranslations(
         sourceKeys,
         targetKeys,
-        isYamlFile ? localeCategories : undefined
+        isYamlFile ? localeCategories : undefined,
+        isYamlFile ? sourcePluralBases : undefined
       );
       missingKeys = result.missingKeys;
       skippedKeys = result.skippedKeys;

@@ -1,5 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile, yamlPluralGroupBasesFromTree } from '../../src/utils/translation-utils.js';
 import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
 import { createIgnoreMatcher } from '../../src/utils/ignore-keys.js';
 
@@ -321,6 +321,79 @@ describe('translation-utils', () => {
         expect(result.missingKeys['errors.other']).toBeDefined();
       });
     });
+
+    describe('target-only plural categories (#636)', () => {
+      const source = {
+        'overdue.one': { value: '1 task overdue' },
+        'overdue.other': { value: '%{count} tasks overdue' }
+      };
+      const polish = ['one', 'few', 'many', 'other'];
+
+      it('requests the categories the locale needs that the source lacks', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(Object.keys(result.missingKeys).sort()).toEqual(
+          ['overdue.few', 'overdue.many', 'overdue.one', 'overdue.other']
+        );
+      });
+
+      it("sends .other's text and points sourceKey at .other", () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.few']).toEqual({
+          value: '%{count} tasks overdue',
+          sourceKey: 'overdue.other'
+        });
+      });
+
+      it('points sourceKey at the key itself for keys the source has', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.one'].sourceKey).toBe('overdue.one');
+      });
+
+      it('does not request a category the target already has', () => {
+        const target = { 'overdue.few': { value: '%{count} zadania' } };
+        const result = findMissingTranslations(source, target, polish);
+        expect(result.missingKeys['overdue.few']).toBeUndefined();
+        expect(result.missingKeys['overdue.many']).toBeDefined();
+      });
+
+      it('requests nothing extra without locale categories', () => {
+        const result = findMissingTranslations(source, {});
+        expect(Object.keys(result.missingKeys).sort()).toEqual(['overdue.one', 'overdue.other']);
+      });
+
+      it('requests nothing extra for a locale with fewer categories', () => {
+        const result = findMissingTranslations(source, {}, ['one', 'other']);
+        expect(Object.keys(result.missingKeys).sort()).toEqual(['overdue.one', 'overdue.other']);
+      });
+
+      it('stamps real plural forms with the metadata the importer uses', () => {
+        const result = findMissingTranslations(source, {}, polish);
+        expect(result.missingKeys['overdue.one'].metadata).toEqual({
+          plural: true, plural_format: 'yaml', plural_category: 'one', plural_base: 'overdue'
+        });
+      });
+
+      it('does not stamp a namespace that mixes categories with other keys', () => {
+        const mixed = {
+          'home_type.duplex': { value: 'Duplex' },
+          'home_type.one': { value: 'One' },
+          'home_type.other': { value: 'Other' }
+        };
+        const result = findMissingTranslations(mixed, {}, polish);
+        expect(result.missingKeys['home_type.other'].metadata).toBeUndefined();
+        expect(result.missingKeys['home_type.few']).toBeUndefined();
+      });
+
+      it('does not stamp without locale categories', () => {
+        const result = findMissingTranslations(source, {});
+        expect(result.missingKeys['overdue.one'].metadata).toBeUndefined();
+      });
+
+      it('does not synthesise siblings for a non-plural .other key', () => {
+        const result = findMissingTranslations({ 'errors.other': { value: 'Other error' } }, {}, polish);
+        expect(Object.keys(result.missingKeys)).toEqual(['errors.other']);
+      });
+    });
   });
 
   describe('findMissingTranslationsByLocale', () => {
@@ -592,6 +665,37 @@ describe('translation-utils', () => {
         const keys = Object.values(result.missing).flatMap((e) => Object.keys(e.keys));
         expect(keys).toContain('questions_remaining.one');
       });
+    });
+  });
+
+  describe('plural groups from the YAML tree (#636)', () => {
+    const yamlFile = (tree) => [{ path: 'config/locales/en.yml', format: 'yml', content: createBase64Content({ en: tree }) }];
+    const polish = { sourceLocale: 'en', outputLocales: ['pl'], localePluralCategories: { pl: ['one', 'few', 'many', 'other'] } };
+    const requested = (result) => Object.assign({}, ...Object.values(result.missing).map((e) => e.keys));
+
+    it('finds nested groups whose children are all CLDR categories', () => {
+      const bases = yamlPluralGroupBasesFromTree({
+        board: { overdue: { one: 'a', other: 'b' }, title: 'x' },
+        home_type: { loft: 'Loft', other: 'Other' },
+        nested: { one: { deep: 'x' }, other: 'y' }
+      });
+      expect([...bases]).toEqual(['board.overdue']);
+    });
+
+    it('stamps and completes a nested plural group', () => {
+      const keys = requested(findMissingTranslationsByLocale(
+        yamlFile({ overdue: { one: '1 task', other: '%{count} tasks' } }), {}, polish, false
+      ));
+      expect(Object.keys(keys).sort()).toEqual(['overdue.few', 'overdue.many', 'overdue.one', 'overdue.other']);
+      expect(keys['overdue.one'].metadata.plural_format).toBe('yaml');
+    });
+
+    it('leaves literal dotted keys alone', () => {
+      const keys = requested(findMissingTranslationsByLocale(
+        yamlFile({ 'foo.one': 'One', 'foo.other': 'Other' }), {}, polish, false
+      ));
+      expect(Object.keys(keys).sort()).toEqual(['foo.one', 'foo.other']);
+      expect(keys['foo.one'].metadata).toBeUndefined();
     });
   });
 
