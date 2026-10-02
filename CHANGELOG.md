@@ -4,8 +4,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.76] - 2026-10-02
+
 ### Changed
 - `check` run without a `localhero.json` now ends its plain-text report with one line saying Localhero.ai can fill missing translations, with a link. It only appears when translations are missing. `--json`, `--format github` and projects with a `localhero.json` are unchanged.
+
+### Fixed
+- A plural key written in English carries `one` and `other`, the only two categories English has. When translating into a language with more categories, such as Polish or Russian, the CLI now asks for every category that language needs rather than mirroring the source's set. Before, `pl.yml` got two forms, Rails fell back to `other` for counts of 2 and above, and the result was fluent-looking Polish that is grammatically wrong with nothing reported as missing. A language with two categories, such as Swedish, is unaffected and never gains `few` or `many`. The source file is never written to: English keeps the categories English has.
+- `translate --changed-only` and `ci` no longer discard those added categories. The filter that keeps a run to the keys a pull request changed recognised plural forms only in the gettext `__plural_N` spelling, so a YAML category such as `attachment_count.few` was dropped on the way out. Two shapes were affected: a plural group added in a pull request wrote only `one` and `other`, and a group whose source text was reworded wrote nothing at all while the run reported "No changed keys need translation" and exited 0. `pull --changed-only` discarded the same categories when they came back from Localhero.
+- `check`'s tests no longer fail when a developer's shell sets `FORCE_COLOR`. The assertions matched a plain string that chalk split with colour codes, so the suite passed in CI and failed locally.
 
 ## [0.0.75] - 2026-10-01
 
