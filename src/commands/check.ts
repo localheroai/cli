@@ -39,7 +39,7 @@ import {
 import { detectCiContext, escapeAnnotationData, type CiContext, type Env } from '../utils/ci-context.js';
 import { resolveChangeBase, runGit, type GitRunner } from '../utils/check-git.js';
 import { baseFileSet, DUPLICATE_KEY_ERROR, type ChangeStatus, type FileSet } from '../utils/check-changes.js';
-import { buildStepSummary, plural, type ProblemCounts } from '../utils/check-summary.js';
+import { buildStepSummary, FILL_MISSING_POINTER, plural, type ProblemCounts } from '../utils/check-summary.js';
 import { spellPlaceholders } from '../utils/placeholders.js';
 import { keyLineFinder, type KeyLineLookup } from '../utils/key-lines.js';
 import type {
@@ -989,6 +989,7 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   } else {
     if (unavailable) con.log(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));
     printHumanReport(con, reports, keyCount, Boolean(options.all));
+    if (result.detected && reports.some((r) => missingCount(r) > 0)) con.log(`\n${FILL_MISSING_POINTER}`);
   }
 
   if (summaryPath) writeStepSummary(deps, summaryPath, changes, reports, sourceLocale);
