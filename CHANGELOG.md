@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.77] - 2026-10-02
+
 ### Changed
 - The link `check` prints when translations are missing, in the terminal report and the GitHub job summary, is now `https://localhero.ai/cli`.
 
