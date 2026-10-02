@@ -470,6 +470,45 @@ describe('check command', () => {
       expect(printed()).not.toContain('https://localhero.ai');
     });
 
+    it.each(['sr-Latn:', '"sr-Latn" :'])('reads a Rails file whose root key %s names another locale than its file name', async (root) => {
+      files = [
+        yamlFile('en', '  a: "A"\n  b: "B"\n'),
+        { ...yamlFile('sr', ''), content: Buffer.from(`${root}\n  a: "A-sr"\n`).toString('base64') }
+      ];
+
+      const { reports } = await run();
+
+      expect(reports[0].orphans).toEqual([]);
+      expect(reports[0].missing.map((m) => m.key)).toEqual(['b']);
+      expect(printed()).toContain('config/locales/sr.yml is named for sr but defines sr-Latn');
+    });
+
+    it('still reports a file whose root key is the source locale', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), { ...yamlFile('sv', ''), content: Buffer.from('en:\n  a: "A-sv"\n').toString('base64') }];
+
+      const { reports } = await run();
+
+      expect(reports[0].missing.map((m) => m.key)).toEqual(['a']);
+    });
+
+    it('leaves a namespace alone in files without a locale root, even when it reads as a language code', async () => {
+      const raw = (locale: string, body: string) => ({ ...yamlFile(locale, ''), content: Buffer.from(body).toString('base64') });
+      files = [raw('en', 'id:\n  title: "Identity"\n'), raw('sv', 'id:\n  title: "Identitet"\n')];
+
+      const { reports } = await run();
+
+      expect(reports[0].missing).toEqual([]);
+      expect(reports[0].orphans).toEqual([]);
+    });
+
+    it('reads a locale file that holds only a comment', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), { ...yamlFile('sv', ''), content: Buffer.from('# translations pending\n').toString('base64') }];
+
+      const { reports } = await run();
+
+      expect(reports[0].missing.map((m) => m.key)).toEqual(['a']);
+    });
+
     it('detects the locale folder and languages, with en as the source', async () => {
       files = [
         yamlFile('en', '  a: "A"\n  b: "B"\n'),
@@ -658,6 +697,28 @@ describe('check command', () => {
 
     beforeEach(() => {
       env = { ...PR_ENV };
+    });
+
+    it('fails when a pull request drops a key from a file whose root key names another locale', async () => {
+      noConfig = true;
+      const serbian = (body: string) => ({ ...yamlFile('sr', ''), content: Buffer.from(`sr-Latn:\n${body}`).toString('base64') });
+      onBase(yamlFile('en', '  a: "A"\n  b: "B"\n'), serbian('  a: "A-sr"\n  b: "B-sr"\n'));
+      files = [yamlFile('en', '  a: "A"\n  b: "B"\n'), serbian('  a: "A-sr"\n')];
+
+      const { exitCode } = await run();
+
+      expect(exitCode).toBe(1);
+    });
+
+    it('judges the base branch by its own source files when it decides how to read root keys', async () => {
+      noConfig = true;
+      const raw = (locale: string, body: string) => ({ ...yamlFile(locale, ''), content: Buffer.from(body).toString('base64') });
+      onBase(raw('en', 'id:\n  title: "Identity"\n'), raw('sv', 'id:\n  title: "Identitet"\n'));
+      files = [raw('en', 'en:\n  id:\n    title: "Identity"\n'), raw('sv', 'id:\n  title: "Identitet"\n')];
+
+      const { exitCode } = await run();
+
+      expect(exitCode).toBe(1);
     });
 
     describe('on a pull request', () => {

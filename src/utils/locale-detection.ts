@@ -19,7 +19,7 @@ export interface SourceChoice {
 }
 
 // "ui.json" or "db.yml" match the locale pattern but name no language.
-function isLanguage(code: string): boolean {
+export function isLanguage(code: string): boolean {
   try {
     return LANGUAGE_NAMES.of(code.replace('_', '-')) !== undefined;
   } catch {
