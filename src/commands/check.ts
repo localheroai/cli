@@ -83,7 +83,7 @@ interface CheckDependencies {
     ) => Promise<TranslationFile[] | TranslationFilesResult>;
   };
   projectDetection: Pick<ConfigDetectionDeps, 'detectProjectType'>;
-  fsUtils: Pick<ConfigDetectionDeps, 'listFiles' | 'readFile'>;
+  fsUtils: Pick<ConfigDetectionDeps, 'listFiles' | 'readFile' | 'findLocaleDirs'>;
   env: Env;
   git: GitRunner;
   appendFile: (path: string, text: string) => void;
@@ -94,7 +94,11 @@ const defaultDeps: CheckDependencies = {
   configUtils: configService,
   fileUtils: { findTranslationFiles },
   projectDetection: { detectProjectType: defaultConfigDetectionDeps.detectProjectType },
-  fsUtils: { listFiles: defaultConfigDetectionDeps.listFiles, readFile: defaultConfigDetectionDeps.readFile },
+  fsUtils: {
+    listFiles: defaultConfigDetectionDeps.listFiles,
+    readFile: defaultConfigDetectionDeps.readFile,
+    findLocaleDirs: defaultConfigDetectionDeps.findLocaleDirs
+  },
   env: process.env,
   git: runGit,
   appendFile: (path, text) => appendFileSync(path, text)
@@ -287,6 +291,9 @@ function printDetected(con: CheckDependencies['console'], detected: DetectedSetu
   con.log(chalk.blue(`ℹ No localhero.json found. Checking ${where}, source ${detected.source} (${SOURCE_REASONS[detected.reason]}).`));
   if (detected.excluded.length > 0) {
     con.log(chalk.blue(`ℹ Skipped ${detected.excluded.join(', ')}: no file matches a source file. Include them with --locales.`));
+  }
+  if (detected.otherPaths.length > 0) {
+    con.log(chalk.blue(`ℹ Also found ${detected.otherPaths.join(', ')}. Check each with --path <folder>`));
   }
   if (detected.reason === 'guessed') {
     con.log(chalk.yellow(`⚠ ${detected.source} is a guess. If your source language is another one, pass --source <locale>.`));
