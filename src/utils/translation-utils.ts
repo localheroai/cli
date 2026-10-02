@@ -107,7 +107,7 @@ function extractPrimitiveValue(value: unknown): TranslationPrimitiveValue {
  */
 const CLDR_CATEGORIES = ['zero', 'one', 'two', 'few', 'many', 'other'];
 
-function splitPluralKey(key: string): { base: string; category: string } | null {
+export function splitPluralKey(key: string): { base: string; category: string } | null {
   const lastDot = key.lastIndexOf('.');
   if (lastDot === -1) return null;
   const category = key.slice(lastDot + 1);
@@ -153,6 +153,12 @@ function yamlPluralGroupBases(sourceKeys: Record<string, any>): Set<string> {
     if (!disqualified.has(base) && categories.length >= 2) bases.add(base);
   }
   return bases;
+}
+
+// The same rule over a bare key set, for callers (--changed-only filtering)
+// that hold changed key names rather than a source map.
+export function yamlPluralGroupBasesFromKeys(keys: Iterable<string>): Set<string> {
+  return yamlPluralGroupBases(Object.fromEntries([...keys].map((key) => [key, true])));
 }
 
 // The same rule read from the parsed YAML tree, which unlike flattened keys

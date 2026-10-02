@@ -4,6 +4,7 @@ import { findTranslationFiles } from '../utils/files.js';
 import { isGitAvailable, getChangedKeysForProject } from '../utils/git-changes.js';
 import { checkAuth as defaultCheckAuth } from '../utils/auth.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from '../utils/po-utils.js';
+import { splitPluralKey, yamlPluralGroupBasesFromKeys } from '../utils/translation-utils.js';
 import chalk from 'chalk';
 import type { Updates } from '../utils/sync-service.js';
 import type {
@@ -59,6 +60,10 @@ interface PullResult {
 function filterUpdatesByKeys(updates: Updates, changedKeys: Set<string>): Updates {
   // Extract base keys from plural forms in changedKeys (only relevant for .po files)
   const baseChangedKeys = extractBaseKeys(changedKeys);
+  // PLURAL_SUFFIX_REGEX is gettext-only, so a YAML/JSON group (`count.one` /
+  // `count.few`) needs the CLDR-category bases among the changed keys, or the
+  // categories the backend generated come back and get dropped here.
+  const yamlPluralBases = yamlPluralGroupBasesFromKeys(changedKeys);
 
   return {
     updates: {
@@ -75,7 +80,11 @@ function filterUpdatesByKeys(updates: Updates, changedKeys: Set<string>): Update
                 }
                 // Include if base key changed (for plurals)
                 const baseKey = t.key.replace(PLURAL_SUFFIX_REGEX, '');
-                return baseKey !== t.key && baseChangedKeys.has(baseKey);
+                if (baseKey !== t.key && baseChangedKeys.has(baseKey)) {
+                  return true;
+                }
+                const parsed = splitPluralKey(t.key);
+                return parsed !== null && yamlPluralBases.has(parsed.base);
               })
             }))
             .filter(lang => lang.translations.length > 0)
