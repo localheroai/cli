@@ -4,8 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- Requires Node.js 20 or newer (was 18). The `.po` parser's current major version needs it; Node 18 reached end of life in April 2025.
+
 ### Fixed
 - In a monorepo with one Localhero project per app, a sync from the web app is now applied only by the app it belongs to. Every app's job receives the same sync, and before, the others tried to write its files into their own folder and failed the run, which could cancel the job that was meant to apply it. They now print a notice and exit 0 without touching any file. Needs the matching server change; against an older server the CLI behaves as before.
+- `.po` catalogs with obsolete entries that keep their previous msgid (`#~|` lines, which Django's `makemessages` writes by default via `msgmerge --previous`) are read correctly. Before, the parser rejected the whole file: `check` reported the language as not checked and exited 0, and `translate` could not read the catalog.
 
 ## [0.0.78] - 2026-10-02
 
