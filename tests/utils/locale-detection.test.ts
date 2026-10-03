@@ -105,6 +105,19 @@ describe('chooseSourceLocale', () => {
     expect(chooseSourceLocale({ locales, keyCounts, gettextSources: [], hasTemplate: false })).toEqual({ locale: 'en', reason: 'en' });
   });
 
+  it('picks a regional English locale over the one with the most keys', () => {
+    const counts = { 'de-DE': 120, 'en-US': 100, 'ar-EG': 130 };
+    expect(chooseSourceLocale({ locales: ['de-DE', 'en-US', 'ar-EG'], keyCounts: counts, gettextSources: [], hasTemplate: false })).toEqual({ locale: 'en-US', reason: 'en' });
+  });
+
+  it.each([
+    [['en-GB', 'en-US', 'sv'], 'en-US'],
+    [['en_GB', 'en_US', 'sv'], 'en_US'],
+    [['en-GB', 'sv'], 'en-GB']
+  ])('prefers US English among English variants in %j', (variants, expected) => {
+    expect(chooseSourceLocale({ locales: variants, keyCounts: {}, gettextSources: [], hasTemplate: false })).toEqual({ locale: expected, reason: 'en' });
+  });
+
   it('guesses the locale with the most keys otherwise', () => {
     expect(chooseSourceLocale({ locales: ['sv', 'de'], keyCounts, gettextSources: [], hasTemplate: false })).toEqual({ locale: 'sv', reason: 'guessed' });
   });

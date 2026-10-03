@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `check` run without a `localhero.json` recognises a regional English file (`en-US.json`, `en_US.yml`, `en-GB`) as the source. Before, it only matched a plain `en` and otherwise picked the language with the most keys, which in many JavaScript projects named after `en-US` meant checking every locale against, say, Arabic. US English wins when several English variants exist.
 - `check` run without a `localhero.json` now finds locale folders below the project root, such as `packages/app/locales` or `apps/web/public/locales` in a monorepo, when the usual folder holds none. It checks the folder with the most languages and names any others it found, each checkable with `--path`. Folders under `node_modules`, `vendor`, build output, virtual environments and test fixtures are left out. Before, the run stopped with "No translation files found".
 
 ## [0.0.77] - 2026-10-02

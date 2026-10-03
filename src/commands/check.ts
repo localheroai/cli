@@ -278,7 +278,7 @@ const SOURCE_REASONS: Record<DetectedSetup['reason'], string> = {
   option: 'from --source',
   gettext: 'its catalog is untranslated',
   template: 'from the .pot template',
-  en: 'en is present',
+  en: 'English is present',
   guessed: 'guessed from the most keys'
 };
 

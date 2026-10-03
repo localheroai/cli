@@ -70,6 +70,13 @@ export function looksLikeGettextSource(content: string): boolean {
   return untranslated.length / entries.length >= GETTEXT_SOURCE_SHARE;
 }
 
+// en-US.json is the most common English file name in JavaScript projects.
+function englishLocale(locales: string[]): string | null {
+  if (locales.includes('en')) return 'en';
+  const variants = locales.filter((locale) => /^en[-_]/i.test(locale));
+  return variants.find((locale) => /^en[-_]us$/i.test(locale)) ?? variants.sort()[0] ?? null;
+}
+
 export function chooseSourceLocale(input: {
   explicit?: string;
   locales: string[];
@@ -82,7 +89,8 @@ export function chooseSourceLocale(input: {
   if (gettextSources.length === 1) return { locale: gettextSources[0], reason: 'gettext' };
   if (hasTemplate) return { locale: 'en', reason: 'template' };
   if (locales.length === 0) return null;
-  if (locales.includes('en')) return { locale: 'en', reason: 'en' };
+  const english = englishLocale(locales);
+  if (english) return { locale: english, reason: 'en' };
 
   const [mostKeys] = [...locales].sort((a, b) => (keyCounts[b] ?? 0) - (keyCounts[a] ?? 0));
   return { locale: mostKeys, reason: 'guessed' };
