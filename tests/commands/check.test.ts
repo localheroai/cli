@@ -645,6 +645,15 @@ describe('check command', () => {
       expect(printed()).not.toContain('Locale        Keys');
     });
 
+    it('fails when --source names a language with no files', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+
+      const { exitCode } = await run({ source: 'fr' });
+
+      expect(exitCode).toBe(1);
+      expect(mockConsole.error).toHaveBeenCalledWith(expect.stringContaining('No files found for the source locale fr'));
+    });
+
     it('stops with a pointer to --path when nothing is found', async () => {
       const { exitCode } = await run();
 

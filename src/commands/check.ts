@@ -653,6 +653,11 @@ export async function runCheck(
     return failedResult(format, sourceLocale);
   }
 
+  if (sourceFiles.length === 0) {
+    console.error(chalk.red(`\n✖ No files found for the source locale ${sourceLocale}, so there is nothing to compare against. Pass --source with a locale that has files.\n`));
+    return failedResult(format, sourceLocale);
+  }
+
   const context: AnalysisContext = {
     sourceLocale,
     targetLocales,

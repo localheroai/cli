@@ -58,6 +58,7 @@ export interface PlaceholderMismatch {
 export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatMap): PlaceholderMismatch[] {
   const mismatches: PlaceholderMismatch[] = [];
   const pluralBases = gettextPluralBases([...Object.keys(sourceKeys), ...Object.keys(targetKeys)]);
+  const pluralGroups = gettextPluralGroups(sourceKeys, pluralBases);
   for (const key of Object.keys(sourceKeys)) {
     const source = toStringValue(sourceKeys[key]);
     if (source === null || source === '') continue;
@@ -71,14 +72,15 @@ export function findPlaceholderMismatches(sourceKeys: FlatMap, targetKeys: FlatM
 
     const missingInTarget: string[] = [];
     const unexpectedInTarget: string[] = [];
+    const allowedInTarget = pluralGroups.get(key.replace(GETTEXT_PLURAL_SUFFIX, '')) ?? sourceCounts;
 
     for (const [token, count] of sourceCounts) {
-      if ((targetCounts.get(token) ?? 0) < count) missingInTarget.push(token);
+      if (occurrences(token, targetCounts) < occurrences(token, sourceCounts, count)) missingInTarget.push(token);
     }
     const pluralForm = isPluralFormKey(key) || pluralBases.has(key);
     for (const [token, count] of targetCounts) {
       if (pluralForm && token.endsWith(':count')) continue;
-      if ((sourceCounts.get(token) ?? 0) < count) unexpectedInTarget.push(token);
+      if (occurrences(token, allowedInTarget) < occurrences(token, targetCounts, count)) unexpectedInTarget.push(token);
     }
 
     if (missingInTarget.length === 0 && unexpectedInTarget.length === 0) continue;
@@ -173,6 +175,26 @@ function mayOmitPlaceholder(key: string): boolean {
   if (GETTEXT_PLURAL_SUFFIX.test(key)) return true;
   const leaf = leafOf(key);
   return COUNT_OPTIONAL_CATEGORIES.some((category) => leaf === category || leaf.endsWith(`_${category}`));
+}
+
+// ICU's # stands in for the plural argument, so a translation need not repeat {n} as often as the source.
+function occurrences(token: string, counts: Map<string, number>, count = counts.get(token) ?? 0): number {
+  return token.startsWith('icu:') ? Math.min(count, 1) : count;
+}
+
+// Every form of a gettext plural may use a placeholder its singular leaves out ("1 place" / "%(counter)s places").
+function gettextPluralGroups(sourceKeys: FlatMap, pluralBases: Set<string>): Map<string, Map<string, number>> {
+  const groups = new Map<string, Map<string, number>>();
+  for (const [sourceKey, value] of Object.entries(sourceKeys)) {
+    const base = sourceKey.replace(GETTEXT_PLURAL_SUFFIX, '');
+    if (!pluralBases.has(base)) continue;
+    const group = groups.get(base) ?? new Map<string, number>();
+    for (const [token, count] of placeholderMultiset(toStringValue(value) ?? '')) {
+      group.set(token, Math.max(group.get(token) ?? 0, count));
+    }
+    groups.set(base, group);
+  }
+  return groups;
 }
 
 function gettextPluralBases(keys: string[]): Set<string> {
