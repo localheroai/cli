@@ -5,6 +5,8 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- `check` no longer flags a gettext plural form for using a placeholder only the plural source has ("Moved down 1 place." / "%(counter)s places"), or an ICU translation for saying the number with `#` instead of repeating `{n}`. Rails and i18next placeholders are still counted, so a dropped repeat like a second `%{days}` is still reported.
+- `check --source <locale>` with no files for that locale now fails with a message instead of reporting 0 keys and 100% complete.
 - `check` run without a `localhero.json` now finds locale folders below the project root, such as `packages/app/locales` or `apps/web/public/locales` in a monorepo, when the usual folder holds none. It checks the folder with the most languages and names any others it found, each checkable with `--path`. Folders under `node_modules`, `vendor`, build output, virtual environments and test fixtures are left out. Before, the run stopped with "No translation files found".
 
 ## [0.0.77] - 2026-10-02

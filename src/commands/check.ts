@@ -653,6 +653,12 @@ export async function runCheck(
     return failedResult(format, sourceLocale);
   }
 
+  // A source file that failed to parse is already reported above and fails the run as a parse failure.
+  if (sourceFiles.length === 0 && parseFailures.length === 0) {
+    console.error(chalk.red(`\n✖ No files found for the source locale ${sourceLocale}, so there is nothing to compare against. Pass --source with a locale that has files.\n`));
+    return failedResult(format, sourceLocale);
+  }
+
   const context: AnalysisContext = {
     sourceLocale,
     targetLocales,
