@@ -25,6 +25,24 @@ describe('findOrphanKeys', () => {
 });
 
 describe('findPlaceholderMismatches', () => {
+  it('accepts a gettext plural form using the placeholder only the plural source has', () => {
+    const source = { 'Moved down 1 place.': 'Moved down 1 place.', 'Moved down 1 place.__plural_1': 'Moved down %(counter)s places.' };
+    const target = { 'Moved down 1 place.': 'Flyttad %(counter)s plats.', 'Moved down 1 place.__plural_1': 'Flyttad %(counter)s platser.' };
+    expect(findPlaceholderMismatches(source, target)).toEqual([]);
+  });
+
+  it('accepts an ICU translation that says the number with # instead of repeating the argument', () => {
+    const source = { items: 'You have {n} items: {n, plural, one {# item} other {# items}}' };
+    const target = { items: 'Du har {n, plural, one {# sak} other {# saker}}' };
+    expect(findPlaceholderMismatches(source, target)).toEqual([]);
+  });
+
+  it('still flags an ICU argument the translation leaves out entirely', () => {
+    const source = { items: 'You have {n} items: {n, plural, one {# item} other {# items}}' };
+    const found = findPlaceholderMismatches(source, { items: 'Du har saker' });
+    expect(found.map((m) => m.missingInTarget)).toEqual([['icu:n']]);
+  });
+
   it('flags a placeholder missing from the target', () => {
     const source = { welcome: 'Hi %{name}' };
     const target = { welcome: 'Hej' };

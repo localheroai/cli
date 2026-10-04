@@ -645,6 +645,28 @@ describe('check command', () => {
       expect(printed()).not.toContain('Locale        Keys');
     });
 
+    it('reports an unparseable source file as a parse failure, also in --json', async () => {
+      files = [yamlFile('sv', '  a: "A-sv"\n')];
+      rawContents['config/locales/en.yml'] = 'en:\n  a: "A"\n   b: "B"\n';
+      parseFailures = [{ path: 'config/locales/en.yml', error: 'bad indentation' }];
+      const checkDeps = deps();
+      checkDeps.fsUtils.listFiles.mockResolvedValue(['config/locales/en.yml', 'config/locales/sv.yml']);
+
+      await check({ json: true }, checkDeps as never);
+
+      expect(JSON.parse(printed()).parseFailures).toEqual([{ path: 'config/locales/en.yml', error: 'bad indentation' }]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('fails when --source names a language with no files', async () => {
+      files = [yamlFile('en', '  a: "A"\n'), yamlFile('sv', '  a: "A-sv"\n')];
+
+      const { exitCode } = await run({ source: 'fr' });
+
+      expect(exitCode).toBe(1);
+      expect(mockConsole.error).toHaveBeenCalledWith(expect.stringContaining('No files found for the source locale fr'));
+    });
+
     it('stops with a pointer to --path when nothing is found', async () => {
       const { exitCode } = await run();
 
