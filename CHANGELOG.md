@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.78] - 2026-10-02
+
 ### Fixed
 - `check` run without a `localhero.json` recognises a regional English file (`en-US.json`, `en_US.yml`, `en-GB`) as the source. Before, it only matched a plain `en` and otherwise picked the language with the most keys, which in many JavaScript projects named after `en-US` meant checking every locale against, say, Arabic. US English wins when several English variants exist.
 - `check` no longer flags a gettext plural form for using a placeholder only the plural source has ("Moved down 1 place." / "%(counter)s places"), or an ICU translation for saying the number with `#` instead of repeating `{n}`. Rails and i18next placeholders are still counted, so a dropped repeat like a second `%{days}` is still reported.
