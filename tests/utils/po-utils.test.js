@@ -66,6 +66,24 @@ describe('po-utils', () => {
   });
 
   describe('parsePoFile', () => {
+    it('reads a catalog with obsolete entries that keep their previous msgid (msgmerge --previous)', () => {
+      const poContent = `msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\\n"
+
+msgid "Hello"
+msgstr "Hej"
+
+#~| msgid "Old greeting"
+#~ msgid "Old hello"
+#~ msgstr "Gammal hej"
+`;
+
+      const result = parsePoFile(poContent);
+
+      expect(result.entries.map((entry) => entry.msgid)).toEqual(['Hello']);
+    });
+
     it('should parse basic .po file', () => {
       const poContent = `# Test .po file
 msgid ""
