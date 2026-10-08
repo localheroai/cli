@@ -9,5 +9,5 @@ export default {
     '**/tests/**/*.test.ts',
     '**/tests/**/*.test.js'
   ],
-  testPathIgnorePatterns: ['/node_modules/', '/.claude/']
+  testPathIgnorePatterns: ['/node_modules/', '<rootDir>/.claude/']
 };
