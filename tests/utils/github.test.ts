@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { parse } from 'yaml';
-import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists, fetchActionToken } from '../../src/utils/github.js';
+import { githubService, createGitHubActionFile, autoCommitChanges, workflowExists, fetchActionToken, PushPermissionError } from '../../src/utils/github.js';
 import { GitHubGraphQLError, StaleHeadError } from '../../src/utils/github-graphql.js';
 
 describe('githubService', () => {
@@ -411,7 +411,7 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: 'inherit' });
       expect(mockExec).toHaveBeenCalledWith('git status --porcelain');
       expect(mockExec).toHaveBeenCalledWith("git commit -m 'Update translations'", { stdio: 'inherit' });
-      expect(mockExec).toHaveBeenCalledWith('git push origin HEAD:feature-branch', { stdio: 'inherit' });
+      expect(mockExec).toHaveBeenCalledWith('git push origin HEAD:feature-branch 2>&1', { stdio: 'pipe' });
     });
 
     it('commits with enhanced message when translation summary provided', async () => {
@@ -705,58 +705,43 @@ describe('githubService', () => {
         '⚠️  Warning: The Localhero GitHub App is not installed for this project. Using GITHUB_TOKEN instead, so checks on this commit will not run. Install the app to enable them.'
       );
     });
+  });
 
-    it('retries push on failure and succeeds on second attempt', async () => {
-      mockEnv.GITHUB_ACTIONS = 'true';
-      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-      mockEnv.GITHUB_TOKEN = 'fake-token';
-      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+  describe('a failed plain git push', () => {
+    const PUSH = 'git push origin HEAD:feature-branch 2>&1';
+    const AMEND_PUSH = 'git push --force-with-lease origin HEAD:feature-branch 2>&1';
+    const FORBIDDEN_GIT_COMMAND = /^git (push --force |push -f|pull|reset|merge)/;
+    const OUTPUT = {
+      fetchFirst: ' ! [rejected]        HEAD -> feature-branch (fetch first)\nhint: Updates were rejected because the remote contains work that you do not',
+      lockRef: " ! [remote rejected] HEAD -> feature-branch (cannot lock ref 'refs/heads/feature-branch': is at 7064da9 but expected a2da9bb)",
+      nonFastForward: ' ! [rejected]        HEAD -> feature-branch (non-fast-forward)',
+      staleInfo: ' ! [rejected]        HEAD -> feature-branch (stale info)',
+      forbidden: 'remote: Permission to owner/repo.git denied to github-actions[bot].\nfatal: unable to access \'https://github.com/owner/repo.git/\': The requested URL returned error: 403',
+      noCredentials: "fatal: could not read Username for 'https://github.com': No such device or address",
+      network: "fatal: unable to access 'https://github.com/owner/repo.git/': Could not resolve host: github.com",
+      signatureRule: 'remote: error: GH013: Repository rule violations found for refs/heads/feature-branch.\nremote: - Commits must have verified signatures.'
+    };
 
-      let pushAttempts = 0;
+    function rejectPush(output: string): never {
+      throw Object.assign(new Error(`Command failed: ${PUSH}`), { stdout: Buffer.from(output) });
+    }
+
+    function stubGit(pushOutcomes: Array<string | null>, extra: Record<string, string> = {}) {
       mockExec.mockImplementation((cmd: string) => {
         if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
-        if (cmd === 'git push origin HEAD:feature-branch') {
-          pushAttempts++;
-          if (pushAttempts === 1) throw new Error('Repository not found');
-          return Buffer.from('');
+        if (cmd in extra) return Buffer.from(extra[cmd]);
+        if (cmd === PUSH || cmd === AMEND_PUSH) {
+          const outcome = pushOutcomes.shift();
+          if (outcome) rejectPush(outcome);
+          return Buffer.from('To https://github.com/owner/repo.git\n   a2da9bb..b77e503  HEAD -> feature-branch');
         }
         return Buffer.from('');
       });
+    }
 
-      githubService.sleep = jest.fn().mockResolvedValue(undefined) as any;
-
-      await githubService.autoCommitChanges('locales/**/*.json');
-
-      expect(pushAttempts).toBe(2);
-      expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (1/3)...');
-      expect(mockConsole.log).toHaveBeenCalledWith('Changes committed and pushed successfully.');
-    });
-
-    it('throws after all retry attempts exhausted', async () => {
-      mockEnv.GITHUB_ACTIONS = 'true';
-      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
-      mockEnv.GITHUB_TOKEN = 'fake-token';
-      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
-
-      mockExec.mockImplementation((cmd: string) => {
-        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
-        if (cmd === 'git push origin HEAD:feature-branch') throw new Error('Repository not found');
-        return Buffer.from('');
-      });
-
-      githubService.sleep = jest.fn().mockResolvedValue(undefined) as any;
-
-      await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toThrow('Repository not found');
-      expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (1/3)...');
-      expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (2/3)...');
-    });
-  });
-
-  describe('plain git push when the branch moved during the run', () => {
-    const rejectNonFastForward = () => {
-      throw new Error('! [rejected] HEAD -> feature-branch (non-fast-forward)');
-    };
-    const REWRITING_GIT_COMMAND = /^git (fetch|pull|rebase|reset|merge)/;
+    const commands = () => mockExec.mock.calls.map(([cmd]) => cmd as string);
+    const pushes = () => commands().filter(cmd => cmd.startsWith('git push'));
+    let rebase: jest.SpiedFunction<typeof githubService.rebaseOntoMovedBranch>;
 
     beforeEach(() => {
       mockEnv.GITHUB_ACTIONS = 'true';
@@ -764,40 +749,117 @@ describe('githubService', () => {
       mockEnv.GITHUB_TOKEN = 'fake-token';
       mockEnv.GITHUB_REPOSITORY = 'owner/repo';
       githubService.sleep = jest.fn().mockResolvedValue(undefined) as any;
+      rebase = jest.spyOn(githubService, 'rebaseOntoMovedBranch').mockResolvedValue('rebased');
     });
 
-    it('fails without force-pushing, pulling or rebasing in the translate flow', async () => {
-      mockExec.mockImplementation((cmd: string) => {
-        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
-        if (cmd.startsWith('git push')) rejectNonFastForward();
-        return Buffer.from('');
-      });
-
-      await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toThrow('non-fast-forward');
-
-      const commands = mockExec.mock.calls.map(([cmd]) => cmd as string);
-      expect(new Set(commands.filter(cmd => cmd.startsWith('git push')))).toEqual(
-        new Set(['git push origin HEAD:feature-branch'])
-      );
-      expect(commands.filter(cmd => REWRITING_GIT_COMMAND.test(cmd))).toEqual([]);
+    afterEach(() => {
+      rebase.mockRestore();
     });
 
-    it('amends with a lease on the checked-out remote ref in the sync flow, never a plain force push', async () => {
-      mockExec.mockImplementation((cmd: string) => {
-        if (cmd === 'git status --porcelain') return Buffer.from('M locales/sv.json');
-        if (cmd === 'git log -1 --format=%ae') return Buffer.from('hi@localhero.ai');
-        if (cmd === 'git log -1 --format= -p -- localhero.json') return Buffer.from('+  "syncTriggerId": "sync_abc"');
-        if (cmd.startsWith('git push')) rejectNonFastForward();
-        return Buffer.from('');
+    it('prints the push output', async () => {
+      stubGit([null]);
+
+      await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('a2da9bb..b77e503  HEAD -> feature-branch'));
+    });
+
+    it.each(['fetchFirst', 'lockRef', 'nonFastForward'] as const)(
+      'replays the commit onto the moved branch and pushes again (%s)',
+      async (kind) => {
+        stubGit([OUTPUT[kind], null]);
+
+        const result = await githubService.autoCommitChanges('locales/**/*.json');
+
+        expect(result).toBe('new');
+        expect(rebase).toHaveBeenCalledWith('feature-branch');
+        expect(pushes()).toEqual([PUSH, PUSH]);
+        expect(commands().filter(cmd => FORBIDDEN_GIT_COMMAND.test(cmd))).toEqual([]);
+      }
+    );
+
+    it('skips with the branch-changed notice when the newer commits touched our files', async () => {
+      stubGit([OUTPUT.fetchFirst]);
+      rebase.mockResolvedValue('skipped-overlap');
+
+      const result = await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(result).toBe('skipped');
+      expect(mockConsole.log).toHaveBeenCalledWith(
+        '::warning::Branch changed during the run and touched these translation files; skipping commit. The new push triggers a fresh run.'
+      );
+      expect(pushes()).toEqual([PUSH]);
+    });
+
+    it('stops chasing a branch that keeps moving', async () => {
+      stubGit([OUTPUT.fetchFirst, OUTPUT.fetchFirst, OUTPUT.fetchFirst]);
+
+      const result = await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(result).toBe('skipped');
+      expect(rebase).toHaveBeenCalledTimes(2);
+      expect(pushes()).toHaveLength(3);
+    });
+
+    it.each(['forbidden', 'noCredentials'] as const)(
+      'fails at once with a permission error, without looking at the branch (%s)',
+      async (kind) => {
+        stubGit([OUTPUT[kind]]);
+
+        await expect(githubService.autoCommitChanges('locales/**/*.json')).rejects.toBeInstanceOf(PushPermissionError);
+        expect(rebase).not.toHaveBeenCalled();
+        expect(pushes()).toEqual([PUSH]);
+      }
+    );
+
+    it.each(['network', 'signatureRule'] as const)(
+      'retries any other failure three times, then fails with git\'s output (%s)',
+      async (kind) => {
+        stubGit([OUTPUT[kind], OUTPUT[kind], OUTPUT[kind]]);
+
+        const failure = githubService.autoCommitChanges('locales/**/*.json');
+
+        await expect(failure).rejects.toThrow(OUTPUT[kind].split('\n')[0]);
+        await expect(failure).rejects.not.toBeInstanceOf(PushPermissionError);
+        expect(pushes()).toHaveLength(3);
+        expect(mockConsole.log).toHaveBeenCalledWith('Push failed, retrying (2/3)...');
+        expect(rebase).not.toHaveBeenCalled();
+      }
+    );
+
+    it('recovers from a network failure and a moved branch in the same push', async () => {
+      stubGit([OUTPUT.network, OUTPUT.fetchFirst, null]);
+
+      const result = await githubService.autoCommitChanges('locales/**/*.json');
+
+      expect(result).toBe('new');
+      expect(pushes()).toHaveLength(3);
+    });
+
+    describe('amending the sync trigger commit', () => {
+      const amendable = {
+        'git log -1 --format=%ae': 'hi@localhero.ai',
+        'git log -1 --format= -p -- localhero.json': '+  "syncTriggerId": "sync_abc"'
+      };
+
+      it('skips without replaying when the branch moved, leaving the sync to be retried', async () => {
+        stubGit([OUTPUT.staleInfo], amendable);
+
+        const result = await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+        expect(result).toBe('skipped');
+        expect(rebase).not.toHaveBeenCalled();
+        expect(pushes()).toEqual([AMEND_PUSH]);
+        expect(mockConsole.log).toHaveBeenCalledWith(
+          '::warning::Branch changed during the sync; skipping commit to avoid overwriting newer work. Sync again from Localhero to commit the translations.'
+        );
       });
 
-      await expect(githubService.autoCommitSyncChanges(['locales/sv.json'])).rejects.toThrow('non-fast-forward');
+      it('fails on a permission error even though nothing moved', async () => {
+        stubGit([OUTPUT.forbidden], amendable);
 
-      const commands = mockExec.mock.calls.map(([cmd]) => cmd as string);
-      expect(new Set(commands.filter(cmd => cmd.startsWith('git push')))).toEqual(
-        new Set(['git push --force-with-lease origin HEAD:feature-branch'])
-      );
-      expect(commands.filter(cmd => REWRITING_GIT_COMMAND.test(cmd))).toEqual([]);
+        await expect(githubService.autoCommitSyncChanges(['locales/sv.json'])).rejects.toBeInstanceOf(PushPermissionError);
+      });
     });
   });
 

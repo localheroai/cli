@@ -34,6 +34,15 @@ const SYNC_SKIP_NOTICES: Record<SkippedCommit, string> = {
 // A tip that keeps moving is a busy branch; stop chasing it and let a later run commit.
 const MAX_COMMITS_ON_NEWER_TIP = 2;
 
+// A failed push is classified by what git printed, not by the branch's shape:
+// a read-only token can still fetch a branch that moved.
+const PERMISSION_DENIED_OUTPUT = /Permission to \S+ denied|returned error: 403|Authentication failed|could not read Username/;
+const BRANCH_MOVED_OUTPUT = /\((fetch first|non-fast-forward|stale info)\)|cannot lock ref/;
+const PUSH_ATTEMPTS = 3;
+
+export class PushPermissionError extends Error {}
+class BranchMovedError extends Error {}
+
 /**
  * Dependencies for the GitHub service
  */
@@ -367,24 +376,80 @@ ${buildExtractStep(options)}      - name: Translate
     return new Promise(resolve => setTimeout(resolve, ms));
   },
 
+  /**
+   * A moved branch is replayed onto (never for an amend, which would carry the
+   * trigger commit along) or skipped; a permission failure fails at once; any
+   * other failure, such as the network, is retried.
+   */
   async pushWithRetry(
     branchName: string,
     token: string,
-    forceWithLease: boolean = false,
-    maxRetries: number = 3
-  ): Promise<void> {
+    forceWithLease: boolean = false
+  ): Promise<'pushed' | SkippedCommit> {
     const { console: log } = this.deps;
+    let failedAttempts = 0;
+    let replays = 0;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    for (;;) {
       try {
         this.pushToGitHub(branchName, token, forceWithLease);
-        return;
+        return 'pushed';
       } catch (error) {
-        if (attempt === maxRetries) throw error;
-        log.log(`Push failed, retrying (${attempt}/${maxRetries})...`);
+        if (error instanceof PushPermissionError) throw error;
+        if (error instanceof BranchMovedError) {
+          if (forceWithLease || replays === MAX_COMMITS_ON_NEWER_TIP) return 'skipped-uncertain';
+          replays++;
+          const outcome = await this.rebaseOntoMovedBranch(branchName);
+          if (outcome !== 'rebased') return outcome;
+          continue;
+        }
+        failedAttempts++;
+        if (failedAttempts === PUSH_ATTEMPTS) throw error;
+        log.log(`Push failed, retrying (${failedAttempts}/${PUSH_ATTEMPTS})...`);
         await this.sleep(2000);
       }
     }
+  },
+
+  /**
+   * After a push rejected because the branch moved: replay our translation
+   * commit onto the new tip when that is safe, the plain-git counterpart of
+   * findTipSafeToCommitOn. Safe means the branch only moved forward from our
+   * commit's parent (so nothing someone removed comes back) and the newer
+   * commits left our files alone. Anything else is a skip.
+   */
+  async rebaseOntoMovedBranch(branchName: string): Promise<'rebased' | SkippedCommit> {
+    const { console: log } = this.deps;
+    const git = (args: string) => this.deps.exec(`git ${args}`, { stdio: 'pipe' }).toString().trim();
+    // --no-renames lists a rename under both paths, so a renamed file of ours counts as touched.
+    const changedFiles = (from: string, to: string) =>
+      git(`diff --name-only --no-renames ${from} ${to}`).split('\n').filter(Boolean);
+
+    try {
+      git(`fetch --no-tags origin ${branchName}`);
+      git('merge-base --is-ancestor HEAD~1 FETCH_HEAD');
+    } catch {
+      log.log('Could not confirm the branch only moved forward since the checkout.');
+      return 'skipped-uncertain';
+    }
+
+    const theirs = new Set(changedFiles('HEAD~1', 'FETCH_HEAD'));
+    const overlap = changedFiles('HEAD~1', 'HEAD').find(file => theirs.has(file));
+    if (overlap) {
+      log.log(`Newer commits on the branch changed ${overlap}.`);
+      return 'skipped-overlap';
+    }
+
+    // --autostash: translate leaves localhero.json (lastSyncedAt) modified and unstaged.
+    try {
+      git('rebase --autostash --onto FETCH_HEAD HEAD~1');
+    } catch {
+      try { git('rebase --abort'); } catch { /* nothing to abort */ }
+      log.log('Could not replay the translation commit onto the newer commits.');
+      return 'skipped-uncertain';
+    }
+    log.log(`Branch moved during the run; replayed the translation commit onto ${git('rev-parse --short FETCH_HEAD')}.`);
+    return 'rebased';
   },
 
   /**
@@ -418,9 +483,22 @@ ${buildExtractStep(options)}      - name: Translate
     }
 
     const pushCmd = forceWithLease
-      ? `git push --force-with-lease origin HEAD:${branchName}`
-      : `git push origin HEAD:${branchName}`;
-    exec(pushCmd, { stdio: 'inherit' });
+      ? `git push --force-with-lease origin HEAD:${branchName} 2>&1`
+      : `git push origin HEAD:${branchName} 2>&1`;
+    const mask = (text: string) => text.split(token).join('***TOKEN***').trim();
+
+    try {
+      const output = mask(exec(pushCmd, { stdio: 'pipe' }).toString());
+      if (output) log.log(output);
+    } catch (error: unknown) {
+      const err = error as Error & { stdout?: Buffer | string };
+      const output = mask(err.stdout?.toString() ?? '');
+      if (output) log.log(output);
+      const message = [mask(err.message), output].filter(Boolean).join('\n');
+      if (PERMISSION_DENIED_OUTPUT.test(output)) throw new PushPermissionError(message);
+      if (BRANCH_MOVED_OUTPUT.test(output)) throw new BranchMovedError(message);
+      throw new Error(message);
+    }
   },
 
   /**
@@ -565,7 +643,11 @@ ${buildExtractStep(options)}      - name: Translate
       this.commit(commitMessage, canAmend);
 
       const token = await this.getTokenForPush();
-      await this.pushWithRetry(branchName, token, canAmend);
+      const outcome = await this.pushWithRetry(branchName, token, canAmend);
+      if (outcome !== 'pushed') {
+        log.log(`::warning::${SYNC_SKIP_NOTICES[outcome]}`);
+        return 'skipped';
+      }
 
       if (canAmend) {
         log.log('✓ Commit amended and pushed to GitHub\n');
@@ -681,7 +763,11 @@ ${buildExtractStep(options)}      - name: Translate
       this.commit(commitMessage);
 
       const token = await this.getTokenForPush();
-      await this.pushWithRetry(branchName, token);
+      const outcome = await this.pushWithRetry(branchName, token);
+      if (outcome !== 'pushed') {
+        log.log(`::warning::${TRANSLATE_SKIP_NOTICES[outcome]}`);
+        return 'skipped';
+      }
 
       log.log('Changes committed and pushed successfully.');
       return 'new';

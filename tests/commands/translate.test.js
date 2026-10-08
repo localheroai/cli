@@ -1,6 +1,8 @@
 import { jest } from '@jest/globals';
 import { translate } from '../../src/commands/translate.js';
 import { ApiResponseError } from '../../src/types/index.js';
+import { PushPermissionError } from '../../src/utils/github.js';
+import { GitHubGraphQLError } from '../../src/utils/github-graphql.js';
 
 describe('translate command', () => {
   let mockConsole;
@@ -1440,14 +1442,36 @@ describe('translate command', () => {
       expect(process.exitCode).not.toBe(1);
     });
 
-    it('fails the run and points at the push permission when the push is rejected', async () => {
-      gitUtils.autoCommitChanges.mockRejectedValue(new Error('Command failed: git push origin HEAD:feature\nremote: Permission denied'));
+    it('fails the run and points at the push permission when the push is denied', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new PushPermissionError('Command failed: git push origin HEAD:feature\nremote: Permission denied'));
 
       await translate({}, createTranslateDeps());
 
       expect(errorAnnotations()).toEqual([
         '::error::Translations were not committed: Command failed: git push origin HEAD:feature%0Aremote: Permission denied. ' +
         'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.'
+      ]);
+      expect(process.exitCode).toBe(1);
+    });
+
+    it('points at the push permission when a signed commit is forbidden', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new GitHubGraphQLError('Resource not accessible by integration', 'FORBIDDEN'));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([
+        '::error::Translations were not committed: Resource not accessible by integration. ' +
+        'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.'
+      ]);
+    });
+
+    it('fails the run without blaming permissions when the push failed for another reason', async () => {
+      gitUtils.autoCommitChanges.mockRejectedValue(new Error("Command failed: git push origin HEAD:feature\nfatal: unable to access: Could not resolve host: github.com"));
+
+      await translate({}, createTranslateDeps());
+
+      expect(errorAnnotations()).toEqual([
+        '::error::Translations were not committed: Command failed: git push origin HEAD:feature%0Afatal: unable to access: Could not resolve host: github.com.'
       ]);
       expect(process.exitCode).toBe(1);
     });

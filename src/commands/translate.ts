@@ -22,7 +22,8 @@ import {
   BatchResult,
   MissingLocaleEntry
 } from '../utils/translation-utils.js';
-import { autoCommitChanges, buildMakemessagesCommand, MISSING_BRANCH_ERROR, MISSING_TOKEN_ERROR, type CommitResult } from '../utils/github.js';
+import { autoCommitChanges, buildMakemessagesCommand, MISSING_BRANCH_ERROR, MISSING_TOKEN_ERROR, PushPermissionError, type CommitResult } from '../utils/github.js';
+import { GitHubGraphQLError } from '../utils/github-graphql.js';
 import { escapeAnnotationData } from '../utils/ci-context.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
@@ -160,9 +161,15 @@ const COMMIT_FAILURE_FIXES: Record<string, string> = {
 const NOT_A_PULL_REQUEST_WARNING = '::warning::Translations were not committed: this is not a pull request run. Only pull_request runs commit translations.';
 const PUSH_PERMISSION_FIX = 'Check that the workflow grants `permissions: contents: write`. On a pull request from a fork, GITHUB_TOKEN is read-only.';
 
-function commitFailedAnnotation(reason: string): string {
-  const fix = COMMIT_FAILURE_FIXES[reason] ?? PUSH_PERMISSION_FIX;
-  return `::error::${escapeAnnotationData(`Translations were not committed: ${reason}. ${fix}`)}`;
+function isPermissionFailure(error: Error): boolean {
+  if (error instanceof PushPermissionError) return true;
+  return error instanceof GitHubGraphQLError && (error.type === 'FORBIDDEN' || /\b403\b/.test(error.message));
+}
+
+function commitFailedAnnotation(error: Error): string {
+  const fix = isPermissionFailure(error) ? PUSH_PERMISSION_FIX : COMMIT_FAILURE_FIXES[error.message];
+  const text = [`Translations were not committed: ${error.message}.`, fix].filter(Boolean).join(' ');
+  return `::error::${escapeAnnotationData(text)}`;
 }
 
 /**
@@ -456,7 +463,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         } else if (err.message === MISSING_BRANCH_ERROR) {
           console.log(NOT_A_PULL_REQUEST_WARNING);
         } else {
-          console.log(commitFailedAnnotation(err.message));
+          console.log(commitFailedAnnotation(err));
           process.exitCode = 1;
         }
       }
