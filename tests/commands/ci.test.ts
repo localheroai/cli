@@ -620,5 +620,52 @@ describe('ci command', () => {
       const passedTranslations = deps.updateTranslationFile.mock.calls[0][1];
       expect(passedTranslations[0].metadata?.source_references).toEqual(['lib/web.ex:10']);
     });
+
+    describe('when the sync belongs to another project in the repository', () => {
+      const otherProjectsSync = {
+        sync: { ...syncResponse.sync, project_id: 'editor', project_matches: false },
+        pagination: { ...syncResponse.pagination, total_pages: 3, next_page: 2 }
+      };
+
+      it('applies nothing, completes nothing and exits cleanly', async () => {
+        mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+        mockEnv.LOCALHERO_SYNC_VERSION = '3';
+        const deps = buildSyncDeps();
+        deps.syncApi.getSyncTranslations.mockResolvedValue(otherProjectsSync);
+        const exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
+
+        try {
+          await ci({}, deps);
+
+          expect(exit).not.toHaveBeenCalled();
+          expect(deps.syncApi.getSyncTranslations).toHaveBeenCalledTimes(1);
+          expect(deps.updateTranslationFile).not.toHaveBeenCalled();
+          expect(mockConfigUtils.saveProjectConfig).not.toHaveBeenCalled();
+          expect(deps.githubUtils.autoCommitSyncChanges).not.toHaveBeenCalled();
+          expect(deps.syncApi.completeSyncUpdate).not.toHaveBeenCalled();
+          expect(mockConsole.log).toHaveBeenCalledWith(
+            '::notice::Nothing to apply here. This sync is for project editor; this directory is project test-project.'
+          );
+        } finally {
+          exit.mockRestore();
+        }
+      });
+
+    });
+
+    it('sends its project with every page so the server can say whose sync it is', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      const deps = buildSyncDeps();
+      const ownSync = { ...syncResponse.sync, project_id: 'test-project', project_matches: true };
+      deps.syncApi.getSyncTranslations
+        .mockResolvedValueOnce({ sync: ownSync, pagination: { ...syncResponse.pagination, total_pages: 2, next_page: 2 } })
+        .mockResolvedValueOnce({ sync: ownSync, pagination: { ...syncResponse.pagination, current_page: 2, total_pages: 2 } });
+
+      await ci({ skipCommit: true }, deps);
+
+      expect(deps.syncApi.getSyncTranslations).toHaveBeenNthCalledWith(1, 'sync_abc', { page: 1, projectId: 'test-project' });
+      expect(deps.syncApi.getSyncTranslations).toHaveBeenNthCalledWith(2, 'sync_abc', { page: 2, projectId: 'test-project' });
+      expect(deps.updateTranslationFile).toHaveBeenCalledTimes(2);
+    });
   });
 });
