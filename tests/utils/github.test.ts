@@ -891,6 +891,27 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
+    it('names the people who edited on Localhero.ai', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/sv.json');
+        if (cmd === 'git log -1 --format=%ae') return Buffer.from('other@example.com');
+        return Buffer.from('');
+      });
+
+      await githubService.autoCommitSyncChanges(
+        ['locales/sv.json'],
+        { keysTranslated: 2, languages: ['sv'], editors: ['Anna Svensson', 'Erik Berg'], otherEditors: 3 }
+      );
+
+      const expectedMessage = 'Sync translations\n\n2 keys in sv\n\nEdited on Localhero.ai by Anna Svensson, Erik Berg and 3 others.';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
     it('commits with subject-only when no summary', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';
