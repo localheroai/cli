@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.80] - 2026-10-08
+
 ### Fixed
 - When another push lands on the pull request branch while a run commits its translations, the run now puts its commit on top of the newer one and pushes again, as signed commits already did. This is the common case in a monorepo where each app's job commits to the same branch: before, the job that pushed second failed after three identical retries and its translations were lost. If the newer commits changed one of the same translation files, or the branch was rewritten, the run skips its commit with a notice instead of overwriting anything.
 - A failed push only suggests checking `permissions: contents: write` when GitHub actually refused the push for permissions. Other failures, such as a network error, show git's output without that hint.
