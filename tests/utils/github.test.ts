@@ -132,6 +132,14 @@ describe('githubService', () => {
       expect(checkout?.with).toMatchObject({ 'fetch-depth': 0, 'persist-credentials': false });
     });
 
+    it('pins the runner image so a GitHub image migration cannot change the toolchain under a generated workflow', async () => {
+      await createGitHubActionFile('/project', ['locale/**'], undefined, { extractor: 'django', locales: ['sv'] });
+
+      const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
+
+      expect(parse(fileContent).jobs.translate['runs-on']).toBe('ubuntu-24.04');
+    });
+
     it('handles directory paths without patterns correctly', async () => {
       await createGitHubActionFile('/project', ['locales', 'translations/', 'src/i18n']);
 

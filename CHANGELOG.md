@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- The workflow `init` writes now runs on `ubuntu-24.04` instead of `ubuntu-latest`. GitHub moves `ubuntu-latest` to Ubuntu 26 between October 19 and November 19, 2026, and a new image can change the tools a workflow relies on, such as the `gettext` package the Django extract step installs. A pinned image keeps the translation workflow in your repository running the same way until you choose to move it; GitHub supports the Ubuntu 24 image for two more years. Workflows created by earlier versions are not changed.
+
 ## [0.0.80] - 2026-10-08
 
 ### Fixed
