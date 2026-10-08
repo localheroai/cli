@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.79] - 2026-10-08
+
 ### Changed
 - Requires Node.js 20 or newer (was 18). The `.po` parser's current major version needs it; Node 18 reached end of life in April 2025.
 
