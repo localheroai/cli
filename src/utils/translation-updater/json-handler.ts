@@ -16,6 +16,16 @@ interface FileStructure {
 
 const LOCALE_KEY_REGEX = /^[a-zA-Z]{2}(-[a-zA-Z]{2})?$/;
 
+function serializeJson(content: unknown, endsWithNewline: boolean): string {
+  return JSON.stringify(content, null, 2) + (endsWithNewline ? '\n' : '');
+}
+
+// Compact serialisations match only when a rewrite would change nothing but
+// whitespace, so skipping it keeps the file's own formatting.
+function hasSameContent(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 function detectStructureFromContent(
   content: Record<string, unknown>,
   languageCode: string
@@ -91,11 +101,13 @@ export async function updateJsonFile(
   sourceFilePath: string | null = null
 ): Promise<UpdateResult> {
   let existingContent: Record<string, any> | null = null;
+  let endsWithNewline = true;
   let created = false;
 
   try {
     const content = await fs.readFile(filePath, 'utf8');
     existingContent = JSON.parse(content);
+    endsWithNewline = content.endsWith('\n');
   } catch {
     console.warn(`Creating new JSON file: ${filePath}`);
     created = true;
@@ -122,12 +134,14 @@ export async function updateJsonFile(
     ? { ...existingContent, [languageCode]: mergedContent }
     : mergedContent;
 
-  await fs.writeFile(filePath, JSON.stringify(updatedContent, null, 2));
+  const result = { updatedKeys: Object.keys(translations), created };
 
-  return {
-    updatedKeys: Object.keys(translations),
-    created
-  };
+  if (existingContent && hasSameContent(updatedContent, existingContent)) {
+    return result;
+  }
+
+  await fs.writeFile(filePath, serializeJson(updatedContent, endsWithNewline));
+  return result;
 }
 
 export async function deleteKeysFromJsonFile(
@@ -177,12 +191,16 @@ export async function deleteKeysFromJsonFile(
         }
       }
     }
+    if (deletedKeys.length === 0) {
+      return deletedKeys;
+    }
+
     if (hasLanguageWrapper) {
       jsonContent[languageCode] = rootContent;
     } else {
       jsonContent = rootContent;
     }
-    await fs.writeFile(filePath, JSON.stringify(jsonContent, null, 2));
+    await fs.writeFile(filePath, serializeJson(jsonContent, content.endsWith('\n')));
 
     return deletedKeys;
   } catch (error) {
