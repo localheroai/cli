@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- In a monorepo with one Localhero project per app, a sync from the web app is now applied only by the app it belongs to. Every app's job receives the same sync, and before, the others tried to write its files into their own folder and failed the run, which could cancel the job that was meant to apply it. They now print a notice and exit 0 without touching any file. Needs the matching server change; against an older server the CLI behaves as before.
+
 ## [0.0.78] - 2026-10-02
 
 ### Fixed

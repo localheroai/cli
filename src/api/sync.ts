@@ -40,6 +40,8 @@ export interface PaginationMetadata {
 export interface SyncResponse {
   sync: {
     sync_id: string;
+    project_id?: string;
+    project_matches?: boolean;
     status: string;
     created_at: string;
     sync_url?: string;
@@ -55,20 +57,24 @@ export interface SyncResponse {
 /**
  * Get sync translations from the Sync API
  * @param syncId The sync ID from localhero.json
- * @param options Optional pagination parameters
+ * @param options Optional pagination parameters, and the caller's projectId so the
+ *   response says whether the sync belongs to it (project_matches)
  * @returns The sync response with translations
  */
 export async function getSyncTranslations(
   syncId: string,
-  options: { page?: number; perPage?: number } = {}
+  options: { page?: number; perPage?: number; projectId?: string } = {}
 ): Promise<SyncResponse> {
   const apiKey = await getApiKey();
-  const { page = 1, perPage = 500 } = options;
+  const { page = 1, perPage = 500, projectId } = options;
 
   const queryParams = new URLSearchParams({
     page: page.toString(),
     per_page: perPage.toString()
   });
+  if (projectId) {
+    queryParams.set('project_id', projectId);
+  }
 
   return apiRequest(`/api/v1/translation_syncs/${syncId}?${queryParams}`, { apiKey });
 }

@@ -100,10 +100,20 @@ async function runTranslateMode(
 }
 
 /**
+ * In a monorepo every app's job receives the same sync dispatch. Only the app
+ * whose project owns the sync applies it; the others have nothing to do.
+ */
+function reportSyncForAnotherProject(deps: CiDependencies, owner: string | undefined, projectId: string): void {
+  const message = `Nothing to apply here. This sync is for project ${owner}; this directory is project ${projectId}.`;
+  deps.console.log(deps.githubUtils.isGitHubAction() ? `::notice::${message}` : chalk.blue(message));
+}
+
+/**
  * Run sync mode - fetch done translations from Sync API and update files
  */
 async function runSyncMode(
   syncId: string,
+  projectId: string,
   deps: CiDependencies,
   options?: { verbose?: boolean; syncUpdateVersion?: number; skipCommit?: boolean }
 ): Promise<void> {
@@ -121,10 +131,15 @@ async function runSyncMode(
 
   try {
     while (currentPage <= totalPages) {
-      const response = await syncApi.getSyncTranslations(syncId, { page: currentPage });
+      const response = await syncApi.getSyncTranslations(syncId, { page: currentPage, projectId });
 
       if (!response || !response.sync || !response.pagination) {
         throw new Error(`Invalid response from Sync API for page ${currentPage}`);
+      }
+
+      if (response.sync.project_matches === false) {
+        reportSyncForAnotherProject(deps, response.sync.project_id, projectId);
+        return;
       }
 
       if (currentPage === 1) {
@@ -263,7 +278,7 @@ export async function ci(
       console.log(chalk.blue('📥 Sync mode detected'));
     }
     try {
-      await runSyncMode(syncTriggerId, deps, { verbose: options.verbose, syncUpdateVersion, skipCommit: options.skipCommit });
+      await runSyncMode(syncTriggerId, config.projectId, deps, { verbose: options.verbose, syncUpdateVersion, skipCommit: options.skipCommit });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(chalk.red('\n✖ Sync failed:', errorMessage));
