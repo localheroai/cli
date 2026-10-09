@@ -531,11 +531,20 @@ ${buildExtractStep(options)}      - name: Translate
       lines.push(`${summary.keysTranslated} ${keyWord} in ${summary.languages.join(', ')}`);
     }
 
+    if (summary?.editors?.length) {
+      lines.push(`Edited on Localhero.ai by ${this.listEditors(summary.editors, summary.otherEditors ?? 0)}.`);
+    }
+
     if (summary?.viewUrl) {
       lines.push(summary.viewUrl);
     }
 
     return lines.join('\n\n');
+  },
+
+  listEditors(names: string[], others: number): string {
+    const all = others > 0 ? [...names, `${others} ${others === 1 ? 'other' : 'others'}`] : names;
+    return all.length > 1 ? `${all.slice(0, -1).join(', ')} and ${all[all.length - 1]}` : all[0];
   },
 
   commit(message: string, amend: boolean = false): void {

@@ -128,10 +128,16 @@ async function runSyncMode(
   let syncUrl: string | undefined;
   let branchName: string | undefined;
   let modifiedKeysCount: number | undefined;
+  let editors: string[] | undefined;
+  let otherEditors: number | undefined;
 
   try {
     while (currentPage <= totalPages) {
-      const response = await syncApi.getSyncTranslations(syncId, { page: currentPage, projectId });
+      const response = await syncApi.getSyncTranslations(syncId, {
+        page: currentPage,
+        projectId,
+        ...(options?.syncUpdateVersion && { version: options.syncUpdateVersion })
+      });
 
       if (!response || !response.sync || !response.pagination) {
         throw new Error(`Invalid response from Sync API for page ${currentPage}`);
@@ -146,6 +152,8 @@ async function runSyncMode(
         syncUrl = response.sync.sync_url;
         branchName = response.sync.branch_name;
         modifiedKeysCount = response.sync.modified_keys_count;
+        editors = response.sync.edited_by;
+        otherEditors = response.sync.edited_by_others;
       }
 
       allFiles.push(...response.sync.files);
@@ -220,7 +228,7 @@ async function runSyncMode(
     const languages = [...new Set(allFiles.map(f => f.language))];
     const commitResult = await githubUtils.autoCommitSyncChanges(
       modifiedFiles,
-      { keysTranslated: keysUpdated, languages, viewUrl: syncUrl },
+      { keysTranslated: keysUpdated, languages, viewUrl: syncUrl, editors, otherEditors },
       { branchName }
     );
     if (commitResult === 'skipped') {

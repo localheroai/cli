@@ -549,6 +549,33 @@ describe('ci command', () => {
       expect(deps.syncApi.completeSyncUpdate).toHaveBeenCalledWith('sync_abc', 3);
     });
 
+    it('asks for the content the sync update recorded', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      mockEnv.LOCALHERO_SYNC_VERSION = '3';
+      const deps = buildSyncDeps();
+
+      await ci({ skipCommit: true }, deps);
+
+      expect(deps.syncApi.getSyncTranslations).toHaveBeenCalledWith('sync_abc', expect.objectContaining({ version: 3 }));
+    });
+
+    it('names the editors the sync carries in the commit', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      const deps = buildSyncDeps();
+      deps.syncApi.getSyncTranslations.mockResolvedValue({
+        ...syncResponse,
+        sync: { ...syncResponse.sync, edited_by: ['Anna Svensson'], edited_by_others: 0 }
+      });
+
+      await ci({}, deps);
+
+      expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ editors: ['Anna Svensson'], otherEditors: 0 }),
+        expect.anything()
+      );
+    });
+
     it('leaves the sync update open when the commit was skipped because the branch moved', async () => {
       mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
       mockEnv.LOCALHERO_SYNC_VERSION = '3';

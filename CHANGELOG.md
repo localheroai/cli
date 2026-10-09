@@ -4,7 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- A sync commit names the people who made the edits on Localhero.ai, for example "Edited on Localhero.ai by Anna Svensson and Erik Berg." Names only, never email addresses: many people who edit translations have no GitHub account. Needs the matching server change; against an older server the commit message is unchanged.
+
 ### Fixed
+- A sync writes the values the web app recorded when the sync started. Before, it wrote whatever was current when CI fetched them, so an edit saved while CI was starting went out early and the web app still showed it as waiting. That edit now goes in the next sync. Needs the matching server change; against an older server the CLI behaves as before.
 - JSON locale files whose values did not change are no longer rewritten. Before, every sync rewrote the source file (`en.json`) with the CLI's own formatting, so a hand-formatted file got a noisy diff in the pull request: inline arrays and one-line objects were spread over many lines. Removing deleted keys during `pull` also rewrote every JSON file, including ones that held none of those keys.
 - A JSON file that ends with a newline keeps it when the CLI writes to it, and new JSON files end with one. Before, every write dropped the final newline, which git shows as `\ No newline at end of file`.
 

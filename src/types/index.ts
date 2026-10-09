@@ -157,6 +157,8 @@ export interface CommitSummary {
   keysAligned?: number;
   alignedLanguages?: string[];
   viewUrl?: string;
+  editors?: string[];
+  otherEditors?: number;
 }
 
 export interface Project {

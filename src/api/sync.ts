@@ -49,6 +49,8 @@ export interface SyncResponse {
     pr_number?: number;
     branch_name?: string;
     modified_keys_count?: number;
+    edited_by?: string[];
+    edited_by_others?: number;
     files: SyncFile[];
   };
   pagination: PaginationMetadata;
@@ -57,16 +59,17 @@ export interface SyncResponse {
 /**
  * Get sync translations from the Sync API
  * @param syncId The sync ID from localhero.json
- * @param options Optional pagination parameters, and the caller's projectId so the
- *   response says whether the sync belongs to it (project_matches)
+ * @param options Optional pagination parameters, the caller's projectId so the
+ *   response says whether the sync belongs to it (project_matches), and the sync
+ *   update version so the server returns the content that update recorded
  * @returns The sync response with translations
  */
 export async function getSyncTranslations(
   syncId: string,
-  options: { page?: number; perPage?: number; projectId?: string } = {}
+  options: { page?: number; perPage?: number; projectId?: string; version?: number } = {}
 ): Promise<SyncResponse> {
   const apiKey = await getApiKey();
-  const { page = 1, perPage = 500, projectId } = options;
+  const { page = 1, perPage = 500, projectId, version } = options;
 
   const queryParams = new URLSearchParams({
     page: page.toString(),
@@ -74,6 +77,9 @@ export async function getSyncTranslations(
   });
   if (projectId) {
     queryParams.set('project_id', projectId);
+  }
+  if (version) {
+    queryParams.set('version', version.toString());
   }
 
   return apiRequest(`/api/v1/translation_syncs/${syncId}?${queryParams}`, { apiKey });
