@@ -95,7 +95,15 @@ export interface TranslationResult {
   failedLanguages: string[];
 }
 
-export const MAX_JOB_STATUS_CHECK_ATTEMPTS = 60;
+export const JOB_WAIT_MINUTES = 10;
+const JOB_WAIT_MS = JOB_WAIT_MINUTES * 60 * 1000;
+const FAST_POLL_WINDOW_MS = 60 * 1000;
+const FAST_POLL_SECONDS = 3;
+const SLOW_POLL_SECONDS = 10;
+
+function pollIntervalSeconds(elapsedMs: number): number {
+  return elapsedMs < FAST_POLL_WINDOW_MS ? FAST_POLL_SECONDS : SLOW_POLL_SECONDS;
+}
 
 /**
  * Creates a job request object for a batch of translations
@@ -181,64 +189,52 @@ function isWaitingStatus(status: string): boolean {
 }
 
 /**
- * Monitors a job's status until completion
+ * Checks a job's status once, waiting before the next check while it is still running
  *
  * @param jobId - The ID of the job to monitor
  * @param verbose - Whether to show verbose output
  * @param translationUtils - Translation utilities
  * @param console - Console for logging
- * @returns The job status when completed
- * @throws Error If the job fails or times out
+ * @param waitSeconds - How long to wait before the next check if the job is still running
+ * @returns The job status
+ * @throws Error If the job fails
  */
 async function monitorJobStatus(
   jobId: string,
   verbose: boolean,
   translationUtils: TranslationDependencies['translationUtils'],
-  console: TranslationDependencies['console']
+  console: TranslationDependencies['console'],
+  waitSeconds: number
 ): Promise<JobStatus> {
   if (verbose) {
     console.log(chalk.blue(`\nℹ Checking job ${jobId}`));
   }
 
-  let status;
-  let retries = 0;
-  const MAX_WAIT_MINUTES = 10;
-  const startTime = Date.now();
+  const status = await translationUtils.checkJobStatus(jobId, true);
 
-  do {
-    status = await translationUtils.checkJobStatus(jobId, true);
+  if (status.status === 'failed') {
+    throw new Error(`Translation job failed: ${status.error_details || 'Unknown error'}`);
+  }
 
-    if (status.status === 'failed') {
-      throw new Error(`Translation job failed: ${status.error_details || 'Unknown error'}`);
-    }
+  if (isWaitingStatus(status.status)) {
+    if (verbose) {
+      let progressMsg = `  Job ${jobId} is ${status.status}`;
 
-    if (isWaitingStatus(status.status)) {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      if (elapsed > MAX_WAIT_MINUTES * 60) {
-        throw new Error(`Translation timed out after ${MAX_WAIT_MINUTES} minutes`);
+      // Add progress information if available
+      if (status.progress) {
+        const { completed_keys, total_keys } = status.progress;
+        const percentage = total_keys > 0 ? Math.round((completed_keys / total_keys) * 100) : 0;
+        progressMsg += ` (${completed_keys}/${total_keys} keys, ${percentage}%)`;
       }
 
-      const waitSeconds = Math.min(2 ** retries, 30);
-      if (verbose) {
-        let progressMsg = `  Job ${jobId} is ${status.status}`;
-
-        // Add progress information if available
-        if (status.progress) {
-          const { completed_keys, total_keys } = status.progress;
-          const percentage = total_keys > 0 ? Math.round((completed_keys / total_keys) * 100) : 0;
-          progressMsg += ` (${completed_keys}/${total_keys} keys, ${percentage}%)`;
-        }
-
-        progressMsg += `, checking again in ${waitSeconds}s...`;
-        console.log(chalk.blue(progressMsg));
-      }
-      await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-      retries = Math.min(retries + 1, 5);
-      return { jobId, status: 'pending' };
+      progressMsg += `, checking again in ${waitSeconds}s...`;
+      console.log(chalk.blue(progressMsg));
     }
+    await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
+    return { jobId, status: 'pending' };
+  }
 
-    return { jobId, status: 'completed', data: status };
-  } while (isWaitingStatus(status.status));
+  return { jobId, status: 'completed', data: status };
 }
 
 /**
@@ -452,15 +448,13 @@ async function processBatch(
   }
 
   const jobSourceMapping = createJobSourceMapping(jobs, sourceFilePath);
-  const jobTries: Record<string, number> = {};
+  const monitoringStartedAt = Date.now();
 
   const pendingJobs = new Set(batchJobIds);
   while (pendingJobs.size > 0) {
+    const elapsedMs = Date.now() - monitoringStartedAt;
     const jobPromises = Array.from(pendingJobs).map(async jobId => {
-      jobTries[jobId] = jobTries[jobId] || 0;
-      jobTries[jobId]++;
-
-      if (jobTries[jobId] > MAX_JOB_STATUS_CHECK_ATTEMPTS) {
+      if (elapsedMs > JOB_WAIT_MS) {
         // Get final job status to show progress information
         let progressInfo = '';
         try {
@@ -479,13 +473,13 @@ async function processBatch(
               console.warn(chalk.yellow(`  ⏱️  Job ${jobId} may have completed but status is delayed${progressInfo}`));
             }
           } else {
-            console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`));
+            console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`));
           }
         } catch {
-          console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`));
+          console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`));
         }
 
-        // However it ran out of retries, the job has not delivered its
+        // However it ran out of time, the job has not delivered its
         // translations. Record it, or the summary reports success for a run
         // that wrote nothing.
         const exhaustedLocale = jobSourceMapping[jobId]?.locale;
@@ -497,8 +491,7 @@ async function processBatch(
         return { jobId, status: 'failed' };
       }
 
-      const jobStatus = await monitorJobStatus(jobId, verbose, translationUtils, console);
-
+      const jobStatus = await monitorJobStatus(jobId, verbose, translationUtils, console, pollIntervalSeconds(elapsedMs));
 
       if (jobStatus.status === 'completed') {
         await applyTranslations(
@@ -525,11 +518,6 @@ async function processBatch(
         pendingJobs.delete(result.jobId);
       }
     });
-
-    // If there are still pending jobs, wait before checking again
-    if (pendingJobs.size > 0) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
   }
 }
 
