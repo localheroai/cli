@@ -227,6 +227,9 @@ function buildExtractStep(options: WorkflowOptions): string {
 }
 
 const workflowFileName = 'localhero-translate.yml';
+// Pinned rather than ubuntu-latest: the generated file lives in the customer's repo,
+// where we cannot fix it if a new runner image changes the toolchain under it.
+const RUNNER_IMAGE = 'ubuntu-24.04';
 const GIT_USER_NAME = 'LocalHero Bot';
 const GIT_USER_EMAIL = 'hi@localhero.ai';
 
@@ -315,7 +318,7 @@ concurrency:
 
 jobs:
   translate:
-    runs-on: ubuntu-latest
+    runs-on: ${RUNNER_IMAGE}
     permissions:
       contents: write
       pull-requests: write
