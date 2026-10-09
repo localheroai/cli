@@ -58,6 +58,11 @@
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.2"
   },
+  "overrides": {
+    "js-yaml@3": {
+      "argparse": "^2.0.1"
+    }
+  },
   "engines": {
     "node": ">=20.0.0"
   },
