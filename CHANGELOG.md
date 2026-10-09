@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- JSON locale files whose values did not change are no longer rewritten. Before, every sync rewrote the source file (`en.json`) with the CLI's own formatting, so a hand-formatted file got a noisy diff in the pull request: inline arrays and one-line objects were spread over many lines. Removing deleted keys during `pull` also rewrote every JSON file, including ones that held none of those keys.
+- A JSON file that ends with a newline keeps it when the CLI writes to it, and new JSON files end with one. Before, every write dropped the final newline, which git shows as `\ No newline at end of file`.
+
 ## [0.0.80] - 2026-10-08
 
 ### Fixed
