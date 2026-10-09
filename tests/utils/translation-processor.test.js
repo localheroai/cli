@@ -1,5 +1,5 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
-import { processTranslationBatches, MAX_JOB_STATUS_CHECK_ATTEMPTS } from '../../src/utils/translation-processor.js';
+import { processTranslationBatches, JOB_WAIT_MINUTES } from '../../src/utils/translation-processor.js';
 import { batchKeysWithMissing } from '../../src/utils/translation-utils.js';
 
 describe('translation-processor', () => {
@@ -30,6 +30,22 @@ describe('translation-processor', () => {
     global.console = originalConsole;
     jest.clearAllMocks();
   });
+
+  const useAdvancingClock = () => {
+    jest.useFakeTimers({ now: 0 });
+    const originalSetTimeout = global.setTimeout;
+    global.setTimeout = jest.fn((callback, ms = 0) => {
+      jest.setSystemTime(Date.now() + ms);
+      if (typeof callback === 'function') callback();
+      return 1;
+    });
+    return () => {
+      global.setTimeout = originalSetTimeout;
+      jest.useRealTimers();
+    };
+  };
+
+  const pollDelays = () => global.setTimeout.mock.calls.map(([, ms]) => ms);
 
   describe('processTranslationBatches', () => {
     it('processes translation batches successfully', async () => {
@@ -798,7 +814,7 @@ describe('translation-processor', () => {
       expect(result.totalLanguages).toBe(0);
     });
 
-    it('handles a job that repeatedly stays pending and hits max tries', async () => {
+    it('stops waiting for a job that is still pending after the wait limit', async () => {
       const testJobId = 'job-always-pending';
 
       const batches = [
@@ -837,14 +853,7 @@ describe('translation-processor', () => {
         return { status: 'completed', translations: { data: {} }, language: { code: 'other' }, job_id: jobId };
       });
 
-      jest.useFakeTimers();
-      const originalSetTimeout = global.setTimeout;
-      global.setTimeout = jest.fn((callback) => {
-        if (typeof callback === 'function') {
-          callback();
-        }
-        return 1;
-      });
+      const restoreClock = useAdvancingClock();
 
       try {
         const result = await processTranslationBatches(
@@ -856,19 +865,22 @@ describe('translation-processor', () => {
         );
 
         expect(mockConsole.warn).toHaveBeenCalledWith(
-          expect.stringContaining(`Job ${testJobId} exceeded maximum retries (${MAX_JOB_STATUS_CHECK_ATTEMPTS}) and will be skipped.`)
+          expect.stringContaining(`Job ${testJobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`)
         );
+
+        const waitLimitMs = JOB_WAIT_MINUTES * 60 * 1000;
+        expect(Date.now()).toBeGreaterThan(waitLimitMs);
+        expect(Date.now()).toBeLessThanOrEqual(waitLimitMs + 10000);
+        expect(Math.max(...pollDelays())).toBeLessThanOrEqual(10000);
 
         const checkJobStatusCallsForTestJob = mockTranslationUtils.checkJobStatus.mock.calls.filter(
           call => call[0] === testJobId
         );
-        expect(checkJobStatusCallsForTestJob.length).toBe(MAX_JOB_STATUS_CHECK_ATTEMPTS + 1); // +1 for final progress check
-        // First 25 calls should have includeTranslations=true
-        checkJobStatusCallsForTestJob.slice(0, MAX_JOB_STATUS_CHECK_ATTEMPTS).forEach(call => {
+        const finalProgressCheck = checkJobStatusCallsForTestJob.pop();
+        expect(finalProgressCheck[1]).toBe(false);
+        checkJobStatusCallsForTestJob.forEach(call => {
           expect(call[1]).toBe(true);
         });
-        // Last call should have includeTranslations=false (final progress check)
-        expect(checkJobStatusCallsForTestJob[MAX_JOB_STATUS_CHECK_ATTEMPTS][1]).toBe(false);
 
         expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalledWith(
           'locales/fr/pending.json',
@@ -882,10 +894,68 @@ describe('translation-processor', () => {
         expect(result.uniqueKeysTranslated.size).toBe(0);
         expect(result.resultsBaseUrl).toBeNull();
         expect(result.jobGroupShortUrl).toBeNull();
-
+        expect(result.failedLanguages).toEqual(['fr']);
       } finally {
-        global.setTimeout = originalSetTimeout;
-        jest.useRealTimers();
+        restoreClock();
+      }
+    });
+
+    it('keeps polling a job that takes several minutes and applies it when it completes', async () => {
+      const batches = [
+        {
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ greeting: 'Hello' })).toString('base64')
+          },
+          localeEntries: ['fr:locales/en.json'],
+          locales: ['fr']
+        }
+      ];
+      const missingByLocale = {
+        'fr:locales/en.json': {
+          locale: 'fr',
+          path: 'locales/en.json',
+          targetPath: 'locales/fr.json',
+          keys: { greeting: { value: 'Hello', sourceKey: 'greeting' } },
+          keyCount: 1
+        }
+      };
+      const config = { projectId: 'test-project' };
+      const completesAfterMs = 5 * 60 * 1000;
+
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-slow', language: { code: 'fr' } }]
+      });
+      mockTranslationUtils.checkJobStatus.mockImplementation(async () => (
+        Date.now() < completesAfterMs
+          ? { status: 'validating' }
+          : { status: 'completed', translations: { data: { greeting: 'Bonjour' } }, language: { code: 'fr' } }
+      ));
+
+      const restoreClock = useAdvancingClock();
+
+      try {
+        const result = await processTranslationBatches(
+          batches,
+          missingByLocale,
+          config,
+          false,
+          { console: mockConsole, translationUtils: mockTranslationUtils }
+        );
+
+        expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+          'locales/fr.json', { greeting: 'Bonjour' }, 'fr', 'locales/en.json', undefined, config
+        );
+        expect(result.failedLanguages).toEqual([]);
+
+        const delays = pollDelays();
+        expect(delays.slice(0, 20)).toEqual(Array(20).fill(3000));
+        expect(Math.max(...delays)).toBeLessThanOrEqual(10000);
+        expect(Date.now()).toBeLessThanOrEqual(completesAfterMs + 10000);
+      } finally {
+        restoreClock();
       }
     });
   });
@@ -917,19 +987,14 @@ describe('translation-processor', () => {
         jobs: [{ id: testJobId, language: { code: 'fr' } }]
       });
       // The job is accepted but never progresses, so every poll returns pending
-      // until the retry budget is spent.
+      // until the wait limit is reached.
       mockTranslationUtils.checkJobStatus.mockImplementation(async (jobId) => (
         jobId === testJobId
           ? { status: 'pending', job_id: jobId, progress: { completed_keys: 0, total_keys: 1 } }
           : { status: 'completed', translations: { data: {} }, language: { code: 'other' }, job_id: jobId }
       ));
 
-      jest.useFakeTimers();
-      const originalSetTimeout = global.setTimeout;
-      global.setTimeout = jest.fn((callback) => {
-        if (typeof callback === 'function') callback();
-        return 1;
-      });
+      const restoreClock = useAdvancingClock();
 
       try {
         const result = await processTranslationBatches(
@@ -943,8 +1008,7 @@ describe('translation-processor', () => {
         expect(result.uniqueKeysTranslated.size).toBe(0);
         expect(result.failedLanguages).toContain('fr');
       } finally {
-        global.setTimeout = originalSetTimeout;
-        jest.useRealTimers();
+        restoreClock();
       }
     });
   });
