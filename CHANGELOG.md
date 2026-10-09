@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- A sync commit names the people who made the edits on Localhero.ai, for example "Edited on Localhero.ai by Anna Svensson and Erik Berg." Names only, never email addresses: many people who edit translations have no GitHub account. Needs the matching server change; against an older server the commit message is unchanged.
+
+### Fixed
+- A sync writes the values the web app recorded when the sync started. Before, it wrote whatever was current when CI fetched them, so an edit saved while CI was starting went out early and the web app still showed it as waiting. That edit now goes in the next sync. Needs the matching server change; against an older server the CLI behaves as before.
+
 ## [0.0.80] - 2026-10-08
 
 ### Fixed
