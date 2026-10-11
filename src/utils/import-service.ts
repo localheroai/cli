@@ -111,14 +111,13 @@ function splitFilesByLocale(files: ImportFile[], config: ProjectConfig): LocaleS
   const isSendable = (language: string): boolean =>
     localeCodesMatch(config.sourceLocale, language) || isConfiguredTargetLocale(outputLocales, language);
 
-  const sourceFiles = files.filter(file => file.language === config.sourceLocale);
   const otherFiles = files.filter(file => file.language !== config.sourceLocale);
-  const skippedLocales = [...new Set(otherFiles.filter(file => !isSendable(file.language)).map(file => file.language))];
+  const skippedFiles = otherFiles.filter(file => !isSendable(file.language));
 
   return {
-    sourceFiles,
+    sourceFiles: files.filter(file => file.language === config.sourceLocale),
     targetFiles: otherFiles.filter(file => isSendable(file.language)),
-    skippedLocales
+    skippedLocales: [...new Set(skippedFiles.map(file => file.language))]
   };
 }
 

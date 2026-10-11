@@ -100,12 +100,16 @@ function hasPreservableNode(node: unknown): boolean {
 
 function pluralGroupOf(keyPath: string): string | null {
   const lastDot = keyPath.lastIndexOf('.');
-  if (lastDot < 0) return null;
-  return CLDR_PLURAL_CATEGORIES.includes(keyPath.slice(lastDot + 1)) ? keyPath.slice(0, lastDot) : null;
+  if (lastDot < 0 || !CLDR_PLURAL_CATEGORIES.includes(lastSegmentOf(keyPath))) return null;
+  return keyPath.slice(0, lastDot);
 }
 
 function cldrRank(keyPath: string): number {
-  return CLDR_PLURAL_CATEGORIES.indexOf(keyPath.slice(keyPath.lastIndexOf('.') + 1));
+  return CLDR_PLURAL_CATEGORIES.indexOf(lastSegmentOf(keyPath));
+}
+
+function lastSegmentOf(keyPath: string): string {
+  return keyPath.slice(keyPath.lastIndexOf('.') + 1);
 }
 
 // New keys are written in the order they arrive. Reorder each plural group's
