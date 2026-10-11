@@ -1483,6 +1483,14 @@ msgstr[2] ""
       expect(findSourceFileForTarget('locales/ja/models/lessons.yml', 'ja', [other, source], 'en')).toBe(source);
     });
 
+    it('does not pair a same-named file from another folder under the locale', () => {
+      const views = file('locales/en/views/common.yml', 'en');
+      const models = file('locales/en/models/common.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/models/common.yml', 'ja', [views, models], 'en')).toBe(models);
+      expect(findSourceFileForTarget('locales/ja/models/common.yml', 'ja', [views], 'en')).toBeUndefined();
+    });
+
     it('picks the source with the matching name among several in one folder', () => {
       const app = file('config/locales/app.en.yml', 'en');
       const models = file('config/locales/models.en.yml', 'en');

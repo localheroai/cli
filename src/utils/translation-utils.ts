@@ -752,9 +752,25 @@ export function generateTargetPath(
   return path.join(sourceDir, `${swapLocaleInName(sourceName, sourceLocale, targetLocale)}${sourceExt}`);
 }
 
+// Each path the target of a source could have in a locale folder layout: one
+// locale folder swapped for the target locale, plus a file named after the locale.
+function localeFolderTargetPaths(sourcePath: string, sourceLocale: string, targetLocale: string): string[] {
+  const folders = path.dirname(sourcePath).split(path.sep);
+  const extension = path.extname(sourcePath);
+  const fileName = path.basename(sourcePath, extension) === sourceLocale
+    ? `${targetLocale}${extension}`
+    : path.basename(sourcePath);
+
+  return folders.flatMap((folder, i) => folder === sourceLocale
+    ? [[...folders.slice(0, i), targetLocale, ...folders.slice(i + 1), fileName].join(path.sep)]
+    : []
+  );
+}
+
 /**
- * Finds the source file a target file is translated from, pairing them the way
- * findTargetFile does. Paths are resolved so relative and absolute ones match.
+ * Finds the one source file whose target path is exactly this target: the same
+ * file for a multi-language file, the generated target path, or the source with
+ * its locale folder swapped. No match, or more than one, finds nothing.
  */
 export function findSourceFileForTarget(
   targetPath: string,
@@ -762,14 +778,15 @@ export function findSourceFileForTarget(
   sourceFiles: TranslationFile[],
   sourceLocale: string
 ): TranslationFile | undefined {
-  const target: TranslationFile = {
-    path: path.resolve(targetPath),
-    locale: targetLocale,
-    format: path.extname(targetPath).slice(1)
-  };
-  return sourceFiles.find(sourceFile =>
-    findTargetFile([target], targetLocale, { ...sourceFile, path: path.resolve(sourceFile.path) }, sourceLocale) !== undefined
-  );
+  const target = path.resolve(targetPath);
+  const matches = sourceFiles.filter(sourceFile => {
+    const resolved = { ...sourceFile, path: path.resolve(sourceFile.path) };
+    const candidates = resolved.multiLanguage
+      ? [resolved.path]
+      : [generateTargetPath(resolved, targetLocale, sourceLocale), ...localeFolderTargetPaths(resolved.path, sourceLocale, targetLocale)];
+    return candidates.includes(target);
+  });
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 /**
