@@ -98,6 +98,43 @@ function hasPreservableNode(node: unknown): boolean {
   return false;
 }
 
+function pluralGroupOf(keyPath: string): string | null {
+  const lastDot = keyPath.lastIndexOf('.');
+  if (lastDot < 0 || !CLDR_PLURAL_CATEGORIES.includes(lastSegmentOf(keyPath))) return null;
+  return keyPath.slice(0, lastDot);
+}
+
+function cldrRank(keyPath: string): number {
+  return CLDR_PLURAL_CATEGORIES.indexOf(lastSegmentOf(keyPath));
+}
+
+function lastSegmentOf(keyPath: string): string {
+  return keyPath.slice(keyPath.lastIndexOf('.') + 1);
+}
+
+// New keys are written in the order they arrive. Reorder each plural group's
+// categories into CLDR order within the slots they already occupy, so other
+// keys keep their position.
+function withPluralCategoriesInCldrOrder(translations: Record<string, unknown>): Record<string, unknown> {
+  const entries = Object.entries(translations);
+  const slotsByGroup = new Map<string, number[]>();
+  entries.forEach(([keyPath], index) => {
+    const group = pluralGroupOf(keyPath);
+    if (group !== null) {
+      slotsByGroup.set(group, [...(slotsByGroup.get(group) ?? []), index]);
+    }
+  });
+
+  const ordered = [...entries];
+  for (const slots of slotsByGroup.values()) {
+    const sorted = slots.map(slot => entries[slot]).sort(([a], [b]) => cldrRank(a) - cldrRank(b));
+    slots.forEach((slot, i) => {
+      ordered[slot] = sorted[i];
+    });
+  }
+  return Object.fromEntries(ordered);
+}
+
 function processArrayItems(array: unknown[], yamlDoc: yaml.Document): YamlNode[] {
   return array.map(item => {
     const itemNode = yamlDoc.createNode(item) as YamlNode;
@@ -349,9 +386,10 @@ async function updateYamlTranslations(
 
 export async function updateYamlFile(
   filePath: string,
-  translations: Record<string, unknown>,
+  incomingTranslations: Record<string, unknown>,
   languageCode: string
 ): Promise<UpdateResult> {
+  const translations = withPluralCategoriesInCldrOrder(incomingTranslations);
   const exists = await fileExists(filePath);
 
   if (!exists) {

@@ -100,6 +100,27 @@ export function isConfiguredTargetLocale(outputLocales: string[], language: stri
     outputLocales.some(locale => localeCodesMatch(locale, language));
 }
 
+interface LocaleSplit {
+  sourceFiles: ImportFile[];
+  targetFiles: ImportFile[];
+  skippedLocales: string[];
+}
+
+function splitFilesByLocale(files: ImportFile[], config: ProjectConfig): LocaleSplit {
+  const outputLocales = config.outputLocales ?? [];
+  const isSendable = (language: string): boolean =>
+    localeCodesMatch(config.sourceLocale, language) || isConfiguredTargetLocale(outputLocales, language);
+
+  const otherFiles = files.filter(file => file.language !== config.sourceLocale);
+  const skippedFiles = otherFiles.filter(file => !isSendable(file.language));
+
+  return {
+    sourceFiles: files.filter(file => file.language === config.sourceLocale),
+    targetFiles: otherFiles.filter(file => isSendable(file.language)),
+    skippedLocales: [...new Set(skippedFiles.map(file => file.language))]
+  };
+}
+
 let poWarningEmitted = false;
 
 export function resetPoWarning(): void {
@@ -357,11 +378,7 @@ export const importService = {
       return { status: 'no_files' };
     }
 
-    const outputLocales = config.outputLocales ?? [];
-    const sourceFiles = files.filter(file => file.language === config.sourceLocale);
-    const targetFiles = files.filter(
-      file => file.language !== config.sourceLocale && isConfiguredTargetLocale(outputLocales, file.language)
-    );
+    const { sourceFiles, targetFiles } = splitFilesByLocale(files, config);
     const importedFiles = {
       source: sourceFiles,
       target: targetFiles
@@ -487,8 +504,19 @@ export const importService = {
       console.log(chalk.dim('--force flag set - pushing all files'));
     }
 
-    const sourceFiles = files.filter(file => file.language === config.sourceLocale);
-    const targetFiles = files.filter(file => file.language !== config.sourceLocale);
+    const { sourceFiles, targetFiles, skippedLocales } = splitFilesByLocale(files, config);
+    if (skippedLocales.length > 0) {
+      console.log(chalk.dim(`Skipped files for ${skippedLocales.join(', ')}: not in outputLocales`));
+    }
+
+    if (sourceFiles.length === 0 && targetFiles.length === 0) {
+      return {
+        status: 'no_changes',
+        files: { source: [], target: [] },
+        ignoreSummary: emptySummary
+      };
+    }
+
     const allTranslations: TranslationRecord[] = [];
 
     const knownLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];

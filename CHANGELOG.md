@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- `push` only sends locale files for the source locale and the locales in `outputLocales`, and names any it skipped. Before, it sent every locale file it found, so one extra file such as `pt.yml` or `zh.yml` next to the configured locales could make the server reject the whole push with "One or more languages are not supported". The initial import already worked this way.
+- New plural forms in Rails YAML files are written in the usual order (zero, one, two, few, many, other). Before, they came out in whatever order the translations arrived, for example `other:` above `one:`. Existing lines are not touched.
+
 ## [0.0.81] - 2026-10-10
 
 ### Added

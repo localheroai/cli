@@ -496,8 +496,21 @@ describe('importService', () => {
 
     const mockFileContents = {
       'translations/en/common.json': '{"hello":"Hello"}',
-      'translations/fr/common.json': '{"hello":"Bonjour"}'
+      'translations/fr/common.json': '{"hello":"Bonjour"}',
+      'translations/pt/common.json': '{"hello":"Olá"}',
+      'translations/pt_BR/common.json': '{"hello":"Olá"}',
+      'translations/zh/common.json': '{"hello":"你好"}'
     };
+
+    const fileFor = (language) => ({
+      path: `translations/${language}/common.json`,
+      language,
+      format: 'json',
+      namespace: 'common'
+    });
+
+    const pushedLanguages = () =>
+      mockImportsApi.bulkUpdateTranslations.mock.calls[0][0].translations.map(t => t.language);
 
     beforeEach(() => {
       jest.spyOn(importService, 'findTranslationFiles').mockResolvedValue(mockFiles);
@@ -657,6 +670,49 @@ describe('importService', () => {
       const result = await importService.pushTranslations(mockConfig, process.cwd(), { prune: true });
 
       expect(result.prunable_keys).toEqual(mockPrunableKeys);
+    });
+
+    it('skips target files whose locale is not in outputLocales and names them once', async () => {
+      const scopedConfig = { ...mockConfig, outputLocales: ['fr'] };
+      jest.spyOn(importService, 'findTranslationFiles').mockResolvedValue(
+        ['en', 'fr', 'pt', 'zh', 'pt'].map(fileFor)
+      );
+
+      const result = await importService.pushTranslations(scopedConfig);
+
+      expect(pushedLanguages()).toEqual(['en', 'fr']);
+      expect(result.files.target.map(f => f.language)).toEqual(['fr']);
+      const skipLines = console.log.mock.calls.map(([line]) => line).filter(line => line.includes('Skipped'));
+      expect(skipLines).toHaveLength(1);
+      expect(skipLines[0]).toContain('Skipped files for pt, zh: not in outputLocales');
+    });
+
+    it('keeps a target file whose locale differs from outputLocales only by case or separator', async () => {
+      const scopedConfig = { ...mockConfig, outputLocales: ['pt-br'] };
+      jest.spyOn(importService, 'findTranslationFiles').mockResolvedValue(['en', 'pt_BR'].map(fileFor));
+
+      await importService.pushTranslations(scopedConfig);
+
+      expect(pushedLanguages()).toEqual(['en', 'pt_BR']);
+    });
+
+    it('keeps a file whose locale differs from sourceLocale only by separator', async () => {
+      const scopedConfig = { ...mockConfig, sourceLocale: 'pt-BR', outputLocales: ['fr'] };
+      jest.spyOn(importService, 'findTranslationFiles').mockResolvedValue(['pt_BR', 'fr'].map(fileFor));
+
+      await importService.pushTranslations(scopedConfig);
+
+      expect(pushedLanguages()).toEqual(['pt_BR', 'fr']);
+    });
+
+    it('reports no changes without calling the API when every file is skipped', async () => {
+      const scopedConfig = { ...mockConfig, outputLocales: ['fr'] };
+      jest.spyOn(importService, 'findTranslationFiles').mockResolvedValue(['zh'].map(fileFor));
+
+      const result = await importService.pushTranslations(scopedConfig);
+
+      expect(result.status).toBe('no_changes');
+      expect(mockImportsApi.bulkUpdateTranslations).not.toHaveBeenCalled();
     });
   });
 });
