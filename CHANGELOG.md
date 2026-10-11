@@ -4,7 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.82] - 2026-10-11
+
+0.0.81 was tagged but never published to npm; 0.0.82 includes everything listed under it.
+
 ### Fixed
+- A sync in CI writes a region locale under the root the file already uses. Before, a value the server reports as `zh-CN` went under a new top-level `zh-CN:` root in `zh_cn.yml`, next to the existing `zh_cn:` one, so the file held the same translations twice and parallel pull requests conflicted on those lines. Affects any locale spelled differently in the config than on the server, such as `zh_cn`, `pt_br` or `en_gb`. `pull` already did this correctly.
+- A new plural key is written for locales whose only plural form is `other`, such as Japanese, Chinese, Thai or Vietnamese. Before, the server returned the translation under the plain key (`count`, not `count.other`) and the CLI dropped it, so those languages never got the key and every CI run translated it again.
 - `push` only sends locale files for the source locale and the locales in `outputLocales`, and names any it skipped. Before, it sent every locale file it found, so one extra file such as `pt.yml` or `zh.yml` next to the configured locales could make the server reject the whole push with "One or more languages are not supported". The initial import already worked this way.
 - New plural forms in Rails YAML files are written in the usual order (zero, one, two, few, many, other). Before, they came out in whatever order the translations arrived, for example `other:` above `one:`. Existing lines are not touched.
 - A Rails YAML plural keeps the shape it already has in the file. A flat `count: "%{count} 件"` in a locale with only one plural form, such as Japanese, stays flat when its `other` translation is updated, and a nested `count:` with `one:`/`other:` stays nested when a single flat value arrives. Before, the entry switched shape and the whole file was rewritten, so comments, quoting and blank lines could change. Only the value changes now.
