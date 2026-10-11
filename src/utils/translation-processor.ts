@@ -377,7 +377,7 @@ async function applyTranslations(
   const returnedTranslations = Object.entries(data.translations.data);
   const requestedTranslations = returnedTranslations.flatMap(([key, value]) => {
     const requestedKey = findRequestedKey(key, entry.keys, requestedKeys, otherOnlyLocale);
-    return requestedKey ? [{ key, value, metadata: entry.keys[requestedKey]?.metadata }] : [];
+    return requestedKey !== undefined ? [{ key, value, metadata: entry.keys[requestedKey]?.metadata }] : [];
   });
   const unrequestedCount = returnedTranslations.length - requestedTranslations.length;
 

@@ -1296,6 +1296,35 @@ describe('translation-processor', () => {
         config
       );
     });
+
+    it('writes a requested key that is the empty string', async () => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-508e', language: { code: 'sv' } }]
+      });
+
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: { data: { '': 'Tom nyckel' } },
+        language: { code: 'sv' }
+      });
+
+      await processTranslationBatches(
+        buildBatch('json', 'json', ['']),
+        buildMissing('json', { '': { value: 'Empty key', sourceKey: '' } }),
+        config,
+        true,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/sv.json',
+        { '': 'Tom nyckel' },
+        'sv',
+        'locales/en.json',
+        undefined,
+        config
+      );
+    });
   });
 
   describe('flat replies for other-only plural locales (#916)', () => {
