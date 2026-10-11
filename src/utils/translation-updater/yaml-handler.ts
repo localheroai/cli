@@ -1,6 +1,7 @@
 import { promises as fs } from 'fs';
 import yaml from 'yaml';
 import { SPECIAL_CHARS_REGEX, INTERPOLATION, CLDR_PLURAL_CATEGORIES, fileExists, tryParseJsonArray } from './common.js';
+import { yamlPluralGroupBasesFromTree } from '../translation-utils.js';
 import {
   spliceYamlUpdate,
   spliceYamlDelete,
@@ -138,12 +139,34 @@ function withPluralCategoriesInCldrOrder(translations: Record<string, unknown>):
 const OTHER_SUFFIX = '.other';
 
 function isPluralMap(node: unknown): boolean {
-  return yaml.isMap(node) && node.items.length > 0 &&
-    node.items.every(pair => yaml.isScalar(pair.key) && CLDR_PLURAL_CATEGORIES.includes(String(pair.key.value)));
+  return yaml.isMap(node) && node.items.length > 0 && node.items.every(pair =>
+    yaml.isScalar(pair.key) && CLDR_PLURAL_CATEGORIES.includes(String(pair.key.value)) && yaml.isScalar(pair.value)
+  );
 }
 
-function keyPathInFileShape(doc: yaml.Document, languageCode: string, keyPath: string, incomingKeys: Set<string>): string {
+async function readSourcePluralBases(sourceFilePath: string | null, sourceLocale?: string): Promise<Set<string>> {
+  if (!sourceFilePath || !(await fileExists(sourceFilePath))) return new Set();
+
+  const sourceDoc = yaml.parseDocument(await fs.readFile(sourceFilePath, 'utf8'), { uniqueKeys: false });
+  if (sourceDoc.errors.length > 0) return new Set();
+
+  const parsed: unknown = sourceDoc.toJS();
+  const wrapped = sourceLocale && parsed && typeof parsed === 'object'
+    ? (parsed as Record<string, unknown>)[sourceLocale]
+    : undefined;
+  return yamlPluralGroupBasesFromTree(wrapped && typeof wrapped === 'object' ? wrapped : parsed);
+}
+
+function keyPathInFileShape(
+  doc: yaml.Document,
+  languageCode: string,
+  keyPath: string,
+  incomingKeys: Set<string>,
+  sourcePluralBases: Set<string>
+): string {
   const base = keyPath.endsWith(OTHER_SUFFIX) ? keyPath.slice(0, -OTHER_SUFFIX.length) : keyPath;
+  if (!sourcePluralBases.has(base)) return keyPath;
+
   const formsOfBase = [base, ...CLDR_PLURAL_CATEGORIES.map(category => `${base}.${category}`)];
   if (formsOfBase.filter(form => incomingKeys.has(form)).length > 1) return keyPath;
 
@@ -154,16 +177,18 @@ function keyPathInFileShape(doc: yaml.Document, languageCode: string, keyPath: s
 }
 
 // Other-only locales often keep a plural flat (`count: …`) while the API sends
-// `count.other`, and a nested plural can receive a flat value. A lone form is
-// written into the shape the file already has, so the file is not re-laid out.
+// `count.other`, and a nested plural can receive a flat value. A lone form of a
+// key the source holds as a plural is written into the shape the file already
+// has, so the file is not re-laid out.
 function withExistingPluralShape(
   doc: yaml.Document,
   translations: Record<string, unknown>,
-  languageCode: string
+  languageCode: string,
+  sourcePluralBases: Set<string>
 ): Record<string, unknown> {
   const incomingKeys = new Set(Object.keys(translations));
   return Object.fromEntries(Object.entries(translations).map(([keyPath, value]) =>
-    [keyPathInFileShape(doc, languageCode, keyPath, incomingKeys), value]
+    [keyPathInFileShape(doc, languageCode, keyPath, incomingKeys, sourcePluralBases), value]
   ));
 }
 
@@ -419,7 +444,9 @@ async function updateYamlTranslations(
 export async function updateYamlFile(
   filePath: string,
   incomingTranslations: Record<string, unknown>,
-  languageCode: string
+  languageCode: string,
+  sourceFilePath: string | null = null,
+  sourceLocale?: string
 ): Promise<UpdateResult> {
   const updatedKeys = Object.keys(incomingTranslations);
   const exists = await fileExists(filePath);
@@ -439,7 +466,10 @@ export async function updateYamlFile(
   const options = detectYamlOptions(source);
   const doc = yaml.parseDocument(source);
   clearDuplicateKeyErrors(doc, filePath);
-  const translations = withPluralCategoriesInCldrOrder(withExistingPluralShape(doc, incomingTranslations, languageCode));
+  const sourcePluralBases = await readSourcePluralBases(sourceFilePath, sourceLocale);
+  const translations = withPluralCategoriesInCldrOrder(
+    withExistingPluralShape(doc, incomingTranslations, languageCode, sourcePluralBases)
+  );
 
   if (Object.keys(translations).length === 0) {
     return { updatedKeys: [], created: false };

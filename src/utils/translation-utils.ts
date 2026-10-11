@@ -753,6 +753,22 @@ export function generateTargetPath(
 }
 
 /**
+ * Finds the source file a target file is translated from: the same file for a
+ * multi-language file, otherwise the source whose generated target path is it.
+ */
+export function findSourceFileForTarget(
+  targetPath: string,
+  targetLocale: string,
+  sourceFiles: TranslationFile[],
+  sourceLocale: string
+): TranslationFile | undefined {
+  const target = path.resolve(targetPath);
+  return sourceFiles.find(sourceFile =>
+    path.resolve(sourceFile.multiLanguage ? sourceFile.path : generateTargetPath(sourceFile, targetLocale, sourceLocale)) === target
+  );
+}
+
+/**
  * Process target content to extract translation keys
  * @param targetContent The target content object
  * @param targetLocale The target locale

@@ -96,7 +96,13 @@ async function _updateTranslationFile(
     };
   }
 
-  const yamlResult = await updateYamlFile(filePath, filteredTranslations, languageCode);
+  const yamlResult = await updateYamlFile(
+    filePath,
+    filteredTranslations,
+    languageCode,
+    sourceFilePath,
+    sourceLanguage ?? config?.sourceLocale
+  );
   return {
     updatedKeys: yamlResult.updatedKeys || Object.keys(filteredTranslations),
     created: yamlResult.created

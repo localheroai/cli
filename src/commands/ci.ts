@@ -7,7 +7,9 @@ import { githubService } from '../utils/github.js';
 import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { toConfigLocale } from '../utils/translation-processor.js';
-import { ProjectConfig } from '../types/index.js';
+import { findTranslationFiles } from '../utils/files.js';
+import { findSourceFileForTarget } from '../utils/translation-utils.js';
+import { ProjectConfig, TranslationFile, TranslationFilesResult } from '../types/index.js';
 
 export type CiOptions = TranslationOptions;
 
@@ -70,6 +72,16 @@ function getBranchContext(env: NodeJS.ProcessEnv, config?: ProjectConfig | null)
     : branch === 'main' || branch === 'master';
 
   return { branch, useChangedOnly: !isOnDefaultBranch };
+}
+
+async function findSourceFiles(config: ProjectConfig): Promise<TranslationFile[]> {
+  const result = await findTranslationFiles(config, {
+    parseContent: false,
+    includeContent: false,
+    extractKeys: false,
+    returnFullResult: true
+  }) as TranslationFilesResult;
+  return result.sourceFiles;
 }
 
 /**
@@ -180,6 +192,7 @@ async function runSyncMode(
   const uniqueKeys = new Set<string>();
 
   const projectRoot = process.cwd();
+  const sourceFiles = await findSourceFiles(config);
 
   for (const file of allFiles) {
     const absolutePath = path.resolve(file.path);
@@ -204,11 +217,12 @@ async function runSyncMode(
       }))
       : file.translations;
 
+    const locale = toConfigLocale(file.language, config);
     await updateTranslationFile(
       file.path,
       translations,
-      toConfigLocale(file.language, config),
-      undefined,
+      locale,
+      findSourceFileForTarget(file.path, locale, sourceFiles, config.sourceLocale)?.path,
       config.sourceLocale,
       config
     );

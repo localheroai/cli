@@ -25,8 +25,23 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
     return filePath;
   }
 
+  function writeEnglishSource(): string {
+    return writeFile('en.yml', [
+      'en:',
+      '  lessons:',
+      '    flat_one:',
+      '      one: "%{count} lesson"',
+      '      other: "%{count} lessons"',
+      '    nested_one:',
+      '      one: "%{count} lesson"',
+      '      other: "%{count} lessons"',
+      '    title: Lessons',
+      ''
+    ]);
+  }
+
   it('writes an incoming .other into a flat plural, changing only its value', async () => {
-    const source = [
+    const original = [
       '# Lessons',
       'ja:',
       '  lessons:',
@@ -35,12 +50,12 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
       '    title: \'レッスン\'',
       ''
     ];
-    const filePath = writeFile('ja.yml', source);
+    const filePath = writeFile('ja.yml', original);
 
-    await updateYamlFile(filePath, { 'lessons.flat_one.other': '新しい %{count}' }, 'ja');
+    await updateYamlFile(filePath, { 'lessons.flat_one.other': '新しい %{count}' }, 'ja', writeEnglishSource(), 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe(
-      source.join('\n').replace('"古い %{count}"', '"新しい %{count}"')
+      original.join('\n').replace('"古い %{count}"', '"新しい %{count}"')
     );
     expect(warn).not.toHaveBeenCalled();
   });
@@ -48,7 +63,7 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
   it('writes an incoming .other into an empty flat plural, keeping it flat', async () => {
     const filePath = writeFile('ja.yml', ['ja:', '  lessons:', '    flat_one:', '    title: レッスン', '']);
 
-    await updateYamlFile(filePath, { 'lessons.flat_one.other': '新しい %{count}' }, 'ja');
+    await updateYamlFile(filePath, { 'lessons.flat_one.other': '新しい %{count}' }, 'ja', writeEnglishSource(), 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe(
       'ja:\n  lessons:\n    flat_one: 新しい %{count}\n    title: レッスン\n'
@@ -57,7 +72,7 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
   });
 
   it('writes an incoming flat value into the .other of a nested plural, leaving one untouched', async () => {
-    const source = [
+    const original = [
       'de:',
       '  lessons:',
       '    nested_one:',
@@ -67,12 +82,12 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
       '    title: Lektionen',
       ''
     ];
-    const filePath = writeFile('de.yml', source);
+    const filePath = writeFile('de.yml', original);
 
-    await updateYamlFile(filePath, { 'lessons.nested_one': 'Neue %{count}' }, 'de');
+    await updateYamlFile(filePath, { 'lessons.nested_one': 'Neue %{count}' }, 'de', writeEnglishSource(), 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe(
-      source.join('\n').replace('"Alte %{count}"', '"Neue %{count}"')
+      original.join('\n').replace('"Alte %{count}"', '"Neue %{count}"')
     );
     expect(warn).not.toHaveBeenCalled();
   });
@@ -83,7 +98,7 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
     await updateYamlFile(filePath, {
       'lessons.nested_new.other': '%{count} 件',
       'lessons.flat_new': '%{count} 個'
-    }, 'ja');
+    }, 'ja', writeEnglishSource(), 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe([
       'ja:',
@@ -97,15 +112,15 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
   });
 
   it('still nests a flat plural that receives several forms', async () => {
-    const filePath = writeFile('de.yml', ['de:', '  lessons:', '    count: "%{count} Lektionen"', '']);
+    const filePath = writeFile('de.yml', ['de:', '  lessons:', '    flat_one: "%{count} Lektionen"', '']);
 
     await updateYamlFile(filePath, {
-      'lessons.count.one': 'Eine Lektion',
-      'lessons.count.other': '%{count} Lektionen neu'
-    }, 'de');
+      'lessons.flat_one.one': 'Eine Lektion',
+      'lessons.flat_one.other': '%{count} Lektionen neu'
+    }, 'de', writeEnglishSource(), 'en');
 
     const reparsed = yaml.parse(fs.readFileSync(filePath, 'utf8'));
-    expect(reparsed.de.lessons.count).toEqual({ one: 'Eine Lektion', other: '%{count} Lektionen neu' });
+    expect(reparsed.de.lessons.flat_one).toEqual({ one: 'Eine Lektion', other: '%{count} Lektionen neu' });
   });
 
   it('does not treat a map with non-plural children as a plural', async () => {
@@ -117,8 +132,72 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
     expect(reparsed.de.errors).toBe('Ein Fehler');
   });
 
+  it('does not treat a namespace with category-named sections as a plural', async () => {
+    const sourcePath = writeFile('en.yml', ['en:', '  errors:', '    one: An error', '    other: Errors', '']);
+    const filePath = writeFile('de.yml', [
+      'de:',
+      '  errors:',
+      '    one:',
+      '      title: Ein Fehler',
+      '    other:',
+      '      title: Fehler',
+      ''
+    ]);
+
+    await updateYamlFile(filePath, { errors: 'Fehler' }, 'de', sourcePath, 'en');
+
+    const reparsed = yaml.parse(fs.readFileSync(filePath, 'utf8'));
+    expect(reparsed.de.errors).toBe('Fehler');
+  });
+
+  it('does not collapse a lone .other the source does not hold as a plural', async () => {
+    const sourcePath = writeFile('en.yml', ['en:', '  errors:', '    other: Other error', '']);
+    const filePath = writeFile('de.yml', ['de:', '  errors: Fehler', '']);
+
+    await updateYamlFile(filePath, { 'errors.other': 'Anderer Fehler' }, 'de', sourcePath, 'en');
+
+    const reparsed = yaml.parse(fs.readFileSync(filePath, 'utf8'));
+    expect(reparsed.de.errors).toEqual({ other: 'Anderer Fehler' });
+  });
+
+  it('does not write a flat value into .other when the source holds the key flat', async () => {
+    const sourcePath = writeFile('en.yml', ['en:', '  errors: Error', '']);
+    const filePath = writeFile('de.yml', ['de:', '  errors:', '    other: Andere', '']);
+
+    await updateYamlFile(filePath, { errors: 'Fehler' }, 'de', sourcePath, 'en');
+
+    const reparsed = yaml.parse(fs.readFileSync(filePath, 'utf8'));
+    expect(reparsed.de.errors).toBe('Fehler');
+  });
+
+  it('reads a source file that repeats a key, as Rails does', async () => {
+    const sourcePath = writeFile('en.yml', [
+      'en:',
+      '  title: Lessons',
+      '  title: Courses',
+      '  count:',
+      '    one: "%{count} lesson"',
+      '    other: "%{count} lessons"',
+      ''
+    ]);
+    const filePath = writeFile('ja.yml', ['ja:', '  count: "古い %{count}"', '']);
+
+    await updateYamlFile(filePath, { 'count.other': '新しい %{count}' }, 'ja', sourcePath, 'en');
+
+    expect(fs.readFileSync(filePath, 'utf8')).toBe('ja:\n  count: "新しい %{count}"\n');
+  });
+
+  it('keeps writing as the keys arrive when no source file is known', async () => {
+    const filePath = writeFile('ja.yml', ['ja:', '  lessons:', '    flat_one: "古い %{count}"', '']);
+
+    await updateYamlFile(filePath, { 'lessons.flat_one.other': '新しい %{count}' }, 'ja');
+
+    const reparsed = yaml.parse(fs.readFileSync(filePath, 'utf8'));
+    expect(reparsed.ja.lessons.flat_one).toEqual({ other: '新しい %{count}' });
+  });
+
   it('keeps each locale root in its own shape in a multi-language file', async () => {
-    const source = [
+    const original = [
       'en:',
       '  lessons:',
       '    count:',
@@ -134,13 +213,13 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
       '      other: "%{count} Lektionen"',
       ''
     ];
-    const filePath = writeFile('lessons.yml', source);
+    const filePath = writeFile('lessons.yml', original);
 
-    await updateYamlFile(filePath, { 'lessons.count.other': '%{count} 件のレッスン' }, 'ja');
-    await updateYamlFile(filePath, { 'lessons.count': '%{count} neue Lektionen' }, 'de');
+    await updateYamlFile(filePath, { 'lessons.count.other': '%{count} 件のレッスン' }, 'ja', filePath, 'en');
+    await updateYamlFile(filePath, { 'lessons.count': '%{count} neue Lektionen' }, 'de', filePath, 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe(
-      source.join('\n')
+      original.join('\n')
         .replace('"%{count} レッスン"', '"%{count} 件のレッスン"')
         .replace('"%{count} Lektionen"', '"%{count} neue Lektionen"')
     );
@@ -148,7 +227,20 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
   });
 
   it('keeps the shape of plurals nested several levels deep', async () => {
-    const source = [
+    const sourcePath = writeFile('en.yml', [
+      'en:',
+      '  courses:',
+      '    sections:',
+      '      lessons:',
+      '        flat_one:',
+      '          one: "%{count} lesson"',
+      '          other: "%{count} lessons"',
+      '        nested_one:',
+      '          one: "%{count} lesson"',
+      '          other: "%{count} lessons"',
+      ''
+    ]);
+    const filePath = writeFile('ja.yml', [
       'ja:',
       '  courses:',
       '    sections:',
@@ -157,13 +249,12 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
       '        nested_one:',
       '          other: "古い %{count}"',
       ''
-    ];
-    const filePath = writeFile('ja.yml', source);
+    ]);
 
     await updateYamlFile(filePath, {
       'courses.sections.lessons.flat_one.other': '新しい平ら %{count}',
       'courses.sections.lessons.nested_one': '新しい入れ子 %{count}'
-    }, 'ja');
+    }, 'ja', sourcePath, 'en');
 
     expect(fs.readFileSync(filePath, 'utf8')).toBe([
       'ja:',
