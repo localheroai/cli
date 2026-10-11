@@ -1,5 +1,9 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
 import { ci, CiOptions } from '../../src/commands/ci.js';
+import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 import type { TranslationOptions } from '../../src/commands/translate.js';
 
 describe('ci command', () => {
@@ -646,6 +650,63 @@ describe('ci command', () => {
 
       const passedTranslations = deps.updateTranslationFile.mock.calls[0][1];
       expect(passedTranslations[0].metadata?.source_references).toEqual(['lib/web.ex:10']);
+    });
+
+    describe('when the backend spells the locale differently from the config', () => {
+      const zhCnSync = {
+        ...syncResponse,
+        sync: {
+          ...syncResponse.sync,
+          files: [{
+            path: 'config/locales/zh_cn.yml',
+            language: 'zh-CN',
+            translations: [{ key: 'exam.review_prompt', name: 'exam.review_prompt', value: '提交前先检查一下你的答案', updated_at: '2026-10-01T00:00:00Z' }]
+          }]
+        }
+      };
+
+      function buildZhCnDeps() {
+        const deps = buildSyncDeps();
+        mockConfigUtils.getValidProjectConfig.mockResolvedValue({
+          projectId: 'test-project',
+          sourceLocale: 'en',
+          outputLocales: ['ja', 'zh_cn', 'zh_tw'],
+          translationFiles: { paths: ['config/locales/'] }
+        });
+        deps.syncApi.getSyncTranslations.mockResolvedValue(zhCnSync);
+        return deps;
+      }
+
+      it('writes with the config spelling', async () => {
+        mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+        const deps = buildZhCnDeps();
+
+        await ci({ skipCommit: true }, deps);
+
+        expect(deps.updateTranslationFile.mock.calls[0][2]).toBe('zh_cn');
+      });
+
+      it('adds the value under the file\'s existing root instead of a new one', async () => {
+        mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+        const deps = { ...buildZhCnDeps(), updateTranslationFile };
+        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'localhero-ci-sync-'));
+        const filePath = path.join(tempDir, 'config/locales/zh_cn.yml');
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, 'zh_cn:\n  exam:\n    title: 考试\n', 'utf8');
+        const originalCwd = process.cwd();
+
+        try {
+          process.chdir(tempDir);
+          await ci({ skipCommit: true }, deps);
+          const written = await fs.readFile(filePath, 'utf8');
+
+          expect(written).not.toMatch(/^zh-CN:/m);
+          expect(written).toMatch(/^zh_cn:\n {2}exam:\n {4}title: 考试\n {4}review_prompt: 提交前先检查一下你的答案\n$/);
+        } finally {
+          process.chdir(originalCwd);
+          await fs.rm(tempDir, { recursive: true, force: true });
+        }
+      });
     });
 
     describe('when the sync belongs to another project in the repository', () => {

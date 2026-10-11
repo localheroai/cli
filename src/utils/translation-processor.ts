@@ -164,6 +164,11 @@ export function localeCodesMatch(a: string, b: string): boolean {
   return a.toLowerCase().replace(/_/g, '-') === b.toLowerCase().replace(/_/g, '-');
 }
 
+export function toConfigLocale(code: string, config: Pick<ProjectConfig, 'sourceLocale' | 'outputLocales'>): string {
+  const configLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];
+  return configLocales.find(locale => localeCodesMatch(locale, code)) ?? code;
+}
+
 function findMissingEntryKey(
   missingByLocale: MissingByLocale,
   languageCode: string,
