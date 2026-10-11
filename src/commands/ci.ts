@@ -6,6 +6,7 @@ import { checkAuth } from '../utils/auth.js';
 import { githubService } from '../utils/github.js';
 import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
+import { toConfigLocale } from '../utils/translation-processor.js';
 import { ProjectConfig } from '../types/index.js';
 
 export type CiOptions = TranslationOptions;
@@ -206,7 +207,7 @@ async function runSyncMode(
     await updateTranslationFile(
       file.path,
       translations,
-      file.language,
+      toConfigLocale(file.language, config),
       undefined,
       config.sourceLocale,
       config
