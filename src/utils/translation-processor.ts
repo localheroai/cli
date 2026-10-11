@@ -2,7 +2,6 @@ import chalk from 'chalk';
 import { ProjectConfig } from '../types/index.js';
 import type { SkippedLanguage } from '../types/index.js';
 import { Spinner } from './spinner.js';
-import { CLDR_PLURAL_CATEGORIES } from './translation-updater/common.js';
 
 /**
  * Types for translation processing
@@ -267,12 +266,8 @@ function createBatchScope(batch: TranslationBatch): BatchScope {
   return { requestedKeys: readRequestedKeys(batch), appliedEntries: new Set<string>() };
 }
 
-function isOtherOnlyYamlPlural(base: string, entryKeys: MissingTranslationEntry['keys']): boolean {
-  if (entryKeys[`${base}.other`]?.metadata?.plural_format !== 'yaml') return false;
-
-  return CLDR_PLURAL_CATEGORIES.every(
-    (category) => category === 'other' || !Object.hasOwn(entryKeys, `${base}.${category}`)
-  );
+function isOtherOnlyLocale(localeCategories: string[] | undefined): boolean {
+  return localeCategories?.length === 1 && localeCategories[0] === 'other';
 }
 
 /**
@@ -283,15 +278,18 @@ function isOtherOnlyYamlPlural(base: string, entryKeys: MissingTranslationEntry[
 function findRequestedKey(
   returnedKey: string,
   entryKeys: MissingTranslationEntry['keys'],
-  requestedKeys: Set<string> | undefined
+  requestedKeys: Set<string> | undefined,
+  otherOnlyLocale: boolean
 ): string | undefined {
   const isRequested = (key: string): boolean =>
     Object.hasOwn(entryKeys, key) && (!requestedKeys || requestedKeys.has(key));
 
   if (isRequested(returnedKey)) return returnedKey;
+  if (!otherOnlyLocale) return undefined;
 
   const otherForm = `${returnedKey}.other`;
-  return isRequested(otherForm) && isOtherOnlyYamlPlural(returnedKey, entryKeys) ? otherForm : undefined;
+  const isYamlPlural = entryKeys[otherForm]?.metadata?.plural_format === 'yaml';
+  return isYamlPlural && isRequested(otherForm) ? otherForm : undefined;
 }
 
 /**
@@ -375,9 +373,10 @@ async function applyTranslations(
   const targetPath = entry.targetPath;
   const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
   const { requestedKeys } = batchScope;
+  const otherOnlyLocale = isOtherOnlyLocale(config.localePluralCategories?.[fileLocale]);
   const returnedTranslations = Object.entries(data.translations.data);
   const requestedTranslations = returnedTranslations.flatMap(([key, value]) => {
-    const requestedKey = findRequestedKey(key, entry.keys, requestedKeys);
+    const requestedKey = findRequestedKey(key, entry.keys, requestedKeys, otherOnlyLocale);
     return requestedKey ? [{ key, value, metadata: entry.keys[requestedKey]?.metadata }] : [];
   });
   const unrequestedCount = returnedTranslations.length - requestedTranslations.length;

@@ -1299,7 +1299,7 @@ describe('translation-processor', () => {
   });
 
   describe('flat replies for other-only plural locales (#916)', () => {
-    const config = { projectId: 'test-project' };
+    const config = { projectId: 'test-project', localePluralCategories: { zh_cn: ['other'] } };
     const pluralMetadata = {
       plural: true,
       plural_format: 'yaml',
@@ -1307,7 +1307,7 @@ describe('translation-processor', () => {
       plural_base: 'lessons.badges_earned'
     };
 
-    const buildBatch = (requestedKeys) => ([
+    const buildBatch = (requestedKeys, locale = 'zh_cn') => ([
       {
         sourceFilePath: 'config/locales/en.yml',
         sourceFile: {
@@ -1317,16 +1317,16 @@ describe('translation-processor', () => {
             keys: Object.fromEntries(requestedKeys.map((key) => [key, { value: key }]))
           })).toString('base64')
         },
-        localeEntries: ['zh_cn:config/locales/en.yml'],
-        locales: ['zh_cn']
+        localeEntries: [`${locale}:config/locales/en.yml`],
+        locales: [locale]
       }
     ]);
 
-    const buildMissing = (keys) => ({
-      'zh_cn:config/locales/en.yml': {
-        locale: 'zh_cn',
+    const buildMissing = (keys, locale = 'zh_cn') => ({
+      [`${locale}:config/locales/en.yml`]: {
+        locale,
         path: 'config/locales/en.yml',
-        targetPath: 'config/locales/zh_cn.yml',
+        targetPath: `config/locales/${locale}.yml`,
         keys,
         keyCount: Object.keys(keys).length
       }
@@ -1338,14 +1338,14 @@ describe('translation-processor', () => {
       metadata: pluralMetadata
     };
 
-    const replyWith = (data) => {
+    const replyWith = (data, languageCode = 'zh-CN') => {
       mockTranslationUtils.createTranslationJob.mockResolvedValue({
-        jobs: [{ id: 'job-916', language: { code: 'zh-CN' } }]
+        jobs: [{ id: 'job-916', language: { code: languageCode } }]
       });
       mockTranslationUtils.checkJobStatus.mockResolvedValue({
         status: 'completed',
         translations: { data },
-        language: { code: 'zh-CN' }
+        language: { code: languageCode }
       });
     };
 
@@ -1458,39 +1458,43 @@ describe('translation-processor', () => {
       );
     });
 
-    it('ignores a flat base when the locale also needs another form of the plural', async () => {
+    it('ignores a flat base when the locale needs another plural form it already has', async () => {
       replyWith({
         'lessons.badges_earned': 'flat value',
-        'lessons.badges_earned.one': '%{count} badge earned',
-        'lessons.badges_earned.other': '%{count} badges earned'
-      });
+        'lessons.badges_earned.other': '%{count} badges na nakuha'
+      }, 'tl');
+      const multiFormConfig = { projectId: 'test-project', localePluralCategories: { tl: ['one', 'other'] } };
 
       await processTranslationBatches(
-        buildBatch(['lessons.badges_earned.one', 'lessons.badges_earned.other']),
-        buildMissing({
-          'lessons.badges_earned.one': {
-            value: '%{count} badge earned',
-            sourceKey: 'lessons.badges_earned.one',
-            metadata: { ...pluralMetadata, plural_category: 'one' }
-          },
-          'lessons.badges_earned.other': badgesEarnedOther
-        }),
-        config,
+        buildBatch(['lessons.badges_earned.other'], 'tl'),
+        buildMissing({ 'lessons.badges_earned.other': badgesEarnedOther }, 'tl'),
+        multiFormConfig,
         false,
         { console: mockConsole, translationUtils: mockTranslationUtils }
       );
 
       expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
-        'config/locales/zh_cn.yml',
-        {
-          'lessons.badges_earned.one': '%{count} badge earned',
-          'lessons.badges_earned.other': '%{count} badges earned'
-        },
-        'zh_cn',
+        'config/locales/tl.yml',
+        { 'lessons.badges_earned.other': '%{count} badges na nakuha' },
+        'tl',
         'config/locales/en.yml',
         undefined,
-        config
+        multiFormConfig
       );
+    });
+
+    it('ignores a flat base when the locale plural categories are unknown', async () => {
+      replyWith({ 'lessons.badges_earned': '获得了 %{count} 枚徽章' });
+
+      await processTranslationBatches(
+        buildBatch(['lessons.badges_earned.other']),
+        buildMissing({ 'lessons.badges_earned.other': badgesEarnedOther }),
+        { projectId: 'test-project' },
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
     });
 
     describe('with the real YAML writer', () => {
