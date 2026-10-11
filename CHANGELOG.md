@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 - `push` only sends locale files for the source locale and the locales in `outputLocales`, and names any it skipped. Before, it sent every locale file it found, so one extra file such as `pt.yml` or `zh.yml` next to the configured locales could make the server reject the whole push with "One or more languages are not supported". The initial import already worked this way.
 - New plural forms in Rails YAML files are written in the usual order (zero, one, two, few, many, other). Before, they came out in whatever order the translations arrived, for example `other:` above `one:`. Existing lines are not touched.
+- A Rails YAML plural keeps the shape it already has in the file. A flat `count: "%{count} 件"` in a locale with only one plural form, such as Japanese, stays flat when its `other` translation is updated, and a nested `count:` with `one:`/`other:` stays nested when a single flat value arrives. Before, the entry switched shape and the whole file was rewritten, so comments, quoting and blank lines could change. Only the value changes now.
 
 ## [0.0.81] - 2026-10-10
 
