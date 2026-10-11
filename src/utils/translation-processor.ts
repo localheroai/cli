@@ -267,6 +267,25 @@ function createBatchScope(batch: TranslationBatch): BatchScope {
 }
 
 /**
+ * Finds the requested key a returned key answers, or undefined when the CLI
+ * never asked for it. For a locale whose only plural form is `other`, the API
+ * answers a requested `x.other` under the flat key `x`.
+ */
+function findRequestedKey(
+  returnedKey: string,
+  entryKeys: MissingTranslationEntry['keys'],
+  requestedKeys: Set<string> | undefined
+): string | undefined {
+  const isRequested = (key: string): boolean =>
+    Object.hasOwn(entryKeys, key) && (!requestedKeys || requestedKeys.has(key));
+
+  if (isRequested(returnedKey)) return returnedKey;
+
+  const otherForm = `${returnedKey}.other`;
+  return isRequested(otherForm) ? otherForm : undefined;
+}
+
+/**
  * Applies completed translations to the target files
  *
  * @param jobStatus - The job status with translation data
@@ -348,9 +367,10 @@ async function applyTranslations(
   const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
   const { requestedKeys } = batchScope;
   const returnedTranslations = Object.entries(data.translations.data);
-  const requestedTranslations = returnedTranslations.filter(
-    ([key]) => Object.hasOwn(entry.keys, key) && (!requestedKeys || requestedKeys.has(key))
-  );
+  const requestedTranslations = returnedTranslations.flatMap(([key, value]) => {
+    const requestedKey = findRequestedKey(key, entry.keys, requestedKeys);
+    return requestedKey ? [{ key, value, metadata: entry.keys[requestedKey]?.metadata }] : [];
+  });
   const unrequestedCount = returnedTranslations.length - requestedTranslations.length;
 
   if (verbose && unrequestedCount > 0) {
@@ -367,12 +387,8 @@ async function applyTranslations(
 
   const isPoFile = /\.(po|pot)$/i.test(targetPath);
   const translationsToWrite = isPoFile
-    ? requestedTranslations.map(([key, value]) => ({
-      key,
-      value,
-      ...(entry.keys[key]?.metadata && { metadata: entry.keys[key].metadata })
-    }))
-    : Object.fromEntries(requestedTranslations);
+    ? requestedTranslations.map(({ key, value, metadata }) => ({ key, value, ...(metadata && { metadata }) }))
+    : Object.fromEntries(requestedTranslations.map(({ key, value }) => [key, value]));
 
   const result = await translationUtils.updateTranslationFile(
     targetPath,

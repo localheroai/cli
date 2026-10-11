@@ -1,6 +1,10 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { processTranslationBatches, JOB_WAIT_MINUTES } from '../../src/utils/translation-processor.js';
-import { batchKeysWithMissing } from '../../src/utils/translation-utils.js';
+import { batchKeysWithMissing, findMissingTranslationsByLocale } from '../../src/utils/translation-utils.js';
+import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 
 describe('translation-processor', () => {
   let mockConsole;
@@ -1291,6 +1295,190 @@ describe('translation-processor', () => {
         undefined,
         config
       );
+    });
+  });
+
+  describe('flat replies for other-only plural locales (#916)', () => {
+    const config = { projectId: 'test-project' };
+    const pluralMetadata = {
+      plural: true,
+      plural_format: 'yaml',
+      plural_category: 'other',
+      plural_base: 'lessons.badges_earned'
+    };
+
+    const buildBatch = (requestedKeys) => ([
+      {
+        sourceFilePath: 'config/locales/en.yml',
+        sourceFile: {
+          path: 'config/locales/en.yml',
+          format: 'yaml',
+          content: Buffer.from(JSON.stringify({
+            keys: Object.fromEntries(requestedKeys.map((key) => [key, { value: key }]))
+          })).toString('base64')
+        },
+        localeEntries: ['zh_cn:config/locales/en.yml'],
+        locales: ['zh_cn']
+      }
+    ]);
+
+    const buildMissing = (keys) => ({
+      'zh_cn:config/locales/en.yml': {
+        locale: 'zh_cn',
+        path: 'config/locales/en.yml',
+        targetPath: 'config/locales/zh_cn.yml',
+        keys,
+        keyCount: Object.keys(keys).length
+      }
+    });
+
+    const badgesEarnedOther = {
+      value: '%{count} badges earned',
+      sourceKey: 'lessons.badges_earned.other',
+      metadata: pluralMetadata
+    };
+
+    const replyWith = (data) => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-916', language: { code: 'zh-CN' } }]
+      });
+      mockTranslationUtils.checkJobStatus.mockResolvedValue({
+        status: 'completed',
+        translations: { data },
+        language: { code: 'zh-CN' }
+      });
+    };
+
+    it('writes the flat base the backend returns for a requested .other form', async () => {
+      replyWith({ 'lessons.badges_earned': '获得了 %{count} 枚徽章' });
+
+      const result = await processTranslationBatches(
+        buildBatch(['lessons.badges_earned.other']),
+        buildMissing({ 'lessons.badges_earned.other': badgesEarnedOther }),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/zh_cn.yml',
+        { 'lessons.badges_earned': '获得了 %{count} 枚徽章' },
+        'zh_cn',
+        'config/locales/en.yml',
+        undefined,
+        config
+      );
+      expect(result.languages).toEqual(['zh-CN']);
+      expect(result.totalLanguages).toBe(1);
+    });
+
+    it('ignores a flat base when its .other form was not requested in this batch', async () => {
+      replyWith({
+        'lessons.badges_earned': '获得了 %{count} 枚徽章',
+        'lessons.title': '课程'
+      });
+
+      await processTranslationBatches(
+        buildBatch(['lessons.title']),
+        buildMissing({
+          'lessons.badges_earned.other': badgesEarnedOther,
+          'lessons.title': { value: 'Lessons', sourceKey: 'lessons.title' }
+        }),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/zh_cn.yml',
+        { 'lessons.title': '课程' },
+        'zh_cn',
+        'config/locales/en.yml',
+        undefined,
+        config
+      );
+    });
+
+    it('still writes a reply keyed by the requested .other form', async () => {
+      replyWith({ 'lessons.badges_earned.other': '获得了 %{count} 枚徽章' });
+
+      await processTranslationBatches(
+        buildBatch(['lessons.badges_earned.other']),
+        buildMissing({ 'lessons.badges_earned.other': badgesEarnedOther }),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/zh_cn.yml',
+        { 'lessons.badges_earned.other': '获得了 %{count} 枚徽章' },
+        'zh_cn',
+        'config/locales/en.yml',
+        undefined,
+        config
+      );
+    });
+
+    describe('with the real YAML writer', () => {
+      let tempDir;
+
+      beforeEach(() => {
+        tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'localhero-916-'));
+      });
+
+      afterEach(() => {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      });
+
+      const readAsTranslationFile = (filePath, locale) => ({
+        path: filePath,
+        format: 'yaml',
+        locale,
+        content: fs.readFileSync(filePath).toString('base64')
+      });
+
+      it('finds nothing missing on the next run, so the key is not translated again', async () => {
+        const sourcePath = path.join(tempDir, 'en.yml');
+        const targetPath = path.join(tempDir, 'zh_cn.yml');
+        fs.writeFileSync(sourcePath, [
+          'en:',
+          '  lessons:',
+          '    badges_earned:',
+          '      one: "%{count} badge earned"',
+          '      other: "%{count} badges earned"',
+          ''
+        ].join('\n'));
+        fs.writeFileSync(targetPath, [
+          'zh_cn:',
+          '  questions_remaining: "还剩 %{count} 题"',
+          ''
+        ].join('\n'));
+
+        const detectMissing = () => findMissingTranslationsByLocale(
+          [readAsTranslationFile(sourcePath, 'en')],
+          { zh_cn: [readAsTranslationFile(targetPath, 'zh_cn')] },
+          { sourceLocale: 'en', outputLocales: ['zh_cn'], localePluralCategories: { zh_cn: ['other'] } },
+          false
+        ).missing;
+
+        const missingBefore = detectMissing();
+        expect(Object.keys(missingBefore[`zh_cn:${sourcePath}`].keys)).toEqual(['lessons.badges_earned.other']);
+
+        replyWith({ 'lessons.badges_earned': '获得了 %{count} 枚徽章' });
+        const { batches } = batchKeysWithMissing([readAsTranslationFile(sourcePath, 'en')], missingBefore);
+
+        await processTranslationBatches(
+          batches,
+          missingBefore,
+          config,
+          false,
+          { console: mockConsole, translationUtils: { ...mockTranslationUtils, updateTranslationFile } }
+        );
+
+        expect(fs.readFileSync(targetPath, 'utf8')).toContain('badges_earned: 获得了 %{count} 枚徽章');
+        expect(detectMissing()).toEqual({});
+      });
     });
   });
 });
