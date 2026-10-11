@@ -753,8 +753,8 @@ export function generateTargetPath(
 }
 
 /**
- * Finds the source file a target file is translated from: the same file for a
- * multi-language file, otherwise the source whose generated target path is it.
+ * Finds the source file a target file is translated from, pairing them the way
+ * findTargetFile does. Paths are resolved so relative and absolute ones match.
  */
 export function findSourceFileForTarget(
   targetPath: string,
@@ -762,9 +762,13 @@ export function findSourceFileForTarget(
   sourceFiles: TranslationFile[],
   sourceLocale: string
 ): TranslationFile | undefined {
-  const target = path.resolve(targetPath);
+  const target: TranslationFile = {
+    path: path.resolve(targetPath),
+    locale: targetLocale,
+    format: path.extname(targetPath).slice(1)
+  };
   return sourceFiles.find(sourceFile =>
-    path.resolve(sourceFile.multiLanguage ? sourceFile.path : generateTargetPath(sourceFile, targetLocale, sourceLocale)) === target
+    findTargetFile([target], targetLocale, { ...sourceFile, path: path.resolve(sourceFile.path) }, sourceLocale) !== undefined
   );
 }
 
