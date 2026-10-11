@@ -271,6 +271,32 @@ function createBatchScope(batch: TranslationBatch): BatchScope {
   return { requestedKeys: readRequestedKeys(batch), appliedEntries: new Set<string>() };
 }
 
+function isOtherOnlyLocale(localeCategories: string[] | undefined): boolean {
+  return localeCategories?.length === 1 && localeCategories[0] === 'other';
+}
+
+/**
+ * Finds the requested key a returned key answers, or undefined when the CLI
+ * never asked for it. For a YAML plural in a locale whose only plural form is
+ * `other`, the API answers a requested `x.other` under the flat key `x`.
+ */
+function findRequestedKey(
+  returnedKey: string,
+  entryKeys: MissingTranslationEntry['keys'],
+  requestedKeys: Set<string> | undefined,
+  otherOnlyLocale: boolean
+): string | undefined {
+  const isRequested = (key: string): boolean =>
+    Object.hasOwn(entryKeys, key) && (!requestedKeys || requestedKeys.has(key));
+
+  if (isRequested(returnedKey)) return returnedKey;
+  if (!otherOnlyLocale) return undefined;
+
+  const otherForm = `${returnedKey}.other`;
+  const isYamlPlural = entryKeys[otherForm]?.metadata?.plural_format === 'yaml';
+  return isYamlPlural && isRequested(otherForm) ? otherForm : undefined;
+}
+
 /**
  * Applies completed translations to the target files
  *
@@ -352,10 +378,12 @@ async function applyTranslations(
   const targetPath = entry.targetPath;
   const fileLocale = localeSourceKey.slice(0, localeSourceKey.indexOf(':')) || languageCode;
   const { requestedKeys } = batchScope;
+  const otherOnlyLocale = isOtherOnlyLocale(config.localePluralCategories?.[fileLocale]);
   const returnedTranslations = Object.entries(data.translations.data);
-  const requestedTranslations = returnedTranslations.filter(
-    ([key]) => Object.hasOwn(entry.keys, key) && (!requestedKeys || requestedKeys.has(key))
-  );
+  const requestedTranslations = returnedTranslations.flatMap(([key, value]) => {
+    const requestedKey = findRequestedKey(key, entry.keys, requestedKeys, otherOnlyLocale);
+    return requestedKey !== undefined ? [{ key, value, metadata: entry.keys[requestedKey]?.metadata }] : [];
+  });
   const unrequestedCount = returnedTranslations.length - requestedTranslations.length;
 
   if (verbose && unrequestedCount > 0) {
@@ -372,12 +400,8 @@ async function applyTranslations(
 
   const isPoFile = /\.(po|pot)$/i.test(targetPath);
   const translationsToWrite = isPoFile
-    ? requestedTranslations.map(([key, value]) => ({
-      key,
-      value,
-      ...(entry.keys[key]?.metadata && { metadata: entry.keys[key].metadata })
-    }))
-    : Object.fromEntries(requestedTranslations);
+    ? requestedTranslations.map(({ key, value, metadata }) => ({ key, value, ...(metadata && { metadata }) }))
+    : Object.fromEntries(requestedTranslations.map(({ key, value }) => [key, value]));
 
   const result = await translationUtils.updateTranslationFile(
     targetPath,
