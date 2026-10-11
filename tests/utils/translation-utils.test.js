@@ -1,5 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile, yamlPluralGroupBasesFromTree } from '../../src/utils/translation-utils.js';
+import { findMissingTranslations, batchKeysWithMissing, generateTargetPath, findMissingTranslationsByLocale, processLocaleTranslations, findTargetFile, findSourceFileForTarget, yamlPluralGroupBasesFromTree } from '../../src/utils/translation-utils.js';
 import { findMissingPoTranslations, createUniqueKey } from '../../src/utils/po-utils.js';
 import { createIgnoreMatcher } from '../../src/utils/ignore-keys.js';
 
@@ -1464,6 +1464,58 @@ msgstr[2] ""
       const result = processLocaleTranslations({ 'countries.se': 'Sweden' }, 'sv', [unrelated], sourceFile, 'en');
 
       expect(result.targetPath).toBe('config/locales/countries/sv.yml');
+    });
+  });
+
+  describe('findSourceFileForTarget', () => {
+    const file = (path, locale) => ({ path, locale, format: path.split('.').pop() });
+
+    it('pairs a folder per locale holding a file named after the locale', () => {
+      const source = file('locales/en/en.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/ja.yml', 'ja', [source], 'en')).toBe(source);
+    });
+
+    it('pairs a file nested under a locale folder', () => {
+      const source = file('locales/en/models/lessons.yml', 'en');
+      const other = file('locales/en/models/courses.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/models/lessons.yml', 'ja', [other, source], 'en')).toBe(source);
+    });
+
+    it('does not pair a same-named file from another folder under the locale', () => {
+      const views = file('locales/en/views/common.yml', 'en');
+      const models = file('locales/en/models/common.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/models/common.yml', 'ja', [views, models], 'en')).toBe(models);
+      expect(findSourceFileForTarget('locales/ja/models/common.yml', 'ja', [views], 'en')).toBeUndefined();
+    });
+
+    it('picks the source with the matching name among several in one folder', () => {
+      const app = file('config/locales/app.en.yml', 'en');
+      const models = file('config/locales/models.en.yml', 'en');
+
+      expect(findSourceFileForTarget('config/locales/app.ja.yml', 'ja', [app, models], 'en')).toBe(app);
+    });
+
+    it('finds a source discovered twice through overlapping paths', () => {
+      const source = file('config/locales/admin/en.yml', 'en');
+      const sameSource = file('./config/locales/admin/en.yml', 'en');
+
+      expect(findSourceFileForTarget('config/locales/admin/ja.yml', 'ja', [source, sameSource], 'en')).toBe(source);
+    });
+
+    it('finds nothing when two different sources pair with the target', () => {
+      const inLocaleFolder = file('locales/en/en.yml', 'en');
+      const besideTarget = file('locales/ja/en.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/ja.yml', 'ja', [inLocaleFolder, besideTarget], 'en')).toBeUndefined();
+    });
+
+    it('pairs a multi-language file with itself', () => {
+      const source = { ...file('config/locales/lessons.yml', 'en'), multiLanguage: true };
+
+      expect(findSourceFileForTarget('config/locales/lessons.yml', 'ja', [source], 'en')).toBe(source);
     });
   });
 

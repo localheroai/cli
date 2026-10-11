@@ -62,7 +62,9 @@ describe('syncService', () => {
     await jest.unstable_mockModule('../../src/utils/translation-updater/index.js', () => mockTranslationUpdater);
 
     await jest.unstable_mockModule('../../src/utils/files.js', () => ({
-      findTranslationFiles: mockFilesUtils.findTranslationFiles
+      findTranslationFiles: mockFilesUtils.findTranslationFiles,
+      flattenTranslations: jest.fn(),
+      parseFile: jest.fn()
     }));
 
     await jest.unstable_mockModule('../../src/utils/git.js', () => ({
@@ -329,6 +331,37 @@ describe('syncService', () => {
 
       const languageCodes = mockTranslationUpdater.updateTranslationFile.mock.calls.map(call => call[2]);
       expect(languageCodes).toEqual(['zh_cn', 'ja_easy']);
+    });
+
+    it('passes the source a YAML target is translated from when one folder holds several', async () => {
+      mockConfigService.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['ja']
+      });
+
+      mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+        sourceFiles: [
+          { path: 'config/locales/models.en.yml', locale: 'en' },
+          { path: 'config/locales/app.en.yml', locale: 'en' }
+        ],
+        allFiles: [],
+        targetFilesByLocale: {}
+      });
+
+      mockTranslationUpdater.updateTranslationFile.mockResolvedValue({ updatedKeys: ['count.other'], created: false });
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      await syncService.applyUpdates({
+        updates: {
+          files: [{
+            path: 'config/locales/models.ja.yml',
+            languages: [{ code: 'ja', translations: [{ key: 'count.other', value: '%{count} 件' }] }]
+          }]
+        }
+      });
+
+      expect(mockTranslationUpdater.updateTranslationFile.mock.calls[0][3]).toBe('config/locales/models.en.yml');
     });
 
     it('passes the backend code through when it matches no config locale', async () => {

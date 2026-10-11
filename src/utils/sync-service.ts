@@ -4,6 +4,7 @@ import { getUpdates, GetUpdatesParams } from '../api/translations.js';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater/index.js';
 import { findTranslationFiles } from './files.js';
 import { toConfigLocale } from './translation-processor.js';
+import { findSourceFileForTarget } from './translation-utils.js';
 import { getCurrentBranch } from './git.js';
 import path from 'path';
 import { TranslationFile, TranslationFilesResult, TranslationWithMetadata } from '../types/index.js';
@@ -174,7 +175,7 @@ export const syncService: SyncService = {
     for (const file of updates.updates.files || []) {
       // Find the corresponding source file
       const dirName = path.dirname(file.path);
-      const sourceFilePath = sourceFilesByPath[dirName];
+      const isYaml = /\.ya?ml$/i.test(file.path);
 
       for (const lang of file.languages) {
         if (verbose) {
@@ -207,7 +208,11 @@ export const syncService: SyncService = {
         }
 
         try {
-          const updateResult = await updateTranslationFile(file.path, translations, toConfigLocale(lang.code, config), sourceFilePath, config.sourceLocale, config);
+          const locale = toConfigLocale(lang.code, config);
+          const sourceFilePath = isYaml
+            ? findSourceFileForTarget(file.path, locale, sourceFiles, config.sourceLocale)?.path
+            : sourceFilesByPath[dirName];
+          const updateResult = await updateTranslationFile(file.path, translations, locale, sourceFilePath, config.sourceLocale, config);
           totalUpdates += updateResult.updatedKeys.length;
         } catch (error: any) {
           console.error(chalk.yellow(`⚠️  Failed to update ${file.path}: ${error.message}`));

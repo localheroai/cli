@@ -709,6 +709,46 @@ describe('ci command', () => {
       });
     });
 
+    it('keeps a flat plural flat when the sync sends its other form', async () => {
+      mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+      const deps = { ...buildSyncDeps(), updateTranslationFile };
+      mockConfigUtils.getValidProjectConfig.mockResolvedValue({
+        projectId: 'test-project',
+        sourceLocale: 'en',
+        outputLocales: ['ja'],
+        translationFiles: { paths: ['config/locales/'] }
+      });
+      deps.syncApi.getSyncTranslations.mockResolvedValue({
+        ...syncResponse,
+        sync: {
+          ...syncResponse.sync,
+          files: [{
+            path: 'config/locales/app.ja.yml',
+            language: 'ja',
+            translations: [{ key: 'lessons.count.other', name: 'lessons.count.other', value: '%{count} 件のレッスン', updated_at: '2026-10-11T00:00:00Z' }]
+          }]
+        }
+      });
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'localhero-ci-sync-'));
+      const localesDir = path.join(tempDir, 'config/locales');
+      await fs.mkdir(localesDir, { recursive: true });
+      await fs.writeFile(path.join(localesDir, 'app.en.yml'), 'en:\n  lessons:\n    count:\n      one: "%{count} lesson"\n      other: "%{count} lessons"\n', 'utf8');
+      await fs.writeFile(path.join(localesDir, 'models.en.yml'), 'en:\n  models:\n    lesson: Lesson\n', 'utf8');
+      await fs.writeFile(path.join(localesDir, 'app.ja.yml'), 'ja:\n  lessons:\n    count: "%{count} レッスン"\n', 'utf8');
+      const originalCwd = process.cwd();
+
+      try {
+        process.chdir(tempDir);
+        await ci({ skipCommit: true }, deps);
+
+        expect(await fs.readFile(path.join(localesDir, 'app.ja.yml'), 'utf8'))
+          .toBe('ja:\n  lessons:\n    count: "%{count} 件のレッスン"\n');
+      } finally {
+        process.chdir(originalCwd);
+        await fs.rm(tempDir, { recursive: true, force: true });
+      }
+    });
+
     describe('when the sync belongs to another project in the repository', () => {
       const otherProjectsSync = {
         sync: { ...syncResponse.sync, project_id: 'editor', project_matches: false },

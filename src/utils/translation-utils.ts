@@ -752,6 +752,44 @@ export function generateTargetPath(
   return path.join(sourceDir, `${swapLocaleInName(sourceName, sourceLocale, targetLocale)}${sourceExt}`);
 }
 
+// Each path the target of a source could have in a locale folder layout: one
+// locale folder swapped for the target locale, plus a file named after the locale.
+function localeFolderTargetPaths(sourcePath: string, sourceLocale: string, targetLocale: string): string[] {
+  const folders = path.dirname(sourcePath).split(path.sep);
+  const extension = path.extname(sourcePath);
+  const fileName = path.basename(sourcePath, extension) === sourceLocale
+    ? `${targetLocale}${extension}`
+    : path.basename(sourcePath);
+
+  return folders.flatMap((folder, i) => folder === sourceLocale
+    ? [[...folders.slice(0, i), targetLocale, ...folders.slice(i + 1), fileName].join(path.sep)]
+    : []
+  );
+}
+
+/**
+ * Finds the one source file whose target path is exactly this target: the same
+ * file for a multi-language file, the generated target path, or the source with
+ * its locale folder swapped. No match, or more than one, finds nothing.
+ */
+export function findSourceFileForTarget(
+  targetPath: string,
+  targetLocale: string,
+  sourceFiles: TranslationFile[],
+  sourceLocale: string
+): TranslationFile | undefined {
+  const target = path.resolve(targetPath);
+  const matches = sourceFiles.filter(sourceFile => {
+    const resolved = { ...sourceFile, path: path.resolve(sourceFile.path) };
+    const candidates = resolved.multiLanguage
+      ? [resolved.path]
+      : [generateTargetPath(resolved, targetLocale, sourceLocale), ...localeFolderTargetPaths(resolved.path, sourceLocale, targetLocale)];
+    return candidates.includes(target);
+  });
+  const matchedPaths = new Set(matches.map(match => path.resolve(match.path)));
+  return matchedPaths.size === 1 ? matches[0] : undefined;
+}
+
 /**
  * Process target content to extract translation keys
  * @param targetContent The target content object
