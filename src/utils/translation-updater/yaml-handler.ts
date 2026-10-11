@@ -164,7 +164,9 @@ function keyPathInFileShape(
   incomingKeys: Set<string>,
   sourcePluralBases: Set<string>
 ): string {
-  const base = keyPath.endsWith(OTHER_SUFFIX) ? keyPath.slice(0, -OTHER_SUFFIX.length) : keyPath;
+  const base = keyPath.endsWith(OTHER_SUFFIX) && !sourcePluralBases.has(keyPath)
+    ? keyPath.slice(0, -OTHER_SUFFIX.length)
+    : keyPath;
   if (!sourcePluralBases.has(base)) return keyPath;
 
   const formsOfBase = [base, ...CLDR_PLURAL_CATEGORIES.map(category => `${base}.${category}`)];

@@ -187,6 +187,16 @@ describe('keeping the plural shape a YAML file already has (localheroai/localher
     expect(fs.readFileSync(filePath, 'utf8')).toBe('ja:\n  count: "新しい %{count}"\n');
   });
 
+  it('writes a flat value into a plural whose own key is named other', async () => {
+    const sourcePath = writeFile('en.yml', ['en:', '  messages:', '    other:', '      one: One other', '      other: Others', '']);
+    const original = ['de:', '  messages:', '    other:', '      one: Ein anderer', '      other: Andere', ''];
+    const filePath = writeFile('de.yml', original);
+
+    await updateYamlFile(filePath, { 'messages.other': 'Weitere' }, 'de', sourcePath, 'en');
+
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(original.join('\n').replace('other: Andere', 'other: Weitere'));
+  });
+
   it('keeps writing as the keys arrive when no source file is known', async () => {
     const filePath = writeFile('ja.yml', ['ja:', '  lessons:', '    flat_one: "古い %{count}"', '']);
 
