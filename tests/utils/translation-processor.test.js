@@ -1420,6 +1420,79 @@ describe('translation-processor', () => {
       );
     });
 
+    it('ignores a flat base echoed for a requested .other that is not a YAML plural', async () => {
+      replyWith({ 'errors.other': '其他错误', errors: '错误' });
+
+      await processTranslationBatches(
+        [{
+          sourceFilePath: 'locales/en.json',
+          sourceFile: {
+            path: 'locales/en.json',
+            format: 'json',
+            content: Buffer.from(JSON.stringify({ keys: { 'errors.other': { value: 'Other errors' } } })).toString('base64')
+          },
+          localeEntries: ['zh_cn:locales/en.json'],
+          locales: ['zh_cn']
+        }],
+        {
+          'zh_cn:locales/en.json': {
+            locale: 'zh_cn',
+            path: 'locales/en.json',
+            targetPath: 'locales/zh_cn.json',
+            keys: { 'errors.other': { value: 'Other errors', sourceKey: 'errors.other' } },
+            keyCount: 1
+          }
+        },
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'locales/zh_cn.json',
+        { 'errors.other': '其他错误' },
+        'zh_cn',
+        'locales/en.json',
+        undefined,
+        config
+      );
+    });
+
+    it('ignores a flat base when the locale also needs another form of the plural', async () => {
+      replyWith({
+        'lessons.badges_earned': 'flat value',
+        'lessons.badges_earned.one': '%{count} badge earned',
+        'lessons.badges_earned.other': '%{count} badges earned'
+      });
+
+      await processTranslationBatches(
+        buildBatch(['lessons.badges_earned.one', 'lessons.badges_earned.other']),
+        buildMissing({
+          'lessons.badges_earned.one': {
+            value: '%{count} badge earned',
+            sourceKey: 'lessons.badges_earned.one',
+            metadata: { ...pluralMetadata, plural_category: 'one' }
+          },
+          'lessons.badges_earned.other': badgesEarnedOther
+        }),
+        config,
+        false,
+        { console: mockConsole, translationUtils: mockTranslationUtils }
+      );
+
+      expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+        'config/locales/zh_cn.yml',
+        {
+          'lessons.badges_earned.one': '%{count} badge earned',
+          'lessons.badges_earned.other': '%{count} badges earned'
+        },
+        'zh_cn',
+        'config/locales/en.yml',
+        undefined,
+        config
+      );
+    });
+
     describe('with the real YAML writer', () => {
       let tempDir;
 

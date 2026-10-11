@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { ProjectConfig } from '../types/index.js';
 import type { SkippedLanguage } from '../types/index.js';
 import { Spinner } from './spinner.js';
+import { CLDR_PLURAL_CATEGORIES } from './translation-updater/common.js';
 
 /**
  * Types for translation processing
@@ -266,10 +267,18 @@ function createBatchScope(batch: TranslationBatch): BatchScope {
   return { requestedKeys: readRequestedKeys(batch), appliedEntries: new Set<string>() };
 }
 
+function isOtherOnlyYamlPlural(base: string, entryKeys: MissingTranslationEntry['keys']): boolean {
+  if (entryKeys[`${base}.other`]?.metadata?.plural_format !== 'yaml') return false;
+
+  return CLDR_PLURAL_CATEGORIES.every(
+    (category) => category === 'other' || !Object.hasOwn(entryKeys, `${base}.${category}`)
+  );
+}
+
 /**
  * Finds the requested key a returned key answers, or undefined when the CLI
- * never asked for it. For a locale whose only plural form is `other`, the API
- * answers a requested `x.other` under the flat key `x`.
+ * never asked for it. For a YAML plural in a locale whose only plural form is
+ * `other`, the API answers a requested `x.other` under the flat key `x`.
  */
 function findRequestedKey(
   returnedKey: string,
@@ -282,7 +291,7 @@ function findRequestedKey(
   if (isRequested(returnedKey)) return returnedKey;
 
   const otherForm = `${returnedKey}.other`;
-  return isRequested(otherForm) ? otherForm : undefined;
+  return isRequested(otherForm) && isOtherOnlyYamlPlural(returnedKey, entryKeys) ? otherForm : undefined;
 }
 
 /**
