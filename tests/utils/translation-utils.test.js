@@ -1498,6 +1498,20 @@ msgstr[2] ""
       expect(findSourceFileForTarget('config/locales/app.ja.yml', 'ja', [app, models], 'en')).toBe(app);
     });
 
+    it('finds a source discovered twice through overlapping paths', () => {
+      const source = file('config/locales/admin/en.yml', 'en');
+      const sameSource = file('./config/locales/admin/en.yml', 'en');
+
+      expect(findSourceFileForTarget('config/locales/admin/ja.yml', 'ja', [source, sameSource], 'en')).toBe(source);
+    });
+
+    it('finds nothing when two different sources pair with the target', () => {
+      const inLocaleFolder = file('locales/en/en.yml', 'en');
+      const besideTarget = file('locales/ja/en.yml', 'en');
+
+      expect(findSourceFileForTarget('locales/ja/ja.yml', 'ja', [inLocaleFolder, besideTarget], 'en')).toBeUndefined();
+    });
+
     it('pairs a multi-language file with itself', () => {
       const source = { ...file('config/locales/lessons.yml', 'en'), multiLanguage: true };
 

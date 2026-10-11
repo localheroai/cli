@@ -786,7 +786,8 @@ export function findSourceFileForTarget(
       : [generateTargetPath(resolved, targetLocale, sourceLocale), ...localeFolderTargetPaths(resolved.path, sourceLocale, targetLocale)];
     return candidates.includes(target);
   });
-  return matches.length === 1 ? matches[0] : undefined;
+  const matchedPaths = new Set(matches.map(match => path.resolve(match.path)));
+  return matchedPaths.size === 1 ? matches[0] : undefined;
 }
 
 /**
