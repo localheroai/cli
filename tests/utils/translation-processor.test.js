@@ -2,7 +2,7 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { processTranslationBatches, JOB_WAIT_MINUTES } from '../../src/utils/translation-processor.js';
+import { processTranslationBatches, JOB_STALL_MINUTES, JOB_WAIT_MAX_MINUTES } from '../../src/utils/translation-processor.js';
 import { batchKeysWithMissing, findMissingTranslationsByLocale } from '../../src/utils/translation-utils.js';
 import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 
@@ -818,7 +818,7 @@ describe('translation-processor', () => {
       expect(result.totalLanguages).toBe(0);
     });
 
-    it('stops waiting for a job that is still pending after the wait limit', async () => {
+    it('stops waiting for a job that makes no progress for the stall limit', async () => {
       const testJobId = 'job-always-pending';
 
       const batches = [
@@ -869,10 +869,10 @@ describe('translation-processor', () => {
         );
 
         expect(mockConsole.warn).toHaveBeenCalledWith(
-          expect.stringContaining(`Job ${testJobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`)
+          expect.stringContaining(`Job ${testJobId} made no progress for ${JOB_STALL_MINUTES} minutes and will be skipped.`)
         );
 
-        const waitLimitMs = JOB_WAIT_MINUTES * 60 * 1000;
+        const waitLimitMs = JOB_STALL_MINUTES * 60 * 1000;
         expect(Date.now()).toBeGreaterThan(waitLimitMs);
         expect(Date.now()).toBeLessThanOrEqual(waitLimitMs + 10000);
         expect(Math.max(...pollDelays())).toBeLessThanOrEqual(10000);
@@ -958,6 +958,106 @@ describe('translation-processor', () => {
         expect(delays.slice(0, 20)).toEqual(Array(20).fill(3000));
         expect(Math.max(...delays)).toBeLessThanOrEqual(10000);
         expect(Date.now()).toBeLessThanOrEqual(completesAfterMs + 10000);
+      } finally {
+        restoreClock();
+      }
+    });
+  });
+
+  describe('waiting while jobs make progress', () => {
+    const minutes = n => n * 60 * 1000;
+    const batches = [
+      {
+        sourceFilePath: 'locales/en.json',
+        sourceFile: {
+          path: 'locales/en.json',
+          format: 'json',
+          content: Buffer.from(JSON.stringify({ greeting: 'Hello' })).toString('base64')
+        },
+        localeEntries: ['fr:locales/en.json', 'de:locales/en.json'],
+        locales: ['fr', 'de']
+      }
+    ];
+    const missingByLocale = {
+      'fr:locales/en.json': {
+        locale: 'fr',
+        path: 'locales/en.json',
+        targetPath: 'locales/fr.json',
+        keys: { greeting: { value: 'Hello', sourceKey: 'greeting' } },
+        keyCount: 1
+      },
+      'de:locales/en.json': {
+        locale: 'de',
+        path: 'locales/en.json',
+        targetPath: 'locales/de.json',
+        keys: { greeting: { value: 'Hello', sourceKey: 'greeting' } },
+        keyCount: 1
+      }
+    };
+    const config = { projectId: 'test-project' };
+    const progressingStatus = () => ({
+      status: 'processing',
+      progress: { completed_keys: Math.floor(Date.now() / minutes(1)), total_keys: 1000 }
+    });
+    const completedStatus = code => ({
+      status: 'completed',
+      translations: { data: { greeting: code === 'fr' ? 'Bonjour' : 'Hallo' } },
+      language: { code }
+    });
+
+    beforeEach(() => {
+      mockTranslationUtils.createTranslationJob.mockResolvedValue({
+        jobs: [{ id: 'job-fr', language: { code: 'fr' } }, { id: 'job-de', language: { code: 'de' } }]
+      });
+    });
+
+    it('keeps waiting past the stall limit while another job in the batch moves', async () => {
+      const deCompletesAfterMs = minutes(25);
+      const frCompletesAfterMs = minutes(30);
+      mockTranslationUtils.checkJobStatus.mockImplementation(async jobId => {
+        if (jobId === 'job-de') {
+          return Date.now() < deCompletesAfterMs ? { status: 'pending', progress: { completed_keys: 0, total_keys: 1 } } : completedStatus('de');
+        }
+        return Date.now() < frCompletesAfterMs ? progressingStatus() : completedStatus('fr');
+      });
+
+      const restoreClock = useAdvancingClock();
+
+      try {
+        const result = await processTranslationBatches(
+          batches, missingByLocale, config, false,
+          { console: mockConsole, translationUtils: mockTranslationUtils }
+        );
+
+        expect(result.failedLanguages).toEqual([]);
+        expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+          'locales/de.json', { greeting: 'Hallo' }, 'de', 'locales/en.json', undefined, config
+        );
+        expect(mockTranslationUtils.updateTranslationFile).toHaveBeenCalledWith(
+          'locales/fr.json', { greeting: 'Bonjour' }, 'fr', 'locales/en.json', undefined, config
+        );
+        expect(Date.now()).toBeLessThanOrEqual(frCompletesAfterMs + batches[0].locales.length * 10000);
+      } finally {
+        restoreClock();
+      }
+    });
+
+    it('stops at the maximum wait even while jobs keep moving', async () => {
+      mockTranslationUtils.checkJobStatus.mockImplementation(async () => progressingStatus());
+
+      const restoreClock = useAdvancingClock();
+
+      try {
+        const result = await processTranslationBatches(
+          batches, missingByLocale, config, true,
+          { console: mockConsole, translationUtils: mockTranslationUtils }
+        );
+
+        expect(result.failedLanguages.sort()).toEqual(['de', 'fr']);
+        const lastPollRoundMs = batches[0].locales.length * 10000;
+        expect(Date.now()).toBeGreaterThan(minutes(JOB_WAIT_MAX_MINUTES));
+        expect(Date.now()).toBeLessThanOrEqual(minutes(JOB_WAIT_MAX_MINUTES) + lastPollRoundMs);
+        expect(mockTranslationUtils.updateTranslationFile).not.toHaveBeenCalled();
       } finally {
         restoreClock();
       }
