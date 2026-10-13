@@ -408,7 +408,7 @@ describe('githubService', () => {
 
       expect(mockExec).toHaveBeenCalledWith('git config --global user.name "LocalHero Bot"', { stdio: 'inherit' });
       expect(mockExec).toHaveBeenCalledWith('git config --global user.email "hi@localhero.ai"', { stdio: 'inherit' });
-      expect(mockExec).toHaveBeenCalledWith('git add locales/**/*.json', { stdio: 'inherit' });
+      expect(mockExec).toHaveBeenCalledWith("git add locales/**/*.json ':(exclude)localhero.json'", { stdio: 'inherit' });
       expect(mockExec).toHaveBeenCalledWith('git status --porcelain');
       expect(mockExec).toHaveBeenCalledWith("git commit -m 'Update translations'", { stdio: 'inherit' });
       expect(mockExec).toHaveBeenCalledWith('git push origin HEAD:feature-branch 2>&1', { stdio: 'pipe' });

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- A translation commit leaves `localhero.json` out, so parallel pull requests no longer conflict on it. Before, a project whose translation path holds its own config, such as a monorepo subproject with `"paths": ["./"]`, committed the `lastSyncedAt` timestamp the run updates, so two pull requests from the same base each changed that line and the second one to merge hit a conflict. Projects with the config outside their translation paths already worked this way.
+
 ## [0.0.83] - 2026-10-13
 
 ### Fixed
