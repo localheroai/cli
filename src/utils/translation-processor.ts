@@ -42,8 +42,9 @@ export interface JobSourceMapping {
 
 export interface JobStatus {
   jobId: string;
-  status: 'pending' | 'processing' | 'completed' | 'validating';
+  status: 'pending' | 'processing' | 'completed' | 'validating' | 'failed';
   data?: any;
+  progressMarker?: string;
 }
 
 export interface TranslationBatch {
@@ -95,14 +96,24 @@ export interface TranslationResult {
   failedLanguages: string[];
 }
 
-export const JOB_WAIT_MINUTES = 10;
-const JOB_WAIT_MS = JOB_WAIT_MINUTES * 60 * 1000;
+// Large runs keep the server busy well past ten minutes, so the CLI waits as
+// long as the jobs keep moving and gives up only on a stall or the hard cap.
+export const JOB_STALL_MINUTES = 10;
+export const JOB_WAIT_MAX_MINUTES = 60;
+const JOB_STALL_MS = JOB_STALL_MINUTES * 60 * 1000;
+const JOB_WAIT_MAX_MS = JOB_WAIT_MAX_MINUTES * 60 * 1000;
 const FAST_POLL_WINDOW_MS = 60 * 1000;
 const FAST_POLL_SECONDS = 3;
 const SLOW_POLL_SECONDS = 10;
 
 function pollIntervalSeconds(elapsedMs: number): number {
   return elapsedMs < FAST_POLL_WINDOW_MS ? FAST_POLL_SECONDS : SLOW_POLL_SECONDS;
+}
+
+function waitEndReason(elapsedMs: number, sinceProgressMs: number): string | null {
+  if (elapsedMs > JOB_WAIT_MAX_MS) return `exceeded maximum wait (${JOB_WAIT_MAX_MINUTES} minutes)`;
+  if (sinceProgressMs > JOB_STALL_MS) return `made no progress for ${JOB_STALL_MINUTES} minutes`;
+  return null;
 }
 
 /**
@@ -236,7 +247,7 @@ async function monitorJobStatus(
       console.log(chalk.blue(progressMsg));
     }
     await new Promise(resolve => setTimeout(resolve, waitSeconds * 1000));
-    return { jobId, status: 'pending' };
+    return { jobId, status: 'pending', progressMarker: `${status.status}:${status.progress?.completed_keys ?? ''}` };
   }
 
   return { jobId, status: 'completed', data: status };
@@ -478,12 +489,16 @@ async function processBatch(
 
   const jobSourceMapping = createJobSourceMapping(jobs, sourceFilePath);
   const monitoringStartedAt = Date.now();
+  let lastProgressAt = monitoringStartedAt;
+  const lastProgressMarkers = new Map<string, string>();
 
   const pendingJobs = new Set(batchJobIds);
   while (pendingJobs.size > 0) {
-    const elapsedMs = Date.now() - monitoringStartedAt;
-    const jobPromises = Array.from(pendingJobs).map(async jobId => {
-      if (elapsedMs > JOB_WAIT_MS) {
+    const now = Date.now();
+    const elapsedMs = now - monitoringStartedAt;
+    const endReason = waitEndReason(elapsedMs, now - lastProgressAt);
+    const jobPromises = Array.from(pendingJobs).map(async (jobId): Promise<JobStatus> => {
+      if (endReason) {
         // Get final job status to show progress information
         let progressInfo = '';
         try {
@@ -502,10 +517,10 @@ async function processBatch(
               console.warn(chalk.yellow(`  ⏱️  Job ${jobId} may have completed but status is delayed${progressInfo}`));
             }
           } else {
-            console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`));
+            console.warn(chalk.yellow(`  ❌ Job ${jobId} ${endReason} and will be skipped.`));
           }
         } catch {
-          console.warn(chalk.yellow(`  ❌ Job ${jobId} exceeded maximum wait (${JOB_WAIT_MINUTES} minutes) and will be skipped.`));
+          console.warn(chalk.yellow(`  ❌ Job ${jobId} ${endReason} and will be skipped.`));
         }
 
         // However it ran out of time, the job has not delivered its
@@ -545,6 +560,10 @@ async function processBatch(
     results.forEach(result => {
       if (result.status === 'completed') {
         pendingJobs.delete(result.jobId);
+        lastProgressAt = Date.now();
+      } else if (result.progressMarker && result.progressMarker !== lastProgressMarkers.get(result.jobId)) {
+        lastProgressMarkers.set(result.jobId, result.progressMarker);
+        lastProgressAt = Date.now();
       }
     });
   }
