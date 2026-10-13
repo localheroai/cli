@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.83] - 2026-10-13
+
 ### Fixed
 - Large translation runs finish instead of dropping languages the server is still working on. The CLI now keeps waiting as long as the jobs make progress, and gives up only after 10 minutes without any progress or after 60 minutes in total. Before, it gave up after 10 minutes in total, so a run across many languages could end with several of them marked as failed while the server was a minute from done.
 
