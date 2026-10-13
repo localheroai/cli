@@ -740,9 +740,12 @@ ${buildExtractStep(options)}      - name: Translate
     try {
       const branchName = this.getBranchName();
       const commitMessage = this.buildTranslateCommitMessage(translationSummary);
+      // translate leaves lastSyncedAt modified in localhero.json; committing it
+      // from a translation path that holds the config makes parallel PRs conflict.
+      const pathspec = `${filesPath} ':(exclude)${PROJECT_CONFIG_FILE}'`;
 
       if (await this.useSignedCommitsMode()) {
-        const filePaths = this.listChangedFiles(filesPath);
+        const filePaths = this.listChangedFiles(pathspec);
         const result = await this.apiCommitAndPush({
           branchName,
           filePaths,
@@ -762,7 +765,7 @@ ${buildExtractStep(options)}      - name: Translate
 
       this.configureGitUser();
 
-      exec(`git add ${filesPath}`, { stdio: 'inherit' });
+      exec(`git add ${pathspec}`, { stdio: 'inherit' });
 
       if (!this.hasStagedChanges()) {
         log.log('No changes to commit.');
