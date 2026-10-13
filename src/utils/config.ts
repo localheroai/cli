@@ -76,17 +76,29 @@ export const configService: ConfigService = {
   },
 
   /**
-   * Get the authentication config
+   * Get the authentication config from the nearest .localhero_key,
+   * looking in each parent directory up to the git root (or filesystem root)
    */
   async getAuthConfig(basePath?: string): Promise<AuthConfig | null> {
     const { fs, path } = this.deps;
-    const baseDir = basePath || this.deps.cwd();
-    try {
-      const configPath = path.join(baseDir, AUTH_CONFIG_FILE);
-      const content = await fs.readFile(configPath, 'utf8');
-      return JSON.parse(content) as AuthConfig;
-    } catch {
-      return null;
+    let dir = basePath || this.deps.cwd();
+
+    while (true) {
+      try {
+        const content = await fs.readFile(path.join(dir, AUTH_CONFIG_FILE), 'utf8');
+        return JSON.parse(content) as AuthConfig;
+      } catch (error: any) {
+        if (error.code !== 'ENOENT') {
+          return null;
+        }
+      }
+
+      const parent = path.dirname(dir);
+      const isGitRoot = await fs.access(path.join(dir, '.git')).then(() => true, () => false);
+      if (parent === dir || isGitRoot) {
+        return null;
+      }
+      dir = parent;
     }
   },
 

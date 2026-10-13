@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import path from 'path';
 import { configService } from '../../src/utils/config.js';
 
 describe('config module', () => {
@@ -82,6 +83,102 @@ describe('config module', () => {
             await configService.getAuthConfig('/custom/path');
 
             expect(mockPath.join).toHaveBeenCalledWith('/custom/path', '.localhero_key');
+        });
+    });
+
+    describe('getAuthConfig in parent directories', () => {
+        const enoent = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+
+        function useFiles(files) {
+            mockFs.readFile.mockImplementation(async (filePath) => {
+                if (filePath in files) return files[filePath];
+                throw enoent();
+            });
+            mockFs.access = jest.fn(async (filePath) => {
+                if (!(filePath in files)) throw enoent();
+            });
+            configService.setDependencies({ fs: mockFs, path, cwd: mockCwd });
+        }
+
+        beforeEach(() => {
+            mockCwd.mockReturnValue('/repo/config/locales/pressroom');
+        });
+
+        it('finds the key at the git root when run from a subdirectory', async () => {
+            useFiles({
+                '/repo/.git': '',
+                '/repo/.localhero_key': JSON.stringify({ api_key: 'root-key' })
+            });
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toEqual({ api_key: 'root-key' });
+        });
+
+        it('prefers the nearest key', async () => {
+            useFiles({
+                '/repo/.git': '',
+                '/repo/.localhero_key': JSON.stringify({ api_key: 'root-key' }),
+                '/repo/config/locales/.localhero_key': JSON.stringify({ api_key: 'nearer-key' })
+            });
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toEqual({ api_key: 'nearer-key' });
+        });
+
+        it('does not look above the git root', async () => {
+            useFiles({
+                '/repo/.git': '',
+                '/.localhero_key': JSON.stringify({ api_key: 'outside-key' })
+            });
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toBeNull();
+            expect(mockFs.readFile).not.toHaveBeenCalledWith('/.localhero_key', 'utf8');
+        });
+
+        it('walks up to the filesystem root outside a git repository', async () => {
+            useFiles({
+                '/.localhero_key': JSON.stringify({ api_key: 'top-key' })
+            });
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toEqual({ api_key: 'top-key' });
+        });
+
+        it('returns null when no key exists outside a git repository', async () => {
+            useFiles({});
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toBeNull();
+            expect(mockFs.readFile).toHaveBeenLastCalledWith('/.localhero_key', 'utf8');
+        });
+
+        it('walks up from an explicit basePath', async () => {
+            useFiles({
+                '/other/.git': '',
+                '/other/.localhero_key': JSON.stringify({ api_key: 'other-key' })
+            });
+
+            const result = await configService.getAuthConfig('/other/app');
+
+            expect(result).toEqual({ api_key: 'other-key' });
+        });
+
+        it('does not fall back to a parent key when the nearest key is unreadable', async () => {
+            useFiles({
+                '/repo/.git': '',
+                '/repo/.localhero_key': JSON.stringify({ api_key: 'root-key' }),
+                '/repo/config/locales/pressroom/.localhero_key': 'not json'
+            });
+
+            const result = await configService.getAuthConfig();
+
+            expect(result).toBeNull();
         });
     });
 

@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- The CLI finds your API key when you run it from a subdirectory of the repository. It looks for `.localhero_key` in the current directory and then in each parent directory up to the repository root, and uses the nearest one. Before, it only looked in the current directory, so in a monorepo where you ran `login` at the root, commands run next to a subproject's `localhero.json` failed with "No API key found". `LOCALHERO_API_KEY` still takes priority.
+
 ## [0.0.84] - 2026-10-13
 
 ### Fixed
