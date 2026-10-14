@@ -364,7 +364,7 @@ describe('syncService', () => {
       expect(mockTranslationUpdater.updateTranslationFile.mock.calls[0][3]).toBe('config/locales/models.en.yml');
     });
 
-    it('passes the backend code through when it matches no config locale', async () => {
+    it('skips a backend code that matches no config locale and names it', async () => {
       mockConfigService.getValidProjectConfig.mockResolvedValue({
         projectId: 'test-project',
         sourceLocale: 'en',
@@ -396,9 +396,65 @@ describe('syncService', () => {
         }
       };
 
-      await syncService.applyUpdates(unconfiguredUpdates);
+      const result = await syncService.applyUpdates(unconfiguredUpdates);
 
-      expect(mockTranslationUpdater.updateTranslationFile.mock.calls[0][2]).toBe('de');
+      expect(mockTranslationUpdater.updateTranslationFile).not.toHaveBeenCalled();
+      expect(result.totalUpdates).toBe(0);
+      expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('Skipped files for de: not in outputLocales'));
+    });
+
+    describe('when the server sends a locale the config does not list', () => {
+      beforeEach(() => {
+        mockConfigService.getValidProjectConfig.mockResolvedValue({
+          projectId: 'test-project',
+          sourceLocale: 'en',
+          outputLocales: ['fr', 'de']
+        });
+        mockFilesUtils.findTranslationFiles.mockResolvedValueOnce({
+          sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+          allFiles: [],
+          targetFilesByLocale: {}
+        });
+        mockTranslationUpdater.updateTranslationFile.mockResolvedValue({ updatedKeys: ['greeting'], created: false });
+        mockConfigService.updateLastSyncedAt.mockResolvedValue();
+      });
+
+      const mixedUpdates = {
+        updates: {
+          files: [
+            { path: 'locales/fr.json', languages: [{ code: 'fr', translations: [{ key: 'greeting', value: 'Bonjour' }] }] },
+            { path: 'locales/pt.json', languages: [{ code: 'pt', translations: [{ key: 'greeting', value: 'Olá' }] }] },
+            { path: 'locales/pt-2.json', languages: [{ code: 'pt', translations: [{ key: 'farewell', value: 'Tchau' }] }] }
+          ]
+        }
+      };
+
+      it('writes only the listed locales', async () => {
+        const result = await syncService.applyUpdates(mixedUpdates);
+
+        expect(mockTranslationUpdater.updateTranslationFile.mock.calls.map(call => call[0])).toEqual(['locales/fr.json']);
+        expect(result.totalUpdates).toBe(1);
+      });
+
+      it('names the skipped locale once', async () => {
+        await syncService.applyUpdates(mixedUpdates);
+
+        const skipLines = mockConsole.log.mock.calls.map(([line]) => line).filter(line => String(line).includes('Skipped'));
+        expect(skipLines).toHaveLength(1);
+        expect(skipLines[0]).toContain('Skipped files for pt: not in outputLocales');
+      });
+
+      it('creates a file for a listed locale that has none yet', async () => {
+        await syncService.applyUpdates({
+          updates: {
+            files: [{ path: 'locales/de.json', languages: [{ code: 'de', translations: [{ key: 'greeting', value: 'Hallo' }] }] }]
+          }
+        });
+
+        expect(mockTranslationUpdater.updateTranslationFile).toHaveBeenCalledWith(
+          'locales/de.json', { greeting: 'Hallo' }, 'de', 'locales/en.json', 'en', expect.anything()
+        );
+      });
     });
 
     it('handles file update errors', async () => {
@@ -548,6 +604,34 @@ describe('syncService', () => {
         'fr'
       );
       expect(result.totalDeleted).toBe(2);
+    });
+
+    it('leaves an unlisted locale file untouched when removing deleted keys', async () => {
+      mockFilesUtils.findTranslationFiles
+        .mockResolvedValueOnce({
+          sourceFiles: [{ path: 'locales/en.json', locale: 'en' }],
+          allFiles: [],
+          targetFilesByLocale: {}
+        })
+        .mockResolvedValueOnce([
+          { path: 'locales/en.json', locale: 'en' },
+          { path: 'locales/fr.json', locale: 'fr' },
+          { path: 'locales/pt.json', locale: 'pt' }
+        ]);
+      mockTranslationUpdater.deleteKeysFromTranslationFile.mockResolvedValue(['deprecated.feature']);
+      mockConfigService.updateLastSyncedAt.mockResolvedValue();
+
+      const result = await syncService.applyUpdates({
+        updates: {
+          files: [],
+          deleted_keys: [{ name: 'deprecated.feature', deleted_at: '2024-03-14T11:50:00Z' }]
+        }
+      });
+
+      expect(mockTranslationUpdater.deleteKeysFromTranslationFile.mock.calls.map(call => call[0]))
+        .toEqual(['locales/en.json', 'locales/fr.json']);
+      expect(result.totalDeleted).toBe(2);
+      expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('Skipped files for pt: not in outputLocales'));
     });
 
     it('passes TranslationWithMetadata array with old_values for PO files', async () => {

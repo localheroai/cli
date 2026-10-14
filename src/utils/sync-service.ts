@@ -3,7 +3,7 @@ import { configService } from './config.js';
 import { getUpdates, GetUpdatesParams } from '../api/translations.js';
 import { updateTranslationFile, deleteKeysFromTranslationFile } from './translation-updater/index.js';
 import { findTranslationFiles } from './files.js';
-import { toConfigLocale } from './translation-processor.js';
+import { toConfigLocale, isWritableLocale, skippedLocalesLine } from './translation-processor.js';
 import { findSourceFileForTarget } from './translation-utils.js';
 import { getCurrentBranch } from './git.js';
 import path from 'path';
@@ -152,6 +152,7 @@ export const syncService: SyncService = {
   async applyUpdates(updates: Updates, verbose = false): Promise<ApplyUpdatesResult> {
     let totalUpdates = 0;
     let totalDeleted = 0;
+    const skippedLocales: string[] = [];
 
     // First, find all source files
     const config = await configService.getValidProjectConfig();
@@ -178,6 +179,11 @@ export const syncService: SyncService = {
       const isYaml = /\.ya?ml$/i.test(file.path);
 
       for (const lang of file.languages) {
+        if (!isWritableLocale(config, lang.code)) {
+          skippedLocales.push(lang.code);
+          continue;
+        }
+
         if (verbose) {
           console.log(chalk.blue(`Updating ${lang.code} translations in ${file.path}`));
         }
@@ -237,6 +243,11 @@ export const syncService: SyncService = {
       }
       const keysToDelete = deletedKeys.map(key => key.name);
       for (const file of translationFiles) {
+        if (!isWritableLocale(config, file.locale)) {
+          skippedLocales.push(file.locale);
+          continue;
+        }
+
         try {
           if (verbose) {
             console.log(chalk.blue(`Checking for deleted keys in ${file.path} (${file.locale})`));
@@ -260,6 +271,10 @@ export const syncService: SyncService = {
           console.error(chalk.yellow(`⚠️  Failed to delete keys from ${file.path}: ${error.message}`));
         }
       }
+    }
+
+    if (skippedLocales.length > 0) {
+      console.log(skippedLocalesLine(skippedLocales));
     }
 
     await configService.updateLastSyncedAt();

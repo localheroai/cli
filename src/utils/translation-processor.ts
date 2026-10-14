@@ -175,6 +175,26 @@ export function localeCodesMatch(a: string, b: string): boolean {
   return a.toLowerCase().replace(/_/g, '-') === b.toLowerCase().replace(/_/g, '-');
 }
 
+export function isConfiguredTargetLocale(outputLocales: string[], language: string): boolean {
+  // An empty outputLocales means "no restriction" (validated configs always have
+  // at least one). Match tolerantly so a config locale (pt-BR) still matches a
+  // gettext directory name (pt_BR).
+  return outputLocales.length === 0 ||
+    outputLocales.some(locale => localeCodesMatch(locale, language));
+}
+
+export function isWritableLocale(
+  config: Pick<ProjectConfig, 'sourceLocale' | 'outputLocales'>,
+  language: string
+): boolean {
+  return localeCodesMatch(config.sourceLocale, language) ||
+    isConfiguredTargetLocale(config.outputLocales ?? [], language);
+}
+
+export function skippedLocalesLine(locales: string[]): string {
+  return chalk.dim(`Skipped files for ${[...new Set(locales)].join(', ')}: not in outputLocales`);
+}
+
 export function toConfigLocale(code: string, config: Pick<ProjectConfig, 'sourceLocale' | 'outputLocales'>): string {
   const configLocales = [config.sourceLocale, ...(config.outputLocales ?? [])];
   return configLocales.find(locale => localeCodesMatch(locale, code)) ?? code;

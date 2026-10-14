@@ -709,6 +709,69 @@ describe('ci command', () => {
       });
     });
 
+    describe('when the sync carries a locale the config does not list', () => {
+      const frFile = {
+        path: 'locales/fr.json',
+        language: 'fr',
+        translations: [{ key: 'hello', name: 'hello', value: 'Bonjour', updated_at: '2026-10-14T00:00:00Z' }]
+      };
+      const ptFile = {
+        path: 'locales/pt.json',
+        language: 'pt',
+        translations: [
+          { key: 'hello', name: 'hello', value: 'Olá', updated_at: '2026-10-14T00:00:00Z' },
+          { key: 'bye', name: 'bye', value: 'Tchau', updated_at: '2026-10-14T00:00:00Z' }
+        ]
+      };
+
+      function buildDeps(files: typeof syncResponse.sync.files) {
+        mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
+        mockEnv.LOCALHERO_SYNC_VERSION = '3';
+        const deps = buildSyncDeps();
+        deps.githubUtils.autoCommitSyncChanges.mockResolvedValue('new');
+        deps.syncApi.getSyncTranslations.mockResolvedValue({
+          ...syncResponse,
+          sync: { ...syncResponse.sync, modified_keys_count: 2, files }
+        });
+        return deps;
+      }
+
+      it('writes, commits and counts only the listed locale', async () => {
+        const deps = buildDeps([frFile, ptFile]);
+
+        await ci({}, deps);
+
+        expect(deps.updateTranslationFile.mock.calls.map(call => call[0])).toEqual(['locales/fr.json']);
+        expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledWith(
+          ['locales/fr.json'],
+          expect.objectContaining({ keysTranslated: 1, languages: ['fr'] }),
+          expect.anything()
+        );
+        expect(mockConsole.log).toHaveBeenCalledWith(expect.stringContaining('Synced 1 keys across 1 files'));
+      });
+
+      it('names the skipped locale once', async () => {
+        const deps = buildDeps([frFile, ptFile, { ...ptFile, path: 'locales/pt-extra.json' }]);
+
+        await ci({}, deps);
+
+        const skipLines = mockConsole.log.mock.calls.map(([line]) => String(line)).filter(line => line.includes('Skipped'));
+        expect(skipLines).toHaveLength(1);
+        expect(skipLines[0]).toContain('Skipped files for pt: not in outputLocales');
+      });
+
+      it('writes no locale file and still completes the sync update when every file is skipped', async () => {
+        const deps = buildDeps([ptFile]);
+        deps.githubUtils.autoCommitSyncChanges.mockResolvedValue('no-changes');
+
+        await ci({}, deps);
+
+        expect(deps.updateTranslationFile).not.toHaveBeenCalled();
+        expect(deps.githubUtils.autoCommitSyncChanges).toHaveBeenCalledWith([], expect.anything(), expect.anything());
+        expect(deps.syncApi.completeSyncUpdate).toHaveBeenCalledWith('sync_abc', 3);
+      });
+    });
+
     it('keeps a flat plural flat when the sync sends its other form', async () => {
       mockEnv.LOCALHERO_SYNC_ID = 'sync_abc';
       const deps = { ...buildSyncDeps(), updateTranslationFile };
