@@ -512,7 +512,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     const detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);
     targetChanges = detectedChanges ?? [];
     const alignmentCandidates = detectedChanges
-      ? collectAlignmentCandidates(targetChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
+      ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
       : [];
 
     const filtered = filterByGitChanges(

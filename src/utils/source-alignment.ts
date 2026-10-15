@@ -52,8 +52,8 @@ const NOT_FOUND_STATUS = 404;
 const INVALID_PARAMETERS_STATUS = 422;
 
 /**
- * Ask the backend to align the translations of reworded source texts, one
- * locale at a time, and write the aligned values into the target files. A
+ * Ask the backend to align the translations of reworded or added source texts,
+ * one locale at a time, and write the aligned values into the target files. A
  * locale that fails is left untouched; the rest of the run carries on.
  */
 export async function runSourceAlignment(
@@ -188,9 +188,9 @@ interface SentChunk {
 }
 
 /**
- * Servers from before keys added in a branch could be aligned reject an item
- * without a previous source. The rewordings in that chunk are asked again on
- * their own, so they still align.
+ * Older servers reject items without a previous source (keys added in this
+ * branch). The chunk's rewordings are then sent again on their own so they
+ * still align.
  */
 async function requestChunk(chunk: AlignmentCandidate[], locale: string, request: AlignmentRequest): Promise<SentChunk> {
   try {

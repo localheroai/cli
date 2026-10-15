@@ -10,8 +10,7 @@ export interface AlignmentCandidate extends SourceAlignmentItem {
 }
 
 const ALIGNABLE_FORMATS = new Set(['yml', 'yaml', 'json']);
-// Added keys are sent on every push for the backend to check; past this many cells
-// the requests would slow every run, so they are left as they are.
+// Added keys are re-checked on every push, so past this many cells they are skipped to keep runs fast.
 const MAX_ADDED_CELLS = 500;
 
 interface SourceEdit {
