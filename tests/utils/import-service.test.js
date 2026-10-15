@@ -9,7 +9,6 @@ describe('importService', () => {
   let mockFs;
   let mockImportsApi;
   let importService;
-  let isConfiguredTargetLocale;
   let originalConsole;
 
   beforeEach(async () => {
@@ -119,7 +118,6 @@ describe('importService', () => {
 
     const importServiceModule = await import('../../src/utils/import-service.js');
     importService = importServiceModule.importService;
-    isConfiguredTargetLocale = importServiceModule.isConfiguredTargetLocale;
   });
 
   afterEach(() => {
@@ -444,28 +442,6 @@ describe('importService', () => {
       expect(languages).not.toContain('fr');
     });
 
-  });
-
-  describe('isConfiguredTargetLocale', () => {
-    it('includes an exact configured locale', () => {
-      expect(isConfiguredTargetLocale(['sv', 'da'], 'sv')).toBe(true);
-    });
-
-    it('excludes a locale that is not configured', () => {
-      expect(isConfiguredTargetLocale(['sv', 'da'], 'fr')).toBe(false);
-    });
-
-    it('matches across separator differences (config pt-BR vs gettext dir pt_BR)', () => {
-      expect(isConfiguredTargetLocale(['pt-BR'], 'pt_BR')).toBe(true);
-    });
-
-    it('matches case-insensitively', () => {
-      expect(isConfiguredTargetLocale(['pt-BR'], 'PT_br')).toBe(true);
-    });
-
-    it('treats an empty outputLocales as no restriction', () => {
-      expect(isConfiguredTargetLocale([], 'anything')).toBe(true);
-    });
   });
 
   describe('pushTranslations', () => {

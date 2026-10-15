@@ -2,7 +2,13 @@ import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { processTranslationBatches, JOB_STALL_MINUTES, JOB_WAIT_MAX_MINUTES } from '../../src/utils/translation-processor.js';
+import {
+  processTranslationBatches,
+  JOB_STALL_MINUTES,
+  JOB_WAIT_MAX_MINUTES,
+  isConfiguredTargetLocale,
+  isWritableLocale
+} from '../../src/utils/translation-processor.js';
 import { batchKeysWithMissing, findMissingTranslationsByLocale } from '../../src/utils/translation-utils.js';
 import { updateTranslationFile } from '../../src/utils/translation-updater/index.js';
 
@@ -1686,5 +1692,48 @@ describe('translation-processor', () => {
         expect(detectMissing()).toEqual({});
       });
     });
+  });
+});
+
+describe('isConfiguredTargetLocale', () => {
+  it('includes an exact configured locale', () => {
+    expect(isConfiguredTargetLocale(['sv', 'da'], 'sv')).toBe(true);
+  });
+
+  it('excludes a locale that is not configured', () => {
+    expect(isConfiguredTargetLocale(['sv', 'da'], 'fr')).toBe(false);
+  });
+
+  it('matches across separator differences (config pt-BR vs gettext dir pt_BR)', () => {
+    expect(isConfiguredTargetLocale(['pt-BR'], 'pt_BR')).toBe(true);
+  });
+
+  it('matches case-insensitively', () => {
+    expect(isConfiguredTargetLocale(['pt-BR'], 'PT_br')).toBe(true);
+  });
+
+  it('treats an empty outputLocales as no restriction', () => {
+    expect(isConfiguredTargetLocale([], 'anything')).toBe(true);
+  });
+});
+
+describe('isWritableLocale', () => {
+  const config = { sourceLocale: 'en', outputLocales: ['fr', 'zh_cn'] };
+
+  it('includes the source locale', () => {
+    expect(isWritableLocale(config, 'en')).toBe(true);
+  });
+
+  it('includes a configured locale spelled differently', () => {
+    expect(isWritableLocale(config, 'zh-CN')).toBe(true);
+  });
+
+  it('excludes a locale that is not configured', () => {
+    expect(isWritableLocale(config, 'pt')).toBe(false);
+  });
+
+  it('treats a missing or empty outputLocales as no restriction', () => {
+    expect(isWritableLocale({ sourceLocale: 'en', outputLocales: [] }, 'pt')).toBe(true);
+    expect(isWritableLocale({ sourceLocale: 'en' }, 'pt')).toBe(true);
   });
 });

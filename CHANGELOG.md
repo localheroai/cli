@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- A sync in CI and `pull` only write the source locale and the locales in `outputLocales`, and name any they skipped. Before, they wrote every language Localhero.ai had, so a language the repository doesn't ship, such as `pt`, showed up as a new `pt.yml` or a new top-level `pt:` in a multi-language file. `pull` also no longer removes deleted keys from files of unlisted locales. `push` and the initial import already worked this way.
+
 ## [0.0.84] - 2026-10-13
 
 ### Fixed

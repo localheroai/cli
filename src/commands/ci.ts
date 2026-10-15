@@ -6,7 +6,7 @@ import { checkAuth } from '../utils/auth.js';
 import { githubService } from '../utils/github.js';
 import { getSyncTranslations, completeSyncUpdate, type SyncFile } from '../api/sync.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
-import { toConfigLocale } from '../utils/translation-processor.js';
+import { toConfigLocale, isWritableLocale, skippedLocalesLine } from '../utils/translation-processor.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { findSourceFileForTarget } from '../utils/translation-utils.js';
 import { ProjectConfig, TranslationFile, TranslationFilesResult } from '../types/index.js';
@@ -187,6 +187,12 @@ async function runSyncMode(
   }
 
   const config = await configUtils.getValidProjectConfig();
+  const files = allFiles.filter(file => isWritableLocale(config, file.language));
+  const skippedLocales = allFiles.filter(file => !isWritableLocale(config, file.language)).map(file => file.language);
+  if (skippedLocales.length > 0) {
+    console.log(skippedLocalesLine(skippedLocales));
+  }
+
   const modifiedFiles: string[] = [];
   let filesUpdated = 0;
   const uniqueKeys = new Set<string>();
@@ -194,7 +200,7 @@ async function runSyncMode(
   const projectRoot = process.cwd();
   const sourceFiles = await findSourceFiles(config);
 
-  for (const file of allFiles) {
+  for (const file of files) {
     const absolutePath = path.resolve(file.path);
     const relativePath = path.relative(projectRoot, absolutePath);
 
@@ -236,11 +242,11 @@ async function runSyncMode(
   await configUtils.saveProjectConfig(config);
 
   const keysProcessed = uniqueKeys.size;
-  const keysUpdated = modifiedKeysCount ?? keysProcessed;
+  const keysUpdated = skippedLocales.length > 0 ? keysProcessed : (modifiedKeysCount ?? keysProcessed);
   console.log(chalk.green(`\n✓ Synced ${keysUpdated} keys across ${filesUpdated} files`));
 
   if (githubUtils.isGitHubAction() && !options?.skipCommit) {
-    const languages = [...new Set(allFiles.map(f => f.language))];
+    const languages = [...new Set(files.map(f => f.language))];
     const commitResult = await githubUtils.autoCommitSyncChanges(
       modifiedFiles,
       { keysTranslated: keysUpdated, languages, viewUrl: syncUrl, editors, otherEditors },

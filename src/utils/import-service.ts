@@ -6,7 +6,7 @@ import { createImport, checkImportStatus, ImportResponse, bulkUpdateTranslations
 import { findTranslationFiles as findFiles, flattenTranslations } from './files.js';
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { filterFilesByGitChanges } from './git-changes.js';
-import { localeCodesMatch } from './translation-processor.js';
+import { isWritableLocale, skippedLocalesLine } from './translation-processor.js';
 import { detectMultiLanguage, sourceKeyedLocales } from './multi-language-detection.js';
 import type { IgnoreSummary, RemovedKey } from './ignore-keys.js';
 import { summarizeRemoved } from './ignore-keys.js';
@@ -92,14 +92,6 @@ function normalizeFormat(format: string): string {
   return format;
 }
 
-export function isConfiguredTargetLocale(outputLocales: string[], language: string): boolean {
-  // An empty outputLocales means "no restriction" (validated configs always have
-  // at least one). Match tolerantly so a config locale (pt-BR) still matches a
-  // gettext directory name (pt_BR).
-  return outputLocales.length === 0 ||
-    outputLocales.some(locale => localeCodesMatch(locale, language));
-}
-
 interface LocaleSplit {
   sourceFiles: ImportFile[];
   targetFiles: ImportFile[];
@@ -107,17 +99,13 @@ interface LocaleSplit {
 }
 
 function splitFilesByLocale(files: ImportFile[], config: ProjectConfig): LocaleSplit {
-  const outputLocales = config.outputLocales ?? [];
-  const isSendable = (language: string): boolean =>
-    localeCodesMatch(config.sourceLocale, language) || isConfiguredTargetLocale(outputLocales, language);
-
   const otherFiles = files.filter(file => file.language !== config.sourceLocale);
-  const skippedFiles = otherFiles.filter(file => !isSendable(file.language));
+  const skippedFiles = otherFiles.filter(file => !isWritableLocale(config, file.language));
 
   return {
     sourceFiles: files.filter(file => file.language === config.sourceLocale),
-    targetFiles: otherFiles.filter(file => isSendable(file.language)),
-    skippedLocales: [...new Set(skippedFiles.map(file => file.language))]
+    targetFiles: otherFiles.filter(file => isWritableLocale(config, file.language)),
+    skippedLocales: skippedFiles.map(file => file.language)
   };
 }
 
@@ -506,7 +494,7 @@ export const importService = {
 
     const { sourceFiles, targetFiles, skippedLocales } = splitFilesByLocale(files, config);
     if (skippedLocales.length > 0) {
-      console.log(chalk.dim(`Skipped files for ${skippedLocales.join(', ')}: not in outputLocales`));
+      console.log(skippedLocalesLine(skippedLocales));
     }
 
     if (sourceFiles.length === 0 && targetFiles.length === 0) {
