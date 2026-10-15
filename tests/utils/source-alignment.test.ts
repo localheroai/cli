@@ -184,6 +184,56 @@ describe('runSourceAlignment', () => {
     expect(result.alignedCells.map((cell: any) => cell.locale)).toEqual(['de']);
   });
 
+  it('retries a rejected request without the keys added in this branch', async () => {
+    const added = candidate('profile.hint', 'fr', { previous_source: null, target_base: null });
+    mockCreateSourceAlignment
+      .mockRejectedValueOnce(new SourceAlignmentRequestError('each item requires previous_source', 422))
+      .mockImplementationOnce(echoResponse('aligned', { value: 'Votre profil' }));
+
+    const result = await runSourceAlignment([candidate('profile.title'), added], request, deps);
+
+    expect(mockCreateSourceAlignment.mock.calls.map((call: any) => call[0].items.map((item: any) => item.key))).toEqual([
+      ['profile.title', 'profile.hint'],
+      ['profile.title']
+    ]);
+    expect(updateTranslationFile).toHaveBeenCalledWith(
+      'config/locales/fr.yml',
+      { 'profile.title': 'Votre profil' },
+      'fr',
+      'config/locales/en.yml',
+      undefined,
+      config
+    );
+    expect(result.localeSummaries.fr).toEqual({ aligned: 1, unchanged: 0, skipped: {} });
+    expect(logged()).toContain('Could not align fr translations of keys added in this branch');
+  });
+
+  it('moves on when a rejected locale only has keys added in this branch', async () => {
+    mockCreateSourceAlignment
+      .mockRejectedValueOnce(new SourceAlignmentRequestError('each item requires previous_source', 422))
+      .mockImplementationOnce(echoResponse('aligned', { value: 'Dein Profil' }));
+
+    const result = await runSourceAlignment(
+      [candidate('a', 'fr', { previous_source: null, target_base: null }), candidate('a', 'de')],
+      request,
+      deps
+    );
+
+    expect(mockCreateSourceAlignment).toHaveBeenCalledTimes(2);
+    expect(mockCreateSourceAlignment.mock.calls[1][0].locale).toBe('de');
+    expect(result.alignedCells.map((cell: any) => cell.locale)).toEqual(['de']);
+    expect(logged()).toContain('Could not align fr translations of keys added in this branch');
+  });
+
+  it('does not retry keys added in this branch after a server error', async () => {
+    mockCreateSourceAlignment.mockRejectedValue(new SourceAlignmentRequestError('Something went wrong', 500));
+
+    await runSourceAlignment([candidate('a'), candidate('b', 'fr', { previous_source: null })], request, deps);
+
+    expect(mockCreateSourceAlignment).toHaveBeenCalledTimes(1);
+    expect(logged()).toMatch(/Could not align fr translations to the reworded source texts/);
+  });
+
   it.each([
     ['a server error', () => new SourceAlignmentRequestError('Something went wrong', 500)],
     ['a network error', () => new TypeError('fetch failed')]

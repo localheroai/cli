@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- A key added in a pull request keeps its translations in step when a later push rewords it. `translate --changed-only` (and `ci`) now sends keys the pull request added, and that already have translations, along with reworded ones, and Localhero updates the translations that were made from the earlier wording. Before, only keys that existed on the base branch were aligned, so a key added on one push and reworded on the next shipped its new English next to translations of the old one. YAML and JSON only, as before. Needs the matching server change; against an older server those keys are left as they are and the run prints a warning, while reworded keys on the base branch are still aligned.
+
 ## [0.0.85] - 2026-10-15
 
 ### Fixed

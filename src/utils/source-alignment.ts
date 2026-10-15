@@ -4,6 +4,7 @@ import {
   SourceAlignmentRequestError,
   type SourceAlignmentItem,
   type SourceAlignmentParams,
+  type SourceAlignmentResponse,
   type SourceAlignmentResultItem
 } from '../api/source-alignments.js';
 import type { AlignmentCandidate } from './alignment-candidates.js';
@@ -69,20 +70,21 @@ export async function runSourceAlignment(
   };
 
   for (const [locale, localeCandidates] of groupBy(candidates, c => c.locale)) {
+    let requested: AlignmentCandidate[] = [];
     let items: SourceAlignmentResultItem[] = [];
+    let addedKeysRejected = false;
     try {
       for (const chunk of chunked(localeCandidates, MAX_ITEMS_PER_REQUEST)) {
-        const response = await createSourceAlignment({
-          ...request,
-          locale,
-          items: chunk.map(toRequestItem)
-        });
-        if (!response.enabled) return result;
+        const sent = await requestChunk(chunk, locale, request);
+        addedKeysRejected ||= sent.addedKeysRejected;
+        if (!sent.response) continue;
+        if (!sent.response.enabled) return result;
 
         result.enabled = true;
-        result.shortUrl = response.job_group?.short_url ?? result.shortUrl;
-        addNotices(result, response.notices ?? []);
-        items = items.concat(matchedItems(chunk, response.items));
+        result.shortUrl = sent.response.job_group?.short_url ?? result.shortUrl;
+        addNotices(result, sent.response.notices ?? []);
+        requested = requested.concat(sent.candidates);
+        items = items.concat(matchedItems(sent.candidates, sent.response.items));
       }
     } catch (error) {
       if (error instanceof SourceAlignmentRequestError && error.status === NOT_FOUND_STATUS) return result;
@@ -90,7 +92,11 @@ export async function runSourceAlignment(
       continue;
     }
 
-    const { summary, aligned } = classifyItems(localeCandidates, items);
+    if (addedKeysRejected) {
+      deps.console.log(chalk.yellow(`⚠ Could not align ${locale} translations of keys added in this branch. Existing translations were kept.`));
+    }
+
+    const { summary, aligned } = classifyItems(requested, items);
     result.localeSummaries[locale] = summary;
     const written = await writeAlignedCells(aligned, locale, deps);
     summary.aligned = written.length;
@@ -173,6 +179,34 @@ async function writeAlignedCells(
     }
   }
   return written;
+}
+
+interface SentChunk {
+  candidates: AlignmentCandidate[];
+  response: SourceAlignmentResponse | null;
+  addedKeysRejected: boolean;
+}
+
+/**
+ * Servers from before keys added in a branch could be aligned reject an item
+ * without a previous source. The rewordings in that chunk are asked again on
+ * their own, so they still align.
+ */
+async function requestChunk(chunk: AlignmentCandidate[], locale: string, request: AlignmentRequest): Promise<SentChunk> {
+  try {
+    return { candidates: chunk, response: await sendItems(chunk, locale, request), addedKeysRejected: false };
+  } catch (error) {
+    const rewordings = chunk.filter(candidate => candidate.previous_source !== null);
+    const rejected = error instanceof SourceAlignmentRequestError && error.status === INVALID_PARAMETERS_STATUS;
+    if (!rejected || rewordings.length === chunk.length) throw error;
+
+    const response = rewordings.length > 0 ? await sendItems(rewordings, locale, request) : null;
+    return { candidates: rewordings, response, addedKeysRejected: true };
+  }
+}
+
+function sendItems(candidates: AlignmentCandidate[], locale: string, request: AlignmentRequest): Promise<SourceAlignmentResponse> {
+  return createSourceAlignment({ ...request, locale, items: candidates.map(toRequestItem) });
 }
 
 function matchedItems(
