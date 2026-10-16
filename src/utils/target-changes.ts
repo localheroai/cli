@@ -14,11 +14,12 @@ import { recordUnreadableFile } from './unreadable-files.js';
 
 export interface TargetChange {
   key: string;
-  status: 'added' | 'updated';
+  status: 'added' | 'updated' | 'reverted';
   value: string;
   old_value?: string | null;
   source_value?: string;
   aligned_source?: string;
+  trigger_locale?: string;
 }
 
 export interface TargetChangeFile {

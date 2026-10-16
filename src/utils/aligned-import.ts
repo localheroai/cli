@@ -77,7 +77,8 @@ function buildImportFiles(cells: AlignedCell[]): TargetChangeFile[] {
       value: cell.value,
       old_value: cell.target_base,
       source_value: cell.source,
-      aligned_source: cell.source
+      aligned_source: cell.aligned_source ?? cell.source,
+      ...(cell.trigger_locale && { trigger_locale: cell.trigger_locale })
     });
   }
   return [...files.values()];

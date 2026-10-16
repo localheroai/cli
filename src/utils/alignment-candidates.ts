@@ -7,6 +7,7 @@ import type { SourceAlignmentItem } from '../api/source-alignments.js';
 
 export interface AlignmentCandidate extends SourceAlignmentItem {
   locale: string;
+  trigger_locale?: string;
 }
 
 export const ALIGNABLE_FORMATS = new Set(['yml', 'yaml', 'json']);

@@ -215,6 +215,41 @@ describe('sendAlignedImport', () => {
     });
   });
 
+  it('marks values that follow an edited translation with the locale of that edit', async () => {
+    const sourcePath = 'config/locales/en.yml';
+    const sourceCell = {
+      ...cell('profile.published', 'en', sourcePath),
+      previous_source: 'Your profile is published',
+      source: 'Your profile is published now',
+      target_base: 'Your profile is published',
+      target_current: 'Your profile is published',
+      value: 'Your profile is published now',
+      trigger_locale: 'sv',
+      aligned_source: 'Din profil är publicerad nu'
+    };
+    const targetCell = { ...cell('profile.published', 'nb'), source: 'Your profile is published now', value: 'Profilen din er publisert nå', trigger_locale: 'sv' };
+
+    await sendAlignedImport([sourceCell, targetCell], request, { console: { log }, sleep });
+
+    const [enFile, nbFile] = mockCreatePullRequestImport.mock.calls[0][0].files;
+    expect(enFile).toEqual({
+      path: sourcePath,
+      source_path: sourcePath,
+      locale: 'en',
+      format: 'yml',
+      changes: [{
+        key: 'profile.published',
+        status: 'updated',
+        value: 'Your profile is published now',
+        old_value: 'Your profile is published',
+        source_value: 'Your profile is published now',
+        aligned_source: 'Din profil är publicerad nu',
+        trigger_locale: 'sv'
+      }]
+    });
+    expect(nbFile.changes[0]).toMatchObject({ aligned_source: 'Your profile is published now', trigger_locale: 'sv' });
+  });
+
   it('keeps the locales of a multi-language file apart', async () => {
     const viewPath = 'app/views/profile/show.i18n.yml';
 
