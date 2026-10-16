@@ -33,7 +33,8 @@ export function collectAlignmentCandidates(
   verbose: boolean,
   ignoreMatcher?: (keyName: string) => boolean
 ): AlignmentCandidate[] {
-  const alignableSourceFiles = sourceFiles.filter(file => ALIGNABLE_FORMATS.has(file.format.toLowerCase()));
+  // Overlapping paths (config/locales/ and config/locales/multi/) list a file more than once.
+  const alignableSourceFiles = uniqueByPath(sourceFiles).filter(file => ALIGNABLE_FORMATS.has(file.format.toLowerCase()));
   if (alignableSourceFiles.length === 0) return [];
 
   const resolvedRef = resolveCompareRef(getBaseBranch(config), verbose);
@@ -89,6 +90,10 @@ function withinAddedLimit(candidates: AlignmentCandidate[]): AlignmentCandidate[
   const keyCount = new Set(added.map(candidate => `${candidate.source_path}\0${candidate.key}`)).size;
   console.log(chalk.yellow(`Not checking translations of ${keyCount} keys added in this branch against their English: more than ${MAX_ADDED_CELLS} translations to check.`));
   return candidates.filter(candidate => candidate.previous_source !== null);
+}
+
+function uniqueByPath(files: TranslationFile[]): TranslationFile[] {
+  return [...new Map(files.map(file => [file.path, file])).values()];
 }
 
 function rewordings(targetChanges: TargetChangeFile[], sourceFile: TranslationFile, sourceLocale: string): SourceEdit[] {
