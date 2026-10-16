@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { execFileSync } from 'child_process';
 import path from 'path';
-import { flatValuesAt } from './git-changes.js';
+import { flatValuesAt, type FileLocation } from './git-changes.js';
 import { fetchActionToken, MISSING_TOKEN_ERROR } from './github.js';
 import type { TargetChange, TargetChangeFile } from './target-changes.js';
 import type { Logger } from './source-alignment.js';
@@ -23,7 +23,7 @@ const defaultDependencies: ImportGuardDependencies = {
   flatValuesAt
 };
 
-type TipValues = (file: { path: string; format: string; locale: string }) => Record<string, unknown> | null;
+type TipValues = (file: FileLocation) => Record<string, unknown> | null;
 
 /**
  * A run imports the values it checked out. When the pull request branch moved

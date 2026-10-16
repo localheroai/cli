@@ -432,7 +432,7 @@ export function diffFileKeys(
   return { oldFlat: oldFlat ?? {}, newFlat };
 }
 
-type FileLocation = Pick<TranslationFile, 'path' | 'format' | 'locale'>;
+export type FileLocation = Pick<TranslationFile, 'path' | 'format' | 'locale'>;
 
 /**
  * A file's flattened key map as committed at `ref`, or null when the ref does
