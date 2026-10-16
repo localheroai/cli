@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- A run that started before a Sync to GitHub no longer replaces the reviewer's edit that sync committed. `translate --changed-only` (and `ci`) now fetches the pull request branch right before it sends the PR's values for review, and leaves out every value the branch changed after the run's checkout, along with any value whose source text changed there. The run prints how many it left out; the newer commit's own run, or the sync that made it, already covers them. Before, a run that checked out the branch just before the sync sent the older value, which replaced the reviewer's edit on the PR page and was applied on merge. If the branch can't be fetched, the run warns and sends everything, as before. GitHub Actions on pull requests only.
+
 ## [0.0.87] - 2026-10-16
 
 0.0.86 was published under the `rc` tag only and never became `latest`; 0.0.87 includes everything listed under it.
