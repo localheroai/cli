@@ -191,6 +191,24 @@ describe('collectTargetEditCandidates', () => {
     ]);
   });
 
+  test('leaves out a YAML source file without a locale root, whose writer would add one', () => {
+    const unwrapped = 'profile:\n  published: "Your profile is published"\n';
+    setupGit(
+      { ...baseFiles, 'en.yml': unwrapped },
+      { ...baseFiles, 'en.yml': unwrapped, 'sv.yml': 'sv:\n  profile:\n    published: "Din profil är publicerad nu"\n' }
+    );
+
+    const result = collectTargetEditCandidates(
+      [edited('sv', 'profile.published', 'Din profil är publicerad', 'Din profil är publicerad nu')],
+      sourceFiles,
+      targetFilesByLocale,
+      config,
+      false
+    );
+
+    expect(result).toEqual([]);
+  });
+
   test('leaves out keys added in this branch', () => {
     setupGit(
       { ...baseFiles, 'en.yml': 'en:\n  other: "x"\n' },

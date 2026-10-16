@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from '@jest/globals';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 
@@ -316,6 +316,34 @@ function v1Candidate(key: string, locale: string, extra: Record<string, unknown>
     ...extra
   };
 }
+
+describe('runTargetEditAlignment writing a real file', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(tmpdir(), 'target-edit-write-'));
+    mockCreateTargetEditAlignment.mockReset();
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('changes only the followed key in a locale-rooted YAML source file', async () => {
+    const { updateTranslationFile } = await import('../../src/utils/translation-updater/index.js');
+    const enPath = path.join(dir, 'en.yml');
+    writeFileSync(enPath, 'en:\n  profile:\n    published: "Your profile is published"\n    title: "Your profile"\n  other: "Other"\n');
+    mockCreateTargetEditAlignment.mockImplementation(respondWith(updated));
+
+    await runTargetEditAlignment(
+      [candidate('profile.published', { source_path: enPath })],
+      request,
+      { console: { log: jest.fn() }, updateTranslationFile, config }
+    );
+
+    expect(readFileSync(enPath, 'utf-8')).toBe('en:\n  profile:\n    published: "Your profile is published now"\n    title: "Your profile"\n  other: "Other"\n');
+  });
+});
 
 describe('replaceAlignmentCandidates', () => {
   it('replaces every first-pass candidate of an updated key with the items for the locales to align', () => {

@@ -1,6 +1,8 @@
+import { readFileSync } from 'fs';
 import chalk from 'chalk';
 import type { ProjectConfig, TranslationFile } from '../types/index.js';
-import { getBaseBranch, resolveCompareRef, type FileDiff } from './git-changes.js';
+import { getBaseBranch, resolveCompareRef, extractLocaleContent, type FileDiff } from './git-changes.js';
+import { parseFile } from './files.js';
 import { findTargetFile } from './translation-utils.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { TargetEditItem, TargetEditTarget } from '../api/target-edit-alignments.js';
@@ -32,7 +34,7 @@ export function collectTargetEditCandidates(
 ): TargetEditCandidate[] {
   const editedKeysBySource = editedKeys(targetChanges, ignoreMatcher);
   const editedSourceFiles = uniqueByPath(sourceFiles).filter(file =>
-    ALIGNABLE_FORMATS.has(file.format.toLowerCase()) && editedKeysBySource.has(file.path)
+    ALIGNABLE_FORMATS.has(file.format.toLowerCase()) && editedKeysBySource.has(file.path) && writableUnderLocale(file)
   );
   if (editedSourceFiles.length === 0) return [];
 
@@ -59,6 +61,21 @@ export function collectTargetEditCandidates(
   }
 
   return withinLimit(candidates);
+}
+
+const YAML_FORMATS = new Set(['yml', 'yaml']);
+
+// The YAML writer always puts the key under a locale root; in a file without
+// one it would add a second tree that hides the existing keys.
+function writableUnderLocale(file: TranslationFile): boolean {
+  if (!YAML_FORMATS.has(file.format.toLowerCase())) return true;
+
+  try {
+    const parsed = parseFile(readFileSync(file.path, 'utf-8'), file.format, file.path);
+    return extractLocaleContent(parsed, file.locale) !== parsed;
+  } catch {
+    return false;
+  }
 }
 
 interface TargetDiff {
