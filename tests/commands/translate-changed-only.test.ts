@@ -210,7 +210,7 @@ describe('translate --changed-only summary', () => {
         env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
         git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'synced-tip') : ''),
         fetchActionToken: async () => ({ token: null }),
-        flatValuesAt: (_file: unknown, ref: string) => (ref === 'HEAD'
+        flatValuesAt: (_file: unknown, ref: string) => (ref === 'checkout'
           ? { greeting: 'Bonjour', farewell: 'Au revoir' }
           : { greeting: 'Bonjour (relu)', farewell: 'Au revoir' })
       });
@@ -614,7 +614,7 @@ describe('translate --changed-only aligning reworded source texts', () => {
         env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
         git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : tipHead) : ''),
         fetchActionToken: async () => ({ token: null }),
-        flatValuesAt: (file: { locale: 'fr' | 'en' }, ref: string) => (ref === 'HEAD' ? checkout : tip)[file.locale]
+        flatValuesAt: (file: { locale: 'fr' | 'en' }, ref: string) => (ref === 'checkout' ? checkout : tip)[file.locale]
       });
     }
 

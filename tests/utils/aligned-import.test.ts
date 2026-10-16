@@ -86,15 +86,16 @@ describe('sendAlignedImport', () => {
     beforeEach(() => {
       importGuard.setDependencies({
         env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
-        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'our-commit' : 'sync-commit') : ''),
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'sync-commit') : ''),
         fetchActionToken: async () => ({ token: null }),
         flatValuesAt: (file: { locale: string }, ref: string) => {
           if (file.locale === 'en') return { 'profile.title': 'Your profile', 'profile.hint': 'Your profile' };
-          return ref === 'HEAD'
-            ? { 'profile.title': 'Votre profil', 'profile.hint': 'Votre profil' }
+          return ref === 'checkout'
+            ? { 'profile.title': 'Profil !', 'profile.hint': 'Profil !' }
             : { 'profile.title': 'Votre profil (relu)', 'profile.hint': 'Votre profil' };
         }
       });
+      importGuard.recordBaseline();
     });
 
     it('leaves out the aligned value the sync changed', async () => {
@@ -106,8 +107,8 @@ describe('sendAlignedImport', () => {
     });
 
     it('sends nothing when the sync changed every aligned value', async () => {
-      const removedOnTip = { fr: { HEAD: { 'profile.title': 'Votre profil' }, FETCH_HEAD: {} }, en: { HEAD: {}, FETCH_HEAD: {} } };
-      importGuard.deps.flatValuesAt = (file: { locale: 'fr' | 'en' }, ref: 'HEAD' | 'FETCH_HEAD') => removedOnTip[file.locale][ref];
+      const removedOnTip = { fr: { checkout: { 'profile.title': 'Profil !' }, FETCH_HEAD: {} }, en: { checkout: {}, FETCH_HEAD: {} } };
+      importGuard.deps.flatValuesAt = (file: { locale: 'fr' | 'en' }, ref: 'checkout' | 'FETCH_HEAD') => removedOnTip[file.locale][ref];
 
       await sendAlignedImport([cell('profile.title')], request, { console: { log }, sleep });
 

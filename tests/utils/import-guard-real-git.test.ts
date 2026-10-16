@@ -92,6 +92,7 @@ describe('the import guard against a real remote', () => {
   it('keeps the full history, so our commit still replays onto an unrelated newer commit and the aligned import is sent', async () => {
     commitFile(sibling, 'README.md', 'docs\n', 'unrelated');
     git(sibling, `push -q origin HEAD:${BRANCH}`);
+    importGuard.recordBaseline();
     const edits = [{
       path: FR_PATH, source_path: EN_PATH, locale: 'fr', format: 'yml',
       changes: [{ key: 'greeting', status: 'added', value: 'Bonjour', source_value: 'Hello' }]
@@ -121,6 +122,7 @@ describe('the import guard against a real remote', () => {
     commitFile(ours, 'README.md', 'docs\n', 'base branch work');
     git(ours, `checkout -q --detach origin/${BRANCH}`);
     git(ours, 'merge -q --no-ff -m merge main');
+    importGuard.recordBaseline();
     writeFileSync(path.join(ours, FR_PATH), 'fr:\n  greeting: Salut\n');
 
     expect(git(ours, 'rev-parse HEAD')).not.toBe(git(remote, `rev-parse ${BRANCH}`));
@@ -133,7 +135,7 @@ describe('the import guard against a real remote', () => {
     expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ key: 'greeting', value: 'Salut' });
   });
 
-  it('on a merge-ref checkout, sends the PR edit even though the base branch reworded its source', async () => {
+  it('on a merge-ref checkout of an unchanged PR branch, sends its French edit although main reworded the English', async () => {
     commitFile(sibling, FR_PATH, 'fr:\n  greeting: Salut\n', 'PR edit');
     git(sibling, `push -q origin HEAD:${BRANCH}`);
     git(ours, 'checkout -q -b main');
@@ -141,6 +143,7 @@ describe('the import guard against a real remote', () => {
     git(ours, 'fetch -q origin');
     git(ours, `checkout -q --detach origin/${BRANCH}`);
     git(ours, 'merge -q --no-ff -m merge main');
+    importGuard.recordBaseline();
     const edits = [{
       path: FR_PATH, source_path: EN_PATH, locale: 'fr', format: 'yml',
       changes: [{ key: 'greeting', status: 'updated', value: 'Salut', source_value: 'Hello there' }]
@@ -150,9 +153,27 @@ describe('the import guard against a real remote', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  it('after replaying our commit past a push that changed only the source, leaves out the stale source text', async () => {
+    importGuard.recordBaseline();
+    commitFile(sibling, EN_PATH, 'en:\n  greeting: Hello there\n', 'reword');
+    git(sibling, `push -q origin HEAD:${BRANCH}`);
+    commitFile(ours, FR_PATH, 'fr:\n  greeting: Salut\n', 'aligned');
+
+    expect(await githubService.pushWithRetry(BRANCH, TOKEN)).toBe('pushed');
+    expect(git(ours, 'rev-parse HEAD')).toBe(git(remote, `rev-parse ${BRANCH}`));
+
+    await sendAlignedImport([{
+      locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
+      previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en' }, { console: { log } });
+
+    expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+  });
+
   it('leaves out a value a sync committed after the checkout, reading the real tip', async () => {
     commitFile(sibling, FR_PATH, 'fr:\n  greeting: Bonjour à tous\n', 'sync');
     git(sibling, `push -q origin HEAD:${BRANCH}`);
+    importGuard.recordBaseline();
 
     const kept = await leaveOutMovedCells([{
       path: FR_PATH, source_path: EN_PATH, locale: 'fr', format: 'yml',

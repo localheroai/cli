@@ -40,7 +40,7 @@ import {
   type SourceAlignmentResult
 } from '../utils/source-alignment.js';
 import { sendAlignedImport } from '../utils/aligned-import.js';
-import { leaveOutMovedCells } from '../utils/import-guard.js';
+import { leaveOutMovedCells, recordImportBaseline } from '../utils/import-guard.js';
 import { keepAlignedCellsOnDisk } from '../utils/aligned-values-on-disk.js';
 import type {
   TranslationResult
@@ -511,6 +511,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
     resetUnreadableFiles();
+    recordImportBaseline();
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
     const detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);

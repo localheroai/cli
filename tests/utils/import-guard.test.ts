@@ -40,12 +40,14 @@ describe('leaveOutMovedCells', () => {
       return '';
     });
     flatValuesAt = jest.fn((file: { path: string; locale: string }, ref: string) => {
-      const values = (ref === 'HEAD' ? checkoutFiles : tipFiles)[`${file.path}#${file.locale}`];
+      const values = (ref === CHECKOUT ? checkoutFiles : tipFiles)[`${file.path}#${file.locale}`];
       if (values === undefined) throw new Error(`unexpected read of ${file.path}#${file.locale}`);
       return values;
     });
     fetchActionToken = jest.fn<any>().mockResolvedValue({ token: 'app-token' });
     importGuard.setDependencies({ env: { ...ACTIONS_ENV }, git, flatValuesAt, fetchActionToken });
+    importGuard.recordBaseline();
+    git.mockClear();
   });
 
   function logged(): string {
@@ -67,7 +69,7 @@ describe('leaveOutMovedCells', () => {
 
     expect(keys(kept)).toEqual(['fr:cart.empty']);
     expect(logged()).toContain('» Left out 1 value the branch changed after this run started.');
-    expect(new Set(flatValuesAt.mock.calls.map(call => call[1]))).toEqual(new Set(['FETCH_HEAD', 'HEAD']));
+    expect(new Set(flatValuesAt.mock.calls.map(call => call[1]))).toEqual(new Set(['FETCH_HEAD', CHECKOUT]));
   });
 
   it('leaves out a value a second sync changed again', async () => {
@@ -105,7 +107,7 @@ describe('leaveOutMovedCells', () => {
     expect(logged()).toContain('» Left out 2 values the branch changed after this run started.');
   });
 
-  it('sends everything, silently and without reading files, when the checkout is not in the branch history', async () => {
+  it('sends everything, silently and without reading files, when the commit the run started from is not in the branch history', async () => {
     git.mockImplementation((args: string[]) => {
       if (args[0] === 'merge-base') throw new Error('Command failed: git merge-base --is-ancestor HEAD FETCH_HEAD');
       if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? CHECKOUT : NEWER_TIP;
@@ -114,7 +116,7 @@ describe('leaveOutMovedCells', () => {
     const files = [frFile([{ key: 'cart.title', status: 'updated', value: 'Panier' }])];
 
     expect(await guard(files)).toEqual(files);
-    expect(git).toHaveBeenCalledWith(['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD']);
+    expect(git).toHaveBeenCalledWith(['merge-base', '--is-ancestor', CHECKOUT, 'FETCH_HEAD']);
     expect(flatValuesAt).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
   });
@@ -303,6 +305,42 @@ describe('leaveOutMovedCells', () => {
     expect(keys(kept)).toEqual(['fr:profile.title']);
   });
 
+  it('compares with the commit the run started from, after our commit was replayed onto the tip', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'promo': 'Soldes' },
+      'config/locales/en.yml#en': { 'promo': 'Sale' }
+    };
+    tipFiles = {
+      'config/locales/fr.yml#fr': { 'promo': 'Grandes soldes' },
+      'config/locales/en.yml#en': { 'promo': 'Big sale' }
+    };
+    git.mockImplementation((args: string[]) => (args[0] === 'rev-parse' ? NEWER_TIP : ''));
+
+    const kept = await guard([frFile([
+      { key: 'promo', status: 'updated', value: 'Grandes soldes', source_value: 'Sale', aligned_source: 'Sale' }
+    ])]);
+
+    expect(kept).toEqual([]);
+  });
+
+  it('imports everything without reading files when the tip is still the commit the run started from', async () => {
+    tipHead = CHECKOUT;
+    git.mockImplementation((args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'our-new-commit' : tipHead) : ''));
+    const files = [frFile([{ key: 'cart.title', status: 'updated', value: 'Panier' }])];
+
+    expect(await guard(files)).toEqual(files);
+    expect(flatValuesAt).not.toHaveBeenCalled();
+  });
+
+  it('imports everything and warns when the commit the run started from is unknown', async () => {
+    importGuard.setDependencies({ env: { ...ACTIONS_ENV }, git, flatValuesAt, fetchActionToken });
+    const files = [frFile([{ key: 'a', status: 'added', value: 'x' }])];
+
+    expect(await guard(files)).toEqual(files);
+    expect(logged()).toContain('Could not check whether the branch moved during this run');
+    expect(flatValuesAt).not.toHaveBeenCalled();
+  });
+
   it('fetches the branch with the app token, through the URL and without a depth', async () => {
     tipHead = CHECKOUT;
 
@@ -338,6 +376,7 @@ describe('leaveOutMovedCells', () => {
   it('imports everything and warns when there is no token to fetch with', async () => {
     fetchActionToken.mockResolvedValue({ token: null });
     importGuard.setDependencies({ env: { ...ACTIONS_ENV, GITHUB_TOKEN: undefined }, git, flatValuesAt, fetchActionToken });
+    importGuard.recordBaseline();
     const files = [frFile([{ key: 'a', status: 'added', value: 'x' }])];
 
     expect(await guard(files)).toEqual(files);

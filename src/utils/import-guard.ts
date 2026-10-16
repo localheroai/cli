@@ -7,7 +7,6 @@ import type { TargetChange, TargetChangeFile } from './target-changes.js';
 import type { Logger } from './source-alignment.js';
 
 const TIP = 'FETCH_HEAD';
-const CHECKOUT = 'HEAD';
 const MASKED_TOKEN = '***TOKEN***';
 
 interface ImportGuardDependencies {
@@ -27,20 +26,34 @@ const defaultDependencies: ImportGuardDependencies = {
 type ValuesAt = (file: FileLocation) => Record<string, unknown> | null;
 
 /**
- * When the pull request branch moved after this run's commit (a Localhero sync,
- * a developer push), the newer commit owns every cell it changed: importing
- * ours would replace a value the branch no longer has. A cell counts as changed
- * when the tip holds it differently from HEAD and from the value we send; the
- * latter is our own commit landing, as a signed commit does without moving HEAD.
+ * When the pull request branch moved after the commit this run started from (a
+ * Localhero sync, a developer push), the newer commit owns every cell it
+ * changed: importing ours would replace a value the branch no longer has. A
+ * cell counts as changed when the tip holds it differently from that commit and
+ * from the value we send; the latter is our own commit landing on the tip.
  */
 export const importGuard = {
   deps: { ...defaultDependencies },
   fetchFailureReported: false,
+  baseline: null as string | null,
 
   setDependencies(customDeps: Partial<ImportGuardDependencies> = {}): typeof importGuard {
     this.deps = { ...defaultDependencies, ...customDeps };
     this.fetchFailureReported = false;
+    this.baseline = null;
     return this;
+  },
+
+  /**
+   * The commit the run starts from, read before anything is written, committed
+   * or replayed: a replay moves HEAD onto the tip and would hide what changed.
+   */
+  recordBaseline(): void {
+    try {
+      this.baseline = this.deps.git(['rev-parse', 'HEAD']);
+    } catch {
+      this.baseline = null;
+    }
   },
 
   async leaveOutMovedCells(files: TargetChangeFile[], sourceLocale: string, logger: Logger): Promise<TargetChangeFile[]> {
@@ -48,10 +61,12 @@ export const importGuard = {
     const branch = env.GITHUB_HEAD_REF;
     if (env.GITHUB_ACTIONS !== 'true' || !branch || files.length === 0) return files;
 
+    const baseline = this.baseline;
     let moved: boolean;
     try {
+      if (!baseline) throw new Error('the commit this run started from is unknown');
       await this.fetchBranchTip(branch);
-      moved = git(['rev-parse', CHECKOUT]) !== git(['rev-parse', TIP]);
+      moved = git(['rev-parse', TIP]) !== baseline;
     } catch (error) {
       if (!this.fetchFailureReported) {
         this.fetchFailureReported = true;
@@ -59,14 +74,14 @@ export const importGuard = {
       }
       return files;
     }
-    if (!moved || !this.checkoutIsInBranchHistory()) return files;
+    if (!moved || !this.isInBranchHistory(baseline)) return files;
 
     const tip = this.valuesReader(TIP);
-    const checkout = this.valuesReader(CHECKOUT);
+    const start = this.valuesReader(baseline);
     let leftOut = 0;
     const kept = files
       .map(file => {
-        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, tip, checkout));
+        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, tip, start));
         leftOut += file.changes.length - changes.length;
         return { ...file, changes };
       })
@@ -102,14 +117,14 @@ export const importGuard = {
   },
 
   /**
-   * A merge-ref checkout or a force-push leaves HEAD outside the branch's
-   * history. Its values then differ from the tip for reasons that have nothing
+   * A merge-ref checkout or a force-push leaves the run's starting commit
+   * outside the branch's history. Its values then differ from the tip for reasons that have nothing
    * to do with a newer commit (the base branch's own changes, a rewrite), so
    * the guard steps aside and the run imports as it always has.
    */
-  checkoutIsInBranchHistory(): boolean {
+  isInBranchHistory(commit: string): boolean {
     try {
-      this.deps.git(['merge-base', '--is-ancestor', CHECKOUT, TIP]);
+      this.deps.git(['merge-base', '--is-ancestor', commit, TIP]);
       return true;
     } catch {
       return false;
@@ -133,6 +148,10 @@ export const importGuard = {
   }
 };
 
+export function recordImportBaseline(): void {
+  importGuard.recordBaseline();
+}
+
 export function leaveOutMovedCells(files: TargetChangeFile[], sourceLocale: string, logger: Logger): Promise<TargetChangeFile[]> {
   return importGuard.leaveOutMovedCells(files, sourceLocale, logger);
 }
@@ -142,11 +161,11 @@ function changedOnTip(
   change: TargetChange,
   sourceLocale: string,
   tip: ValuesAt,
-  checkout: ValuesAt
+  start: ValuesAt
 ): boolean {
   const cellChanged = (cell: FileLocation, sent: string) => {
     const atTip = tip(cell)?.[change.key];
-    return !sameValue(atTip, checkout(cell)?.[change.key]) && !sameValue(atTip, sent);
+    return !sameValue(atTip, start(cell)?.[change.key]) && !sameValue(atTip, sent);
   };
 
   if (cellChanged(file, change.value)) return true;
