@@ -214,6 +214,7 @@ function sourceCell({ candidate, item }: UpdatedKey, sourceLocale: string): Alig
     target_current: candidate.source,
     value: item.source,
     trigger_locale: item.trigger_locale,
+    trigger_path: findTarget(candidate, item.trigger_locale)?.target_path,
     aligned_source: item.trigger_value
   };
 }

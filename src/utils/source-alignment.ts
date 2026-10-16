@@ -13,6 +13,7 @@ import type { ProjectConfig } from '../types/index.js';
 export interface AlignedCell extends AlignmentCandidate {
   value: string;
   aligned_source?: string;
+  trigger_path?: string;
 }
 
 export interface LocaleAlignmentSummary {

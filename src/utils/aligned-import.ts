@@ -4,7 +4,7 @@ import {
   PullRequestImportError,
   type PullRequestImportParams
 } from '../api/pull-request-imports.js';
-import { leaveOutMovedCells, type SentValuesFrom } from './import-guard.js';
+import { leaveOutMovedCells, triggerPathKey, type SentValuesFrom, type TriggerPaths } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { AlignedCell, Logger } from './source-alignment.js';
 
@@ -35,13 +35,14 @@ export async function sendAlignedImport(
 ): Promise<void> {
   const sleep = deps.sleep ?? defaultSleep;
   const { sourceLocale, valuesFrom, ...importRequest } = request;
+  const triggerPaths = triggerPathsOf(cells);
   let importedCount = 0;
 
   for (const chunk of chunkFiles(buildImportFiles(cells))) {
     let files = chunk;
     // Checked again before every attempt: a sync can land between requests or during a retry's wait.
     const sendUnmoved = async () => {
-      files = await leaveOutMovedCells(files, sourceLocale, deps.console, valuesFrom);
+      files = await leaveOutMovedCells(files, sourceLocale, deps.console, valuesFrom, triggerPaths);
       return files.length === 0 ? null : createPullRequestImport({ ...importRequest, files });
     };
     try {
@@ -56,6 +57,16 @@ export async function sendAlignedImport(
   if (importedCount > 0) {
     deps.console.log(`» Sent ${importedCount} aligned ${importedCount === 1 ? 'value' : 'values'} for review`);
   }
+}
+
+function triggerPathsOf(cells: AlignedCell[]): TriggerPaths {
+  const paths: TriggerPaths = new Map();
+  for (const cell of cells) {
+    if (cell.trigger_locale && cell.trigger_path) {
+      paths.set(triggerPathKey(cell.source_path, cell.trigger_locale), cell.trigger_path);
+    }
+  }
+  return paths;
 }
 
 function buildImportFiles(cells: AlignedCell[]): TargetChangeFile[] {

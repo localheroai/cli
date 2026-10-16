@@ -146,6 +146,7 @@ describe('runTargetEditAlignment', () => {
       target_current: 'Your profile is published',
       value: 'Your profile is published now',
       trigger_locale: 'sv',
+      trigger_path: 'config/locales/sv.yml',
       aligned_source: 'Din profil är publicerad nu'
     }]);
   });
