@@ -4,10 +4,11 @@ import {
   PullRequestImportError,
   type PullRequestImportParams
 } from '../api/pull-request-imports.js';
+import { leaveOutMovedCells, type SentValuesFrom } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { AlignedCell, Logger } from './source-alignment.js';
 
-type ImportRequest = Omit<PullRequestImportParams, 'files'>;
+type ImportRequest = Omit<PullRequestImportParams, 'files'> & { sourceLocale: string; valuesFrom: SentValuesFrom };
 
 interface ImportDependencies {
   console: Logger;
@@ -33,14 +34,21 @@ export async function sendAlignedImport(
   deps: ImportDependencies
 ): Promise<void> {
   const sleep = deps.sleep ?? defaultSleep;
+  const { sourceLocale, valuesFrom, ...importRequest } = request;
   let importedCount = 0;
 
-  for (const files of chunkFiles(buildImportFiles(cells))) {
-    const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
+  for (const chunk of chunkFiles(buildImportFiles(cells))) {
+    let files = chunk;
+    // Checked again before every attempt: a sync can land between requests or during a retry's wait.
+    const sendUnmoved = async () => {
+      files = await leaveOutMovedCells(files, sourceLocale, deps.console, valuesFrom);
+      return files.length === 0 ? null : createPullRequestImport({ ...importRequest, files });
+    };
     try {
-      const response = await withRetries(() => createPullRequestImport({ ...request, files }), sleep);
-      importedCount += response.imported_count;
+      const response = await withRetries(sendUnmoved, sleep);
+      importedCount += response?.imported_count ?? 0;
     } catch (error) {
+      const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
       deps.console.log(chalk.yellow(`⚠ Could not send ${changeCount} aligned values to Localhero: ${(error as Error).message}. They are committed to the branch and will be picked up on the next push.`));
     }
   }

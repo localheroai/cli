@@ -3,6 +3,7 @@ import { describe, it, expect, jest, beforeAll, beforeEach } from '@jest/globals
 const mockCreatePullRequestImport = jest.fn<any>();
 
 let sendAlignedImport: any;
+let importGuard: any;
 let PullRequestImportError: any;
 
 beforeAll(async () => {
@@ -13,9 +14,10 @@ beforeAll(async () => {
     createPullRequestImport: mockCreatePullRequestImport
   }));
   sendAlignedImport = (await import('../../src/utils/aligned-import.js')).sendAlignedImport;
+  importGuard = (await import('../../src/utils/import-guard.js')).importGuard;
 });
 
-const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1' };
+const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1', sourceLocale: 'en', valuesFrom: 'our-commit' };
 
 function cell(key: string, locale = 'fr', targetPath = `config/locales/${locale}.yml`) {
   return {
@@ -41,6 +43,7 @@ describe('sendAlignedImport', () => {
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [] });
     log = jest.fn();
     sleep = jest.fn<any>().mockResolvedValue(undefined);
+    importGuard.setDependencies({ env: {} });
   });
 
   function logged(): string {
@@ -76,6 +79,139 @@ describe('sendAlignedImport', () => {
           ]
         }
       ]
+    });
+  });
+
+  describe('when a sync moved the branch after our commit', () => {
+    beforeEach(() => {
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'sync-commit') : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: (file: { locale: string }, ref: string) => {
+          if (file.locale === 'en') return { 'profile.title': 'Your profile', 'profile.hint': 'Your profile' };
+          return ref === 'checkout'
+            ? { 'profile.title': 'Profil !', 'profile.hint': 'Profil !' }
+            : { 'profile.title': 'Votre profil (relu)', 'profile.hint': 'Votre profil' };
+        }
+      });
+      importGuard.recordBaseline();
+    });
+
+    it('leaves out the aligned value the sync changed', async () => {
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      const sent = mockCreatePullRequestImport.mock.calls[0][0].files;
+      expect(sent[0].changes.map((change: any) => change.key)).toEqual(['profile.hint']);
+      expect(logged()).toContain('Left out 1 value the branch changed after this run started');
+    });
+
+    it('sends nothing when the sync changed every aligned value', async () => {
+      const removedOnTip = { fr: { checkout: { 'profile.title': 'Profil !' }, FETCH_HEAD: {} }, en: { checkout: {}, FETCH_HEAD: {} } };
+      importGuard.deps.flatValuesAt = (file: { locale: 'fr' | 'en' }, ref: 'checkout' | 'FETCH_HEAD') => removedOnTip[file.locale][ref];
+
+      await sendAlignedImport([cell('profile.title')], request, { console: { log }, sleep });
+
+      expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('when a sync lands while the import is under way', () => {
+    let tip: { sha: string; values: Map<string, string> };
+
+    function changedKeys(callIndex: number): string[] {
+      return mockCreatePullRequestImport.mock.calls[callIndex][0].files
+        .flatMap((file: any) => file.changes.map((change: any) => change.key));
+    }
+
+    function syncChanges(...keys: string[]) {
+      tip.sha = 'sync-commit';
+      keys.forEach(key => tip.values.set(key, 'Profil (relu)'));
+    }
+
+    function restoreStartValue(key: string) {
+      tip.sha = 'restore-commit';
+      tip.values.set(key, 'Profil !');
+    }
+
+    beforeEach(() => {
+      tip = { sha: 'our-commit', values: new Map() };
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : tip.sha) : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: (file: { locale: string }, ref: string) => new Proxy({}, {
+          get: (_target, key: string) => {
+            if (file.locale === 'en') return 'Your profile';
+            if (ref === 'checkout') return 'Profil !';
+            return tip.values.get(key) ?? 'Votre profil';
+          }
+        })
+      });
+      importGuard.recordBaseline();
+    });
+
+    it('checks the branch again before retrying, and leaves out what the sync changed', async () => {
+      mockCreatePullRequestImport
+        .mockRejectedValueOnce(new PullRequestImportError('Translation ingestion failed with status 502', 502))
+        .mockResolvedValueOnce({ imported_count: 1, skipped: [] });
+      sleep.mockImplementation(async () => syncChanges('profile.title'));
+
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toEqual(['profile.title', 'profile.hint']);
+      expect(changedKeys(1)).toEqual(['profile.hint']);
+      expect(logged()).toContain('Left out 1 value the branch changed after this run started');
+    });
+
+    it('sends no retry when the sync changed every value of the request', async () => {
+      mockCreatePullRequestImport.mockRejectedValueOnce(new PullRequestImportError('Translation ingestion failed with status 502', 502));
+      sleep.mockImplementation(async () => syncChanges('profile.title'));
+
+      await sendAlignedImport([cell('profile.title')], request, { console: { log }, sleep });
+
+      expect(mockCreatePullRequestImport).toHaveBeenCalledTimes(1);
+      expect(logged()).not.toContain('Could not');
+    });
+
+    it('leaves out a value a newer commit set back to the start value before the import', async () => {
+      restoreStartValue('profile.title');
+
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toEqual(['profile.hint']);
+    });
+
+    it('leaves out a value a newer commit set back to the start value before a retry', async () => {
+      mockCreatePullRequestImport
+        .mockRejectedValueOnce(new PullRequestImportError('Translation ingestion failed with status 502', 502))
+        .mockResolvedValueOnce({ imported_count: 1, skipped: [] });
+      sleep.mockImplementation(async () => restoreStartValue('profile.title'));
+
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      expect(changedKeys(1)).toEqual(['profile.hint']);
+    });
+
+    it('keeps values not committed yet that the tip holds as at the start (--skip-commit)', async () => {
+      restoreStartValue('profile.title');
+
+      await sendAlignedImport([cell('profile.title')], { ...request, valuesFrom: 'working-tree' }, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toEqual(['profile.title']);
+    });
+
+    it('checks the branch again before each request, and leaves out what a sync changed in between', async () => {
+      const cells = Array.from({ length: 52 }, (_, i) => cell(`key_${i}`, 'fr', `config/locales/file_${i}.fr.yml`));
+      mockCreatePullRequestImport.mockImplementationOnce(async () => {
+        syncChanges('key_51');
+        return { imported_count: 50, skipped: [] };
+      });
+
+      await sendAlignedImport(cells, request, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toHaveLength(50);
+      expect(changedKeys(1)).toEqual(['key_50']);
     });
   });
 
