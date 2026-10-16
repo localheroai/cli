@@ -503,7 +503,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       try {
         const result = await gitUtils.autoCommitChanges(translationPaths, {
           ...summary,
-          ...summarizeAlignedCells(alignedCells),
+          ...summarizeAlignedCells(alignedCells, sourceLocale),
           viewUrl: summary.viewUrl || alignment?.shortUrl || undefined
         });
         inBranch = result === 'new';

@@ -852,7 +852,11 @@ describe('translate --changed-only following an edited translation', () => {
       target_base: norwegian,
       target_current: norwegian
     })]);
-    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalledWith('config/locales/', expect.objectContaining({ keysAligned: 1 }));
+    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalledWith('config/locales/', expect.objectContaining({
+      keysAligned: 1,
+      alignedLanguages: ['nb'],
+      sourceTextsUpdated: 1
+    }));
     expect(changeIn(alignedImport(), 'en')).toMatchObject({ value: englishNow, aligned_source: swedishNow, trigger_locale: 'sv' });
     expect(changeIn(alignedImport(), 'nb')).toMatchObject({ aligned_source: englishNow, trigger_locale: 'sv' });
     expect(loggedLines()).toContain('profile.published: en updated to match the sv edit');
@@ -892,8 +896,9 @@ describe('translate --changed-only following an edited translation', () => {
 
     expect(mockCreateSourceAlignment).not.toHaveBeenCalled();
     expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalledWith('config/locales/', expect.objectContaining({
-      keysAligned: 1,
-      alignedLanguages: ['en']
+      keysAligned: 0,
+      alignedLanguages: [],
+      sourceTextsUpdated: 1
     }));
     expect(changeIn(alignedImport(), 'en')).toMatchObject({ value: englishNow, aligned_source: swedishNow });
   });

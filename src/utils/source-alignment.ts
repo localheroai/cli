@@ -110,10 +110,15 @@ export async function runSourceAlignment(
   return result;
 }
 
-export function summarizeAlignedCells(cells: AlignedCell[]): { keysAligned: number; alignedLanguages: string[] } {
+export function summarizeAlignedCells(
+  cells: AlignedCell[],
+  sourceLocale: string
+): { keysAligned: number; alignedLanguages: string[]; sourceTextsUpdated: number } {
+  const targetCells = cells.filter(cell => cell.locale !== sourceLocale);
   return {
-    keysAligned: new Set(cells.map(cell => `${cell.source_path}\0${cell.key}`)).size,
-    alignedLanguages: [...new Set(cells.map(cell => cell.locale))]
+    keysAligned: new Set(targetCells.map(cell => `${cell.source_path}\0${cell.key}`)).size,
+    alignedLanguages: [...new Set(targetCells.map(cell => cell.locale))],
+    sourceTextsUpdated: cells.length - targetCells.length
   };
 }
 
