@@ -9,7 +9,7 @@ export interface AlignmentCandidate extends SourceAlignmentItem {
   locale: string;
 }
 
-const ALIGNABLE_FORMATS = new Set(['yml', 'yaml', 'json']);
+export const ALIGNABLE_FORMATS = new Set(['yml', 'yaml', 'json']);
 // Added keys are re-checked on every push, so past this many cells they are skipped to keep runs fast.
 const MAX_ADDED_CELLS = 500;
 
@@ -92,7 +92,7 @@ function withinAddedLimit(candidates: AlignmentCandidate[]): AlignmentCandidate[
   return candidates.filter(candidate => candidate.previous_source !== null);
 }
 
-function uniqueByPath(files: TranslationFile[]): TranslationFile[] {
+export function uniqueByPath(files: TranslationFile[]): TranslationFile[] {
   return [...new Map(files.map(file => [file.path, file])).values()];
 }
 
@@ -125,11 +125,11 @@ function isRewording(change: TargetChangeFile['changes'][number]): boolean {
   return change.status === 'updated' && isFilledString(change.old_value) && isFilledString(change.value);
 }
 
-function isFilledString(value: unknown): value is string {
+export function isFilledString(value: unknown): value is string {
   return typeof value === 'string' && value !== '';
 }
 
-function readDiff(file: TranslationFile, resolvedRef: string, verbose: boolean): FileDiff | null {
+export function readDiff(file: TranslationFile, resolvedRef: string, verbose: boolean): FileDiff | null {
   try {
     return diffFileKeys(file, resolvedRef, verbose);
   } catch (error) {
