@@ -66,7 +66,7 @@ describe('leaveOutMovedCells', () => {
     ])]);
 
     expect(keys(kept)).toEqual(['fr:cart.empty']);
-    expect(logged()).toContain('Left out 1 value the branch changed after this run started; it is handled by the newer commit.');
+    expect(logged()).toContain('» Left out 1 value the branch changed after this run started.');
     expect(new Set(flatValuesAt.mock.calls.map(call => call[1]))).toEqual(new Set(['FETCH_HEAD', 'HEAD']));
   });
 
@@ -91,7 +91,7 @@ describe('leaveOutMovedCells', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('after a force-push, leaves out only the values the new history holds differently', async () => {
+  it('counts every value it left out', async () => {
     checkoutFiles = { 'config/locales/fr.yml#fr': { 'a': 'same', 'b': 'ours', 'c': 'gone' } };
     tipFiles = { 'config/locales/fr.yml#fr': { 'a': 'same', 'b': 'rewritten' } };
 
@@ -102,7 +102,21 @@ describe('leaveOutMovedCells', () => {
     ])]);
 
     expect(keys(kept)).toEqual(['fr:a']);
-    expect(logged()).toContain('Left out 2 values the branch changed after this run started; they are handled by the newer commit.');
+    expect(logged()).toContain('» Left out 2 values the branch changed after this run started.');
+  });
+
+  it('sends everything, silently and without reading files, when the checkout is not in the branch history', async () => {
+    git.mockImplementation((args: string[]) => {
+      if (args[0] === 'merge-base') throw new Error('Command failed: git merge-base --is-ancestor HEAD FETCH_HEAD');
+      if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? CHECKOUT : NEWER_TIP;
+      return '';
+    });
+    const files = [frFile([{ key: 'cart.title', status: 'updated', value: 'Panier' }])];
+
+    expect(await guard(files)).toEqual(files);
+    expect(git).toHaveBeenCalledWith(['merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD']);
+    expect(flatValuesAt).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
   });
 
   it('leaves out an aligned value a sync changed after our commit', async () => {

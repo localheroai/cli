@@ -133,6 +133,23 @@ describe('the import guard against a real remote', () => {
     expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ key: 'greeting', value: 'Salut' });
   });
 
+  it('on a merge-ref checkout, sends the PR edit even though the base branch reworded its source', async () => {
+    commitFile(sibling, FR_PATH, 'fr:\n  greeting: Salut\n', 'PR edit');
+    git(sibling, `push -q origin HEAD:${BRANCH}`);
+    git(ours, 'checkout -q -b main');
+    commitFile(ours, EN_PATH, 'en:\n  greeting: Hello there\n', 'base branch rewords');
+    git(ours, 'fetch -q origin');
+    git(ours, `checkout -q --detach origin/${BRANCH}`);
+    git(ours, 'merge -q --no-ff -m merge main');
+    const edits = [{
+      path: FR_PATH, source_path: EN_PATH, locale: 'fr', format: 'yml',
+      changes: [{ key: 'greeting', status: 'updated', value: 'Salut', source_value: 'Hello there' }]
+    }];
+
+    expect(await leaveOutMovedCells(edits, 'en', { log })).toEqual(edits);
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('leaves out a value a sync committed after the checkout, reading the real tip', async () => {
     commitFile(sibling, FR_PATH, 'fr:\n  greeting: Bonjour à tous\n', 'sync');
     git(sibling, `push -q origin HEAD:${BRANCH}`);

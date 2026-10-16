@@ -59,7 +59,7 @@ export const importGuard = {
       }
       return files;
     }
-    if (!moved) return files;
+    if (!moved || !this.checkoutIsInBranchHistory()) return files;
 
     const tip = this.valuesReader(TIP);
     const checkout = this.valuesReader(CHECKOUT);
@@ -74,8 +74,7 @@ export const importGuard = {
 
     if (leftOut > 0) {
       const what = leftOut === 1 ? '1 value' : `${leftOut} values`;
-      const owner = leftOut === 1 ? 'it is' : 'they are';
-      logger.log(`» Left out ${what} the branch changed after this run started; ${owner} handled by the newer commit.`);
+      logger.log(`» Left out ${what} the branch changed after this run started.`);
     }
     return kept;
   },
@@ -99,6 +98,21 @@ export const importGuard = {
       git(['fetch', '--no-tags', `https://x-access-token:${token}@github.com/${repository}.git`, branch]);
     } catch (error) {
       throw new Error((error as Error).message.split(token).join(MASKED_TOKEN));
+    }
+  },
+
+  /**
+   * A merge-ref checkout or a force-push leaves HEAD outside the branch's
+   * history. Its values then differ from the tip for reasons that have nothing
+   * to do with a newer commit (the base branch's own changes, a rewrite), so
+   * the guard steps aside and the run imports as it always has.
+   */
+  checkoutIsInBranchHistory(): boolean {
+    try {
+      this.deps.git(['merge-base', '--is-ancestor', CHECKOUT, TIP]);
+      return true;
+    } catch {
+      return false;
     }
   },
 
