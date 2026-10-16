@@ -143,6 +143,20 @@ describe('collectAlignmentCandidates', () => {
     ]);
   });
 
+  test('sends each key once when overlapping paths list a multi-language file twice', () => {
+    const viewPath = 'config/locales/multi/welcome.yml';
+    setupGit(
+      { [viewPath]: 'en:\n  title: "Welcome"\nfr:\n  title: "Bienvenue"\n' },
+      { [viewPath]: 'en:\n  title: "Welcome"\n  tip: "Invite your team"\nfr:\n  title: "Bienvenue"\n  tip: "Invitez votre équipe"\n' }
+    );
+    const file = { path: viewPath, format: 'yml', locale: 'en', multiLanguage: true };
+    const target = { path: viewPath, format: 'yml', locale: 'fr', multiLanguage: true };
+
+    const result = collectAlignmentCandidates([], [file, { ...file }], { fr: [target, { ...target }] }, { ...config, outputLocales: ['fr'] }, false);
+
+    expect(result.map((c: any) => [c.locale, c.key])).toEqual([['fr', 'tip']]);
+  });
+
   test('passes a null target_base when the key is new in the target', () => {
     setupGit(
       { 'fr.yml': 'fr:\n  other: "Autre"\n', 'de.yml': null },
