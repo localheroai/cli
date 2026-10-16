@@ -218,7 +218,7 @@ function sourceCell({ candidate, item }: UpdatedKey, sourceLocale: string): Alig
 function alignmentCandidates({ candidate, item }: UpdatedKey): AlignmentCandidate[] {
   return item.align_locales
     .map(locale => findTarget(candidate, locale))
-    .filter((target): target is TargetEditCandidateTarget => target !== undefined)
+    .filter((target): target is TargetEditCandidateTarget => target !== undefined && target.writable)
     .map(target => ({
       locale: target.locale,
       source_path: candidate.source_path,

@@ -101,6 +101,7 @@ describe('collectTargetEditCandidates', () => {
           locale: 'sv',
           target_path: 'config/locales/sv.yml',
           format: 'yml',
+          writable: true,
           base: 'Din profil är publicerad',
           current: 'Din profil är publicerad nu'
         },
@@ -108,6 +109,7 @@ describe('collectTargetEditCandidates', () => {
           locale: 'nb',
           target_path: 'config/locales/nb.yml',
           format: 'yml',
+          writable: true,
           base: 'Profilen din er publisert',
           current: 'Profilen din er publisert'
         }
@@ -209,6 +211,27 @@ describe('collectTargetEditCandidates', () => {
     expect(result).toEqual([]);
   });
 
+  test('keeps a target without a locale root for detecting the edit, marked as not writable', () => {
+    setupGit(
+      { ...baseFiles, 'nb.yml': 'profile:\n  published: "Profilen din er publisert"\n' },
+      {
+        ...baseFiles,
+        'sv.yml': 'sv:\n  profile:\n    published: "Din profil är publicerad nu"\n',
+        'nb.yml': 'profile:\n  published: "Profilen din er publisert"\n'
+      }
+    );
+
+    const result = collectTargetEditCandidates(
+      [edited('sv', 'profile.published', 'Din profil är publicerad', 'Din profil är publicerad nu')],
+      sourceFiles,
+      targetFilesByLocale,
+      config,
+      false
+    );
+
+    expect(result[0].targets.map((target: any) => [target.locale, target.writable])).toEqual([['sv', true], ['nb', false]]);
+  });
+
   test('leaves out keys added in this branch', () => {
     setupGit(
       { ...baseFiles, 'en.yml': 'en:\n  other: "x"\n' },
@@ -303,8 +326,8 @@ describe('collectTargetEditCandidates', () => {
       source_base: 'Your profile is published',
       source: 'Your profile is published',
       targets: [
-        { locale: 'sv', target_path: viewPath, format: 'yml', base: 'Din profil är publicerad', current: 'Din profil är publicerad nu' },
-        { locale: 'nb', target_path: viewPath, format: 'yml', base: 'Profilen din er publisert', current: 'Profilen din er publisert' }
+        { locale: 'sv', target_path: viewPath, format: 'yml', writable: true, base: 'Din profil är publicerad', current: 'Din profil är publicerad nu' },
+        { locale: 'nb', target_path: viewPath, format: 'yml', writable: true, base: 'Profilen din er publisert', current: 'Profilen din er publisert' }
       ]
     }]);
   });

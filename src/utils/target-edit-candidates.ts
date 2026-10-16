@@ -10,6 +10,7 @@ import { ALIGNABLE_FORMATS, isFilledString, isRewording, readDiff, uniqueByPath 
 
 export interface TargetEditCandidateTarget extends TargetEditTarget {
   format: string;
+  writable: boolean;
 }
 
 export interface TargetEditCandidate extends Omit<TargetEditItem, 'targets'> {
@@ -66,7 +67,8 @@ export function collectTargetEditCandidates(
 const YAML_FORMATS = new Set(['yml', 'yaml']);
 
 // The YAML writer always puts the key under a locale root; in a file without
-// one it would add a second tree that hides the existing keys.
+// one it would add a second tree that hides the existing keys. Such a target
+// still counts as an edited language; it is just never written.
 function writableUnderLocale(file: TranslationFile): boolean {
   if (!YAML_FORMATS.has(file.format.toLowerCase())) return true;
 
@@ -82,6 +84,7 @@ interface TargetDiff {
   locale: string;
   file: TranslationFile;
   diff: FileDiff;
+  writable: boolean;
 }
 
 function readTargetDiffs(
@@ -97,18 +100,18 @@ function readTargetDiffs(
     if (!file) continue;
 
     const diff = readDiff(file, resolvedRef, verbose);
-    if (diff) diffs.push({ locale, file, diff });
+    if (diff) diffs.push({ locale, file, diff, writable: writableUnderLocale(file) });
   }
   return diffs;
 }
 
 function targetsWithKey(targetDiffs: TargetDiff[], key: string): TargetEditCandidateTarget[] {
-  return targetDiffs.flatMap(({ locale, file, diff }) => {
+  return targetDiffs.flatMap(({ locale, file, diff, writable }) => {
     const current = diff.newFlat[key];
     if (!isFilledString(current)) return [];
 
     const base = diff.oldFlat[key];
-    return [{ locale, target_path: file.path, format: file.format, base: isFilledString(base) ? base : null, current }];
+    return [{ locale, target_path: file.path, format: file.format, writable, base: isFilledString(base) ? base : null, current }];
   });
 }
 

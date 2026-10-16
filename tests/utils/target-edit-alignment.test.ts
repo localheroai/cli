@@ -33,8 +33,8 @@ const config = { projectId: 'proj', sourceLocale: 'en', outputLocales: ['sv', 'n
 const request = { projectId: 'proj', branch: 'feature/now', jobGroupId: 'grp-1', headSha: 'abc123' };
 const sourcePath = 'config/locales/en.yml';
 
-function target(locale: string, base: string | null, current: string) {
-  return { locale, target_path: `config/locales/${locale}.yml`, format: 'yml', base, current };
+function target(locale: string, base: string | null, current: string, writable = true) {
+  return { locale, target_path: `config/locales/${locale}.yml`, format: 'yml', writable, base, current };
 }
 
 function candidate(key = 'profile.published', overrides: Record<string, unknown> = {}) {
@@ -175,6 +175,19 @@ describe('runTargetEditAlignment', () => {
         target_current: 'Profiilisi on julkaistu'
       })
     ]);
+  });
+
+  it('does not align a locale whose file has no locale root, which the writer would break', async () => {
+    const c = candidate('profile.published', {
+      targets: [target('sv', 'Din profil är publicerad', 'Din profil är publicerad nu'), target('nb', 'Profilen', 'Profilen', false)]
+    });
+    mockCreateTargetEditAlignment.mockImplementation(respondWith(item => updated(item, { align_locales: ['nb'] })));
+
+    const result = await runTargetEditAlignment([c], request, deps);
+
+    expect(mockCreateTargetEditAlignment.mock.calls[0][0].items[0].targets.map((t: any) => t.locale)).toEqual(['sv', 'nb']);
+    expect(result.alignmentCandidates).toEqual([]);
+    expect(result.sourceCells).toHaveLength(1);
   });
 
   it('matches the locales the server names regardless of separator and case', async () => {
@@ -327,6 +340,31 @@ describe('runTargetEditAlignment writing a real file', () => {
 
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('leaves a target file without a locale root untouched and readable', async () => {
+    const { updateTranslationFile } = await import('../../src/utils/translation-updater/index.js');
+    const enPath = path.join(dir, 'en.yml');
+    const nbPath = path.join(dir, 'nb.yml');
+    const nbContent = 'profile:\n  published: "Profilen din er publisert"\n  title: "Profil"\n';
+    writeFileSync(enPath, 'en:\n  profile:\n    published: "Your profile is published"\n');
+    writeFileSync(nbPath, nbContent);
+    mockCreateTargetEditAlignment.mockImplementation(respondWith(item => updated(item, { align_locales: ['nb'] })));
+
+    const result = await runTargetEditAlignment(
+      [candidate('profile.published', {
+        source_path: enPath,
+        targets: [
+          target('sv', 'Din profil är publicerad', 'Din profil är publicerad nu'),
+          { ...target('nb', 'Profilen din er publisert', 'Profilen din er publisert', false), target_path: nbPath }
+        ]
+      })],
+      request,
+      { console: { log: jest.fn() }, updateTranslationFile, config }
+    );
+
+    expect(result.alignmentCandidates).toEqual([]);
+    expect(readFileSync(nbPath, 'utf-8')).toBe(nbContent);
   });
 
   it('changes only the followed key in a locale-rooted YAML source file', async () => {

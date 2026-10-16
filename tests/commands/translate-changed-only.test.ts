@@ -719,8 +719,8 @@ describe('translate --changed-only following an edited translation', () => {
       source_base: english,
       source: english,
       targets: [
-        { locale: 'sv', target_path: path.join(dir, 'sv.yml'), format: 'yml', base: 'Din profil är publicerad', current: swedishNow },
-        { locale: 'nb', target_path: path.join(dir, 'nb.yml'), format: 'yml', base: norwegian, current: norwegian }
+        { locale: 'sv', target_path: path.join(dir, 'sv.yml'), format: 'yml', writable: true, base: 'Din profil är publicerad', current: swedishNow },
+        { locale: 'nb', target_path: path.join(dir, 'nb.yml'), format: 'yml', writable: true, base: norwegian, current: norwegian }
       ]
     };
   }
