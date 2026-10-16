@@ -116,6 +116,23 @@ describe('the import guard against a real remote', () => {
     expect(existsSync(path.join(ours, '.git', 'shallow'))).toBe(false);
   });
 
+  it('on a merge-commit checkout of an unchanged branch, sends values the pipeline has not committed yet', async () => {
+    git(ours, 'checkout -q -b main');
+    commitFile(ours, 'README.md', 'docs\n', 'base branch work');
+    git(ours, `checkout -q --detach origin/${BRANCH}`);
+    git(ours, 'merge -q --no-ff -m merge main');
+    writeFileSync(path.join(ours, FR_PATH), 'fr:\n  greeting: Salut\n');
+
+    expect(git(ours, 'rev-parse HEAD')).not.toBe(git(remote, `rev-parse ${BRANCH}`));
+    await sendAlignedImport([{
+      locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
+      previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en' }, { console: { log } });
+
+    expect(mockCreatePullRequestImport).toHaveBeenCalledTimes(1);
+    expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ key: 'greeting', value: 'Salut' });
+  });
+
   it('leaves out a value a sync committed after the checkout, reading the real tip', async () => {
     commitFile(sibling, FR_PATH, 'fr:\n  greeting: Bonjour à tous\n', 'sync');
     git(sibling, `push -q origin HEAD:${BRANCH}`);

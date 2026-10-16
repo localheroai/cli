@@ -7,6 +7,7 @@ import type { TargetChange, TargetChangeFile } from './target-changes.js';
 import type { Logger } from './source-alignment.js';
 
 const TIP = 'FETCH_HEAD';
+const CHECKOUT = 'HEAD';
 const MASKED_TOKEN = '***TOKEN***';
 
 interface ImportGuardDependencies {
@@ -23,13 +24,14 @@ const defaultDependencies: ImportGuardDependencies = {
   flatValuesAt
 };
 
-type TipValues = (file: FileLocation) => Record<string, unknown> | null;
+type ValuesAt = (file: FileLocation) => Record<string, unknown> | null;
 
 /**
- * A run imports the values it checked out. When the pull request branch moved
- * since (a Localhero sync, a developer push), the newer commit owns every cell
- * it holds differently: importing ours would replace a value the branch no
- * longer has.
+ * When the pull request branch moved after this run's commit (a Localhero sync,
+ * a developer push), the newer commit owns every cell it changed: importing
+ * ours would replace a value the branch no longer has. A cell counts as changed
+ * when the tip holds it differently from HEAD and from the value we send; the
+ * latter is our own commit landing, as a signed commit does without moving HEAD.
  */
 export const importGuard = {
   deps: { ...defaultDependencies },
@@ -49,7 +51,7 @@ export const importGuard = {
     let moved: boolean;
     try {
       await this.fetchBranchTip(branch);
-      moved = git(['rev-parse', 'HEAD']) !== git(['rev-parse', TIP]);
+      moved = git(['rev-parse', CHECKOUT]) !== git(['rev-parse', TIP]);
     } catch (error) {
       if (!this.fetchFailureReported) {
         this.fetchFailureReported = true;
@@ -59,11 +61,12 @@ export const importGuard = {
     }
     if (!moved) return files;
 
-    const tipValues = this.tipValuesReader();
+    const tip = this.valuesReader(TIP);
+    const checkout = this.valuesReader(CHECKOUT);
     let leftOut = 0;
     const kept = files
       .map(file => {
-        const changes = file.changes.filter(change => sameAtTip(file, change, sourceLocale, tipValues));
+        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, tip, checkout));
         leftOut += file.changes.length - changes.length;
         return { ...file, changes };
       })
@@ -99,15 +102,15 @@ export const importGuard = {
     }
   },
 
-  tipValuesReader(): TipValues {
+  valuesReader(ref: string): ValuesAt {
     const cache = new Map<string, Record<string, unknown> | null>();
     return (file) => {
       const id = `${file.locale}\0${file.path}`;
       if (!cache.has(id)) {
         try {
-          cache.set(id, this.deps.flatValuesAt(file, TIP));
+          cache.set(id, this.deps.flatValuesAt(file, ref));
         } catch {
-          // Unreadable at the tip: the newer commit owns the file's cells as much as if it held other values.
+          // Unreadable at the tip: the newer commit owns the file's cells as much as if it had removed them.
           cache.set(id, null);
         }
       }
@@ -120,20 +123,33 @@ export function leaveOutMovedCells(files: TargetChangeFile[], sourceLocale: stri
   return importGuard.leaveOutMovedCells(files, sourceLocale, logger);
 }
 
-function sameAtTip(file: TargetChangeFile, change: TargetChange, sourceLocale: string, tipValues: TipValues): boolean {
-  if (!sameValue(tipValues(file)?.[change.key], change.value)) return false;
-  if (change.source_value === undefined && change.aligned_source === undefined) return true;
+function changedOnTip(
+  file: TargetChangeFile,
+  change: TargetChange,
+  sourceLocale: string,
+  tip: ValuesAt,
+  checkout: ValuesAt
+): boolean {
+  const cellChanged = (cell: FileLocation, sent: string) => {
+    const atTip = tip(cell)?.[change.key];
+    return !sameValue(atTip, checkout(cell)?.[change.key]) && !sameValue(atTip, sent);
+  };
+
+  if (cellChanged(file, change.value)) return true;
 
   const sourceFile = { path: file.source_path, format: path.extname(file.source_path).slice(1), locale: sourceLocale };
-  const tipSource = tipValues(sourceFile)?.[change.key];
-  return [change.source_value, change.aligned_source].every(source => source === undefined || sameValue(tipSource, source));
+  return [change.source_value, change.aligned_source].some(source => source !== undefined && cellChanged(sourceFile, source));
 }
 
-// The server compares values in the form it stores them.
-function sameValue(tipValue: unknown, value: string): boolean {
-  if (tipValue === undefined || tipValue === null) return false;
-  const stored = typeof tipValue === 'object' ? JSON.stringify(tipValue) : String(tipValue);
-  return normalizeLineEndings(stored) === normalizeLineEndings(value);
+// The server compares values in the form it stores them; a missing cell matches only another missing one.
+function sameValue(a: unknown, b: unknown): boolean {
+  return storageForm(a) === storageForm(b);
+}
+
+function storageForm(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const stored = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  return normalizeLineEndings(stored);
 }
 
 function normalizeLineEndings(value: string): string {

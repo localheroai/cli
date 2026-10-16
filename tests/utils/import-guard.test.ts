@@ -11,7 +11,7 @@ const ACTIONS_ENV = {
   GITHUB_TOKEN: 'workflow-token'
 };
 
-type TipFiles = Record<string, Record<string, unknown> | null>;
+type FilesAtRef = Record<string, Record<string, unknown> | null>;
 
 function frFile(changes: TargetChangeFile['changes']): TargetChangeFile {
   return { path: 'config/locales/fr.yml', source_path: 'config/locales/en.yml', locale: 'fr', format: 'yml', changes };
@@ -27,18 +27,20 @@ describe('leaveOutMovedCells', () => {
   let flatValuesAt: jest.Mock<any>;
   let fetchActionToken: jest.Mock<any>;
   let tipHead: string;
-  let tipFiles: TipFiles;
+  let tipFiles: FilesAtRef;
+  let checkoutFiles: FilesAtRef;
 
   beforeEach(() => {
     log = jest.fn();
     tipHead = NEWER_TIP;
     tipFiles = {};
+    checkoutFiles = {};
     git = jest.fn((args: string[]) => {
       if (args[0] === 'rev-parse') return args[1] === 'HEAD' ? CHECKOUT : tipHead;
       return '';
     });
-    flatValuesAt = jest.fn((file: { path: string; locale: string }) => {
-      const values = tipFiles[`${file.path}#${file.locale}`];
+    flatValuesAt = jest.fn((file: { path: string; locale: string }, ref: string) => {
+      const values = (ref === 'HEAD' ? checkoutFiles : tipFiles)[`${file.path}#${file.locale}`];
       if (values === undefined) throw new Error(`unexpected read of ${file.path}#${file.locale}`);
       return values;
     });
@@ -55,9 +57,8 @@ describe('leaveOutMovedCells', () => {
   }
 
   it('leaves out a value a sync changed after the checkout and imports the rest', async () => {
-    tipFiles = {
-      'config/locales/fr.yml#fr': { 'cart.title': 'Panier (relu)', 'cart.empty': 'Panier vide' }
-    };
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier', 'cart.empty': 'Panier vide' } };
+    tipFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier (relu)', 'cart.empty': 'Panier vide' } };
 
     const kept = await guard([frFile([
       { key: 'cart.title', status: 'updated', value: 'Panier', old_value: 'Le panier' },
@@ -66,10 +67,11 @@ describe('leaveOutMovedCells', () => {
 
     expect(keys(kept)).toEqual(['fr:cart.empty']);
     expect(logged()).toContain('Left out 1 value the branch changed after this run started; it is handled by the newer commit.');
-    expect(flatValuesAt.mock.calls.map(call => call[1])).toEqual(['FETCH_HEAD']);
+    expect(new Set(flatValuesAt.mock.calls.map(call => call[1]))).toEqual(new Set(['FETCH_HEAD', 'HEAD']));
   });
 
   it('leaves out a value a second sync changed again', async () => {
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier (C1)' } };
     tipFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier (C2)' } };
 
     const kept = await guard([frFile([{ key: 'cart.title', status: 'updated', value: 'Panier (C1)' }])]);
@@ -90,6 +92,7 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('after a force-push, leaves out only the values the new history holds differently', async () => {
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'a': 'same', 'b': 'ours', 'c': 'gone' } };
     tipFiles = { 'config/locales/fr.yml#fr': { 'a': 'same', 'b': 'rewritten' } };
 
     const kept = await guard([frFile([
@@ -103,6 +106,10 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out an aligned value a sync changed after our commit', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Votre profil', 'profile.hint': 'Votre astuce' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile', 'profile.hint': 'Your hint' }
+    };
     tipFiles = {
       'config/locales/fr.yml#fr': { 'profile.title': 'Votre profil (relu)', 'profile.hint': 'Votre astuce' },
       'config/locales/en.yml#en': { 'profile.title': 'Your profile', 'profile.hint': 'Your hint' }
@@ -117,6 +124,10 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out an unchanged target that carries source text a newer push replaced', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'promo': 'Soldes' },
+      'config/locales/en.yml#en': { 'promo': 'Sale' }
+    };
     tipFiles = {
       'config/locales/fr.yml#fr': { 'promo': 'Soldes' },
       'config/locales/en.yml#en': { 'promo': 'Big sale' }
@@ -128,6 +139,10 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out an aligned value whose source text a newer push replaced', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'promo': 'Grandes soldes' },
+      'config/locales/en.yml#en': { 'promo': 'Big sale' }
+    };
     tipFiles = {
       'config/locales/fr.yml#fr': { 'promo': 'Grandes soldes' },
       'config/locales/en.yml#en': { 'promo': 'Huge sale' }
@@ -139,6 +154,10 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out a value whose source cell the tip lacks', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'promo': 'Soldes' },
+      'config/locales/en.yml#en': { 'promo': 'Sale' }
+    };
     tipFiles = {
       'config/locales/fr.yml#fr': { 'promo': 'Soldes' },
       'config/locales/en.yml#en': {}
@@ -150,6 +169,10 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('reads each locale of a multi-language file separately', async () => {
+    checkoutFiles = {
+      'config/locales/multi.yml#sv': { 'greeting': 'Hej', 'bye': 'Hejdå' },
+      'config/locales/multi.yml#en': { 'greeting': 'Hello', 'bye': 'Bye' }
+    };
     tipFiles = {
       'config/locales/multi.yml#sv': { 'greeting': 'Hej (relu)', 'bye': 'Hejdå' },
       'config/locales/multi.yml#en': { 'greeting': 'Hello', 'bye': 'Bye' }
@@ -167,6 +190,7 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('compares PO values by their msgid key', async () => {
+    checkoutFiles = { 'locale/sv/LC_MESSAGES/django.po#sv': { 'Hello': 'Hej', 'menu|Open': 'Öppna' } };
     tipFiles = { 'locale/sv/LC_MESSAGES/django.po#sv': { 'Hello': 'Hej', 'menu|Open': 'Öppna (relu)' } };
     const po: TargetChangeFile = {
       path: 'locale/sv/LC_MESSAGES/django.po',
@@ -183,6 +207,7 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out every value of a file the tip no longer has', async () => {
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier' } };
     tipFiles = { 'config/locales/fr.yml#fr': null };
 
     const kept = await guard([frFile([{ key: 'cart.title', status: 'added', value: 'Panier' }])]);
@@ -191,7 +216,11 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('leaves out every value of a file it cannot read at the tip', async () => {
-    flatValuesAt.mockImplementation(() => { throw new Error('bad indentation'); });
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'cart.title': 'Panier' } };
+    flatValuesAt.mockImplementation((file: { path: string; locale: string }, ref: string) => {
+      if (ref === 'FETCH_HEAD') throw new Error('bad indentation');
+      return checkoutFiles[`${file.path}#${file.locale}`];
+    });
 
     const kept = await guard([frFile([{ key: 'cart.title', status: 'added', value: 'Panier' }])]);
 
@@ -199,6 +228,7 @@ describe('leaveOutMovedCells', () => {
   });
 
   it('compares values in the form Localhero stores them', async () => {
+    checkoutFiles = { 'config/locales/fr.yml#fr': { 'two.lines': 'Ligne', 'count': 2 } };
     tipFiles = { 'config/locales/fr.yml#fr': { 'two.lines': 'Ligne 1\r\nLigne 2', 'count': 3 } };
 
     const kept = await guard([frFile([
@@ -207,6 +237,56 @@ describe('leaveOutMovedCells', () => {
     ])]);
 
     expect(keys(kept)).toEqual(['fr:two.lines', 'fr:count']);
+  });
+
+  it('keeps values not committed yet when the newer commit left their cells alone (--skip-commit, merge checkout)', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Profil !' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile' }
+    };
+    tipFiles = { ...checkoutFiles };
+
+    const kept = await guard([frFile([
+      { key: 'profile.title', status: 'updated', value: 'Votre profil', source_value: 'Your profile', aligned_source: 'Your profile' }
+    ])]);
+
+    expect(keys(kept)).toEqual(['fr:profile.title']);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('leaves out a value not committed yet when a sync changed its cell after the checkout', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Profil !', 'profile.hint': 'Astuce' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile', 'profile.hint': 'Your hint' }
+    };
+    tipFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Profil (relu)', 'profile.hint': 'Astuce' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile', 'profile.hint': 'Your hint' }
+    };
+
+    const kept = await guard([frFile([
+      { key: 'profile.title', status: 'updated', value: 'Votre profil', aligned_source: 'Your profile' },
+      { key: 'profile.hint', status: 'updated', value: 'Votre astuce', aligned_source: 'Your hint' }
+    ])]);
+
+    expect(keys(kept)).toEqual(['fr:profile.hint']);
+  });
+
+  it('keeps values our own commit landed on the tip when HEAD is still the checkout (signed commits)', async () => {
+    checkoutFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Profil !' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile' }
+    };
+    tipFiles = {
+      'config/locales/fr.yml#fr': { 'profile.title': 'Votre profil' },
+      'config/locales/en.yml#en': { 'profile.title': 'Your profile' }
+    };
+
+    const kept = await guard([frFile([
+      { key: 'profile.title', status: 'updated', value: 'Votre profil', aligned_source: 'Your profile' }
+    ])]);
+
+    expect(keys(kept)).toEqual(['fr:profile.title']);
   });
 
   it('fetches the branch with the app token, through the URL and without a depth', async () => {
