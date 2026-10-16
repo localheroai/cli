@@ -35,15 +35,20 @@ export async function sendAlignedImport(
 ): Promise<void> {
   const sleep = deps.sleep ?? defaultSleep;
   const { sourceLocale, ...importRequest } = request;
-  const importFiles = await leaveOutMovedCells(buildImportFiles(cells), sourceLocale, deps.console);
   let importedCount = 0;
 
-  for (const files of chunkFiles(importFiles)) {
-    const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
+  for (const chunk of chunkFiles(buildImportFiles(cells))) {
+    let files = chunk;
+    // Checked again before every attempt: a sync can land between requests or during a retry's wait.
+    const sendUnmoved = async () => {
+      files = await leaveOutMovedCells(files, sourceLocale, deps.console);
+      return files.length === 0 ? null : createPullRequestImport({ ...importRequest, files });
+    };
     try {
-      const response = await withRetries(() => createPullRequestImport({ ...importRequest, files }), sleep);
-      importedCount += response.imported_count;
+      const response = await withRetries(sendUnmoved, sleep);
+      importedCount += response?.imported_count ?? 0;
     } catch (error) {
+      const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
       deps.console.log(chalk.yellow(`⚠ Could not send ${changeCount} aligned values to Localhero: ${(error as Error).message}. They are committed to the branch and will be picked up on the next push.`));
     }
   }
