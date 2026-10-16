@@ -6,7 +6,7 @@ export interface SourceAlignmentItem {
   target_path: string;
   format: string;
   key: string;
-  previous_source: string;
+  previous_source: string | null;
   source: string;
   target_base: string | null;
   target_current: string | null;

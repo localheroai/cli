@@ -338,14 +338,30 @@ describe('translate --changed-only aligning reworded source texts', () => {
     });
   }
 
-  it('carries on without alignment candidates when change detection returns null', async () => {
+  it('carries on without aligning when change detection returns null', async () => {
     mockDetectTargetChanges.mockReturnValue(null);
 
     await translate({ changedOnly: true }, deps);
 
-    expect(mockCollectAlignmentCandidates.mock.calls[0][0]).toEqual([]);
+    expect(mockCollectAlignmentCandidates).not.toHaveBeenCalled();
+    expect(mockCreateSourceAlignment).not.toHaveBeenCalled();
     expect(loggedLines()).not.toContain('more than 1,000');
     expect(loggedLines()).toContain('No changed keys need translation');
+  });
+
+  it('leaves keys the ignore rules exclude out of alignment', async () => {
+    deps.configUtils.getProjectConfig.mockResolvedValue({
+      projectId: 'demo',
+      sourceLocale: 'en',
+      outputLocales: ['fr'],
+      translationFiles: { paths: ['config/locales/'], ignoreKeys: ['admin.*'] }
+    });
+
+    await translate({ changedOnly: true }, deps);
+
+    const ignoreMatcher = mockCollectAlignmentCandidates.mock.calls[0][5] as (key: string) => boolean;
+    expect(ignoreMatcher('admin.note')).toBe(true);
+    expect(ignoreMatcher('reminders.remind_tomorrow')).toBe(false);
   });
 
   it('asks nothing when no source text was reworded', async () => {
@@ -495,6 +511,24 @@ describe('translate --changed-only aligning reworded source texts', () => {
     expect(loggedLines()).toContain('Could not align fr translations');
     expect(loggedLines()).toContain('No changed keys need translation');
     expect(process.exit).not.toHaveBeenCalled();
+  });
+
+  it('carries on without aligned values when the server rejects keys added in this branch', async () => {
+    const { SourceAlignmentRequestError } = await import('../../src/api/source-alignments.js');
+    mockCollectAlignmentCandidates.mockReturnValue([
+      { ...candidate('reminders.added'), previous_source: null, target_base: null }
+    ]);
+    mockCreateSourceAlignment.mockRejectedValue(new SourceAlignmentRequestError('each item requires previous_source', 422));
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(deps.translationUtils.updateTranslationFile).not.toHaveBeenCalled();
+    expect(deps.gitUtils.autoCommitChanges).not.toHaveBeenCalled();
+    expect(alignedImports()).toHaveLength(0);
+    expect(loggedLines()).toContain('Could not align fr translations of keys added in this branch');
+    expect(loggedLines()).toContain('No changed keys need translation');
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(process.exitCode).toBeUndefined();
   });
 
   it.each([['skipped'], ['no-changes']])('does not stage aligned values when the commit result is %s', async (commitResult) => {

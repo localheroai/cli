@@ -509,8 +509,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     resetUnreadableFiles();
     manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
     removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
-    targetChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher) ?? [];
-    const alignmentCandidates = collectAlignmentCandidates(targetChanges, sourceFiles, targetFilesByLocale, config, !!verbose);
+    const detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);
+    targetChanges = detectedChanges ?? [];
+    const alignmentCandidates = detectedChanges
+      ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
+      : [];
 
     const filtered = filterByGitChanges(
       sourceFiles,
