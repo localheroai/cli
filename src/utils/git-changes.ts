@@ -422,14 +422,28 @@ export function diffFileKeys(
   resolvedRef: string,
   verbose: boolean
 ): FileDiff | null {
-  const sanitizedPath = gitShowPath(file.path);
-  const isPo = file.format === 'po' || file.format === 'pot';
+  const oldFlat = flatValuesAt(file, resolvedRef);
+  if (oldFlat === null && verbose) {
+    console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
+  }
 
-  let oldFlat: Record<string, any> = {};
+  const newFlat = flattenFileContent(readFileSync(file.path, 'utf-8'), file);
+
+  return { oldFlat: oldFlat ?? {}, newFlat };
+}
+
+type FileLocation = Pick<TranslationFile, 'path' | 'format' | 'locale'>;
+
+/**
+ * A file's flattened key map as committed at `ref`, or null when the ref does
+ * not have the file.
+ */
+export function flatValuesAt(file: FileLocation, ref: string): Record<string, any> | null {
+  let content: string;
   try {
     // stderr is piped and git's locale pinned: the missing-at-ref check below reads git's English message
-    const oldContent = execSync(
-      `git show ${resolvedRef}:"${sanitizedPath}"`,
+    content = execSync(
+      `git show ${ref}:"${gitShowPath(file.path)}"`,
       {
         encoding: 'utf-8',
         maxBuffer: 10 * 1024 * 1024,
@@ -437,29 +451,22 @@ export function diffFileKeys(
         env: { ...process.env, LC_ALL: 'C' }
       }
     );
-    const oldObj = parseFile(oldContent, file.format, file.path);
-    const oldTranslations = isPo ? oldObj : extractLocaleContent(oldObj, file.locale);
-    oldFlat = isPo ? extractPoKeys(oldObj) : flattenTranslations(oldTranslations);
   } catch (error) {
     const err = error as Error;
     const missingAtRef = err.message.includes('exists on disk, but not in') || err.message.includes('does not exist');
-    if (!missingAtRef) {
-      // A git failure or an unparsable base file is NOT an empty base — falling through
-      // would report every key as added, and the backend trusts those. Callers catch
-      // per-file and skip.
-      throw error;
-    }
-    if (verbose) {
-      console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
-    }
+    if (missingAtRef) return null;
+    // A git failure is NOT an empty file: falling through would report every key
+    // as added, and the backend trusts those. Callers catch per-file and skip.
+    throw error;
   }
+  // An unparsable file throws too, for the same reason.
+  return flattenFileContent(content, file);
+}
 
-  const newContent = readFileSync(file.path, 'utf-8');
-  const newObj = parseFile(newContent, file.format, file.path);
-  const newTranslations = isPo ? newObj : extractLocaleContent(newObj, file.locale);
-  const newFlat = isPo ? extractPoKeys(newObj) : flattenTranslations(newTranslations);
-
-  return { oldFlat, newFlat };
+function flattenFileContent(content: string, file: FileLocation): Record<string, any> {
+  const isPo = file.format === 'po' || file.format === 'pot';
+  const parsed = parseFile(content, file.format, file.path);
+  return isPo ? extractPoKeys(parsed) : flattenTranslations(extractLocaleContent(parsed, file.locale));
 }
 
 /**

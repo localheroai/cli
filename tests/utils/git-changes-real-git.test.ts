@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { diffFileKeys } from '../../src/utils/git-changes.js';
+import { diffFileKeys, flatValuesAt } from '../../src/utils/git-changes.js';
 
 describe('diffFileKeys against a real git repository', () => {
   let repo: string;
@@ -35,5 +35,38 @@ describe('diffFileKeys against a real git repository', () => {
     expect(() =>
       diffFileKeys({ path: 'existing.yml', format: 'yml', locale: 'en' }, 'no-such-ref', false)
     ).toThrow();
+  });
+});
+
+describe('flatValuesAt against a real git repository', () => {
+  let repo: string;
+  let originalCwd: string;
+
+  beforeEach(() => {
+    originalCwd = process.cwd();
+    repo = mkdtempSync(path.join(os.tmpdir(), 'flat-values-'));
+    process.chdir(repo);
+    execSync('git init -q');
+    writeFileSync('multi.yml', 'en:\n  hello: Hello\nsv:\n  hello: Hej\n');
+    writeFileSync('sv.po', 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\nmsgid "Hello"\nmsgstr "Hej"\n');
+    execSync('git add . && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm base');
+    writeFileSync('multi.yml', 'en:\n  hello: Hello\nsv:\n  hello: Hallå\n');
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it('reads one locale of a multi-language file as committed at the ref, not as on disk', () => {
+    expect(flatValuesAt({ path: 'multi.yml', format: 'yml', locale: 'sv' }, 'HEAD')).toEqual({ hello: 'Hej' });
+  });
+
+  it('reads a PO file keyed the way change detection keys it', () => {
+    expect(flatValuesAt({ path: 'sv.po', format: 'po', locale: 'sv' }, 'HEAD')).toMatchObject({ Hello: 'Hej' });
+  });
+
+  it('returns null for a file the ref does not have', () => {
+    expect(flatValuesAt({ path: 'missing.yml', format: 'yml', locale: 'en' }, 'HEAD')).toBeNull();
   });
 });
