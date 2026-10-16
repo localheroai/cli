@@ -319,6 +319,37 @@ describe('reportSourceAlignment', () => {
     expect(output).toContain('Credits are running low');
   });
 
+  it('leaves out translations that were already aligned, and the heading when nothing else happened', () => {
+    const log = jest.fn();
+
+    reportSourceAlignment({
+      enabled: true,
+      alignedCells: [],
+      localeSummaries: {
+        fr: { aligned: 0, unchanged: 0, skipped: { already_aligned: 3 } },
+        de: { aligned: 0, unchanged: 0, skipped: { already_aligned: 2 } }
+      },
+      notices: [],
+      shortUrl: null
+    }, { log });
+
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it('counts only the skips that need a look', () => {
+    const log = jest.fn();
+
+    reportSourceAlignment({
+      enabled: true,
+      alignedCells: [],
+      localeSummaries: { fr: { aligned: 1, unchanged: 0, skipped: { already_aligned: 3, edited_in_pr: 1 } } },
+      notices: [],
+      shortUrl: null
+    }, { log });
+
+    expect(log.mock.calls.map((call) => String(call[0]))).toContain('  fr: 1 aligned, 1 skipped (1 edited_in_pr)');
+  });
+
   it('prints nothing when the backend did not align', () => {
     const log = jest.fn();
 

@@ -28,6 +28,8 @@ export interface SourceAlignmentResult {
   shortUrl: string | null;
 }
 
+const ALREADY_ALIGNED = 'already_aligned';
+
 type AlignmentRequest = Omit<SourceAlignmentParams, 'locale' | 'items'>;
 
 export interface Logger {
@@ -134,7 +136,8 @@ function describeLocale(locale: string, summary: LocaleAlignmentSummary): string
   if (summary.aligned > 0) parts.push(`${summary.aligned} aligned`);
   if (summary.unchanged > 0) parts.push(`${summary.unchanged} already ${summary.unchanged === 1 ? 'fits' : 'fit'}`);
 
-  const reasons = Object.entries(summary.skipped);
+  // Already aligned means there was nothing to do; every push re-checks the keys a branch added.
+  const reasons = Object.entries(summary.skipped).filter(([reason]) => reason !== ALREADY_ALIGNED);
   if (reasons.length > 0) {
     const total = reasons.reduce((sum, [, count]) => sum + count, 0);
     const breakdown = reasons.map(([reason, count]) => `${count} ${reason}`).join(', ');
