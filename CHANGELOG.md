@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.87] - 2026-10-16
+
+0.0.86 was published under the `rc` tag only and never became `latest`; 0.0.87 includes everything listed under it.
+
 ### Fixed
 - A project whose `translationFiles.paths` overlap, such as `config/locales/` and `config/locales/multi/`, sends each key once when aligning translations. Before, a multi-language file found through both paths sent its keys twice, and the second copy came back as `in_progress` in the run's summary. The translations themselves were right.
 - A published package holds only the current build. Before, files left in `dist/` by older builds were published with it; nothing loaded them.
