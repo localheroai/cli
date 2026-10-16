@@ -42,6 +42,17 @@ import {
 import { sendAlignedImport } from '../utils/aligned-import.js';
 import { leaveOutMovedCells, recordImportBaseline } from '../utils/import-guard.js';
 import { keepAlignedCellsOnDisk } from '../utils/aligned-values-on-disk.js';
+import { collectTargetEditCandidates } from '../utils/target-edit-candidates.js';
+import {
+  runTargetEditAlignment,
+  reportTargetEditAlignment,
+  replaceAlignmentCandidates,
+  withRevertedChanges,
+  addSourceCells,
+  refreshFileContent,
+  emptyTargetEditResult,
+  type TargetEditAlignmentResult
+} from '../utils/target-edit-alignment.js';
 import type {
   TranslationResult
 } from '../utils/translation-processor.js';
@@ -427,6 +438,42 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return result;
   }
 
+  // Runs before missing keys are looked for: a locale without the key is then
+  // translated from the source text as written here.
+  async function followEditedTranslations(
+    detectedChanges: TargetChangeFile[] | null,
+    projectConfig: ProjectConfig
+  ): Promise<TargetEditAlignmentResult> {
+    const candidates = detectedChanges
+      ? collectTargetEditCandidates(detectedChanges, sourceFiles, targetFilesByLocale, projectConfig, !!verbose, ignoreMatcher)
+      : [];
+    if (candidates.length === 0) return emptyTargetEditResult();
+
+    const branch = await getCurrentBranch();
+    if (!branch) return emptyTargetEditResult();
+
+    const headSha = await getHeadSha();
+    const result = await runTargetEditAlignment(
+      candidates,
+      { projectId, branch, jobGroupId, ...(headSha && { headSha }) },
+      { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
+    );
+    reportTargetEditAlignment(result, console);
+    refreshFileContent([...sourceFiles, ...Object.values(targetFilesByLocale).flat()], result.writtenPaths);
+    return result;
+  }
+
+  // A run that could not read its files knows only part of the story, and
+  // finalizing on a partial manifest would record that partial view as the truth (#779).
+  function stoppedOnUnreadableFiles(): boolean {
+    const unreadable = getUnreadableFiles();
+    if (unreadable.length === 0) return false;
+
+    reportUnreadableFiles(unreadable);
+    process.exitCode = 1;
+    return true;
+  }
+
   function runPostTranslateCommand(command: string | undefined): void {
     if (!command) return;
 
@@ -490,6 +537,25 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
   const ignoreMatcher = createIgnoreMatcher(config.translationFiles?.ignoreKeys ?? []);
 
+  // Capture the full manifest BEFORE filtering down to missing-only keys.
+  // This is the complete snapshot of "what differs from main" for this push.
+  let manifest: Record<string, any> | null = null;
+  let removedManifest: Record<string, any> | null = null;
+  let detectedChanges: TargetChangeFile[] | null = null;
+  let targetEdits = emptyTargetEditResult();
+  if (options.changedOnly) {
+    resetUnreadableFiles();
+    recordImportBaseline();
+    manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
+    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
+    detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);
+
+    // Before anything is sent.
+    if (stoppedOnUnreadableFiles()) return;
+
+    targetEdits = await followEditedTranslations(detectedChanges, config);
+  }
+
   const findResult = translationUtils.findMissingTranslationsByLocale(
     sourceFiles,
     targetFilesByLocale,
@@ -505,21 +571,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     logIgnoreSummary(ignoreSummary, console);
   }
 
-  // Capture the full manifest BEFORE filtering down to missing-only keys.
-  // This is the complete snapshot of "what differs from main" for this push.
-  let manifest: Record<string, any> | null = null;
-  let removedManifest: Record<string, any> | null = null;
   let targetChanges: TargetChangeFile[] = [];
   if (options.changedOnly) {
-    resetUnreadableFiles();
-    recordImportBaseline();
-    manifest = getManifestForFinalize(sourceFiles, config, !!verbose, ignoreMatcher);
-    removedManifest = getRemovedKeysManifestForFinalize(sourceFiles, config, !!verbose);
-    const detectedChanges = detectTargetChanges(sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher);
-    targetChanges = detectedChanges ?? [];
-    const alignmentCandidates = detectedChanges
-      ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
-      : [];
+    targetChanges = withRevertedChanges(detectedChanges ?? [], targetEdits.revertedChanges);
 
     const filtered = filterByGitChanges(
       sourceFiles,
@@ -528,18 +582,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       !!verbose
     );
 
-    // Before anything is sent: a run that could not read its files knows only
-    // part of the story, and finalizing on a partial manifest would record that
-    // partial view as the truth (#779).
-    const unreadable = getUnreadableFiles();
-    if (unreadable.length > 0) {
-      reportUnreadableFiles(unreadable);
-      process.exitCode = 1;
-      return;
-    }
+    if (stoppedOnUnreadableFiles()) return;
 
     if (filtered !== null) {
-      alignment = await alignRewordedSourceTexts(alignmentCandidates, config);
+      const alignmentCandidates = detectedChanges
+        ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
+        : [];
+      alignment = addSourceCells(
+        await alignRewordedSourceTexts(replaceAlignmentCandidates(alignmentCandidates, targetEdits), config),
+        targetEdits.sourceCells
+      );
 
       if (Object.keys(filtered).length === 0) {
         if (manifest !== null) {

@@ -70,15 +70,7 @@ export async function runTargetEditAlignment(
   request: TargetEditRequest,
   deps: TargetEditDependencies
 ): Promise<TargetEditAlignmentResult> {
-  const result: TargetEditAlignmentResult = {
-    sourceCells: [],
-    alignmentCandidates: [],
-    revertedChanges: [],
-    writtenPaths: [],
-    localFixes: 0,
-    skipped: {}
-  };
-
+  const result = emptyTargetEditResult();
   const updatedKeys: UpdatedKey[] = [];
   for (const chunk of chunked(candidates, MAX_ITEMS_PER_REQUEST)) {
     try {
@@ -113,6 +105,10 @@ export async function runTargetEditAlignment(
   }
 
   return result;
+}
+
+export function emptyTargetEditResult(): TargetEditAlignmentResult {
+  return { sourceCells: [], alignmentCandidates: [], revertedChanges: [], writtenPaths: [], localFixes: 0, skipped: {} };
 }
 
 /**
