@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- When a pull request edits a translation so it says something new, the source text and the other languages follow it in the same run. `translate --changed-only` (and `ci`) asks Localhero.ai about keys whose translation or source text changed. When the edit changed the meaning, it writes the updated source text, aligns the other translations to it and commits both; the PR comment names the source text that followed. An edit that only fixes the wording in one language changes nothing else. Before, a Swedish edit from "Din profil är publicerad" to "Din profil är publicerad nu" was staged on its own, so the English and the other languages kept saying the profile was published, without the "now". Keys edited in two languages, or by a reviewer on the PR page, are left as they are. YAML and JSON only, not plural keys. Needs the matching server change and the project setting, which Localhero.ai turns on per project; against an older server or with the setting off, the run works as before.
+
 ### Fixed
 - A run that started before a Sync to GitHub no longer replaces the reviewer's edit that sync committed. `translate --changed-only` (and `ci`) now fetches the pull request branch right before it sends the PR's values for review, and leaves out every value the branch changed after the run's checkout, along with any value whose source text changed there. The run prints how many it left out. Before, a run that checked out the branch just before the sync sent the older value, which replaced the reviewer's edit on the PR page and was applied on merge. If the branch can't be fetched, the run warns and sends everything, as before. GitHub Actions on pull requests only, for runs that check out the branch itself; a merge-commit checkout imports as before.
 
