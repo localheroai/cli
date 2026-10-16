@@ -122,7 +122,7 @@ function isSourcePass(file: TargetChangeFile, sourceLocale: string): boolean {
   return file.locale === sourceLocale && file.path === file.source_path;
 }
 
-function isRewording(change: TargetChangeFile['changes'][number]): boolean {
+export function isRewording(change: TargetChangeFile['changes'][number]): boolean {
   return change.status === 'updated' && isFilledString(change.old_value) && isFilledString(change.value);
 }
 

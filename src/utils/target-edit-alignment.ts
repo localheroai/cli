@@ -9,10 +9,17 @@ import {
 } from '../api/target-edit-alignments.js';
 import { localeCodesMatch } from './translation-processor.js';
 import type { AlignmentCandidate } from './alignment-candidates.js';
-import type { AlignedCell, Logger, SourceAlignmentResult } from './source-alignment.js';
+import {
+  chunked,
+  groupBy,
+  type AlignedCell,
+  type AlignmentDependencies,
+  type Logger,
+  type SourceAlignmentResult
+} from './source-alignment.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { TargetEditCandidate, TargetEditCandidateTarget } from './target-edit-candidates.js';
-import type { ProjectConfig, TranslationFile } from '../types/index.js';
+import type { TranslationFile } from '../types/index.js';
 
 export interface TargetEditAlignmentResult {
   sourceCells: AlignedCell[];
@@ -24,19 +31,6 @@ export interface TargetEditAlignmentResult {
 }
 
 type TargetEditRequest = Omit<TargetEditAlignmentParams, 'items'>;
-
-interface TargetEditDependencies {
-  console: Logger;
-  config: ProjectConfig;
-  updateTranslationFile: (
-    targetPath: string,
-    translations: Record<string, unknown>,
-    languageCode: string,
-    sourcePath: string,
-    sourceLanguage?: string,
-    config?: ProjectConfig
-  ) => Promise<unknown>;
-}
 
 type UpdatedItem = TargetEditResultItem & {
   source: string;
@@ -68,7 +62,7 @@ const QUIET_STATUSES = new Set(['no_trigger', 'source_edited']);
 export async function runTargetEditAlignment(
   candidates: TargetEditCandidate[],
   request: TargetEditRequest,
-  deps: TargetEditDependencies
+  deps: AlignmentDependencies
 ): Promise<TargetEditAlignmentResult> {
   const result = emptyTargetEditResult();
   const updatedKeys: UpdatedKey[] = [];
@@ -190,7 +184,7 @@ function isUpdate(item: TargetEditResultItem): item is UpdatedItem {
     Array.isArray(item.align_locales);
 }
 
-async function writeSourceTexts(sourcePath: string, keys: UpdatedKey[], deps: TargetEditDependencies): Promise<boolean> {
+async function writeSourceTexts(sourcePath: string, keys: UpdatedKey[], deps: AlignmentDependencies): Promise<boolean> {
   const values = Object.fromEntries(keys.map(({ candidate, item }) => [candidate.key, item.source]));
   try {
     await deps.updateTranslationFile(sourcePath, values, deps.config.sourceLocale, sourcePath, undefined, deps.config);
@@ -242,7 +236,9 @@ function alignmentCandidates({ candidate, item }: UpdatedKey): AlignmentCandidat
 // The edit was undone: the trigger's own proposal is withdrawn rather than
 // staging its merge-base value, which merge could apply over a newer live text.
 function revertedChange({ candidate, item }: UpdatedKey): TargetChangeFile | null {
-  const trigger = item.trigger_at_base ? findTarget(candidate, item.trigger_locale) : undefined;
+  if (!item.trigger_at_base) return null;
+
+  const trigger = findTarget(candidate, item.trigger_locale);
   if (!trigger) return null;
 
   return {
@@ -295,21 +291,4 @@ function toRequestItem(candidate: TargetEditCandidate): TargetEditItem {
 
 function keyId(cell: { source_path: string; key: string }): string {
   return `${cell.source_path}\0${cell.key}`;
-}
-
-function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> {
-  const groups = new Map<string, T[]>();
-  for (const value of values) {
-    const key = keyOf(value);
-    groups.set(key, [...(groups.get(key) ?? []), value]);
-  }
-  return groups;
-}
-
-function chunked<T>(values: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let i = 0; i < values.length; i += size) {
-    chunks.push(values.slice(i, i + size));
-  }
-  return chunks;
 }

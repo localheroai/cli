@@ -38,7 +38,7 @@ export interface Logger {
   log: (message?: any, ...optionalParams: any[]) => void;
 }
 
-interface AlignmentDependencies {
+export interface AlignmentDependencies {
   console: Logger;
   config: ProjectConfig;
   updateTranslationFile: (
@@ -262,7 +262,7 @@ function toRequestItem(candidate: AlignmentCandidate): SourceAlignmentItem {
   };
 }
 
-function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> {
+export function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> {
   const groups = new Map<string, T[]>();
   for (const value of values) {
     const key = keyOf(value);
@@ -271,7 +271,7 @@ function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> 
   return groups;
 }
 
-function chunked<T>(values: T[], size: number): T[][] {
+export function chunked<T>(values: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < values.length; i += size) {
     chunks.push(values.slice(i, i + size));

@@ -4,7 +4,7 @@ import { getBaseBranch, resolveCompareRef, type FileDiff } from './git-changes.j
 import { findTargetFile } from './translation-utils.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { TargetEditItem, TargetEditTarget } from '../api/target-edit-alignments.js';
-import { ALIGNABLE_FORMATS, isFilledString, readDiff, uniqueByPath } from './alignment-candidates.js';
+import { ALIGNABLE_FORMATS, isFilledString, isRewording, readDiff, uniqueByPath } from './alignment-candidates.js';
 
 export interface TargetEditCandidateTarget extends TargetEditTarget {
   format: string;
@@ -51,15 +51,7 @@ export function collectTargetEditCandidates(
       const source = sourceDiff.newFlat[key];
       if (!isFilledString(sourceBase) || !isFilledString(source)) continue;
 
-      const targets = targetDiffs
-        .filter(target => isFilledString(target.diff.newFlat[key]))
-        .map(target => ({
-          locale: target.locale,
-          target_path: target.file.path,
-          format: target.file.format,
-          base: isFilledString(target.diff.oldFlat[key]) ? target.diff.oldFlat[key] : null,
-          current: target.diff.newFlat[key] as string
-        }));
+      const targets = targetsWithKey(targetDiffs, key);
       if (targets.length === 0) continue;
 
       candidates.push({ source_path: sourceFile.path, format: sourceFile.format, key, source_base: sourceBase, source, targets });
@@ -85,10 +77,22 @@ function readTargetDiffs(
   const diffs: TargetDiff[] = [];
   for (const locale of config.outputLocales) {
     const file = findTargetFile(targetFilesByLocale[locale] ?? [], locale, sourceFile, config.sourceLocale);
-    const diff = file ? readDiff(file, resolvedRef, verbose) : null;
-    if (file && diff) diffs.push({ locale, file, diff });
+    if (!file) continue;
+
+    const diff = readDiff(file, resolvedRef, verbose);
+    if (diff) diffs.push({ locale, file, diff });
   }
   return diffs;
+}
+
+function targetsWithKey(targetDiffs: TargetDiff[], key: string): TargetEditCandidateTarget[] {
+  return targetDiffs.flatMap(({ locale, file, diff }) => {
+    const current = diff.newFlat[key];
+    if (!isFilledString(current)) return [];
+
+    const base = diff.oldFlat[key];
+    return [{ locale, target_path: file.path, format: file.format, base: isFilledString(base) ? base : null, current }];
+  });
 }
 
 function editedKeys(
@@ -98,8 +102,7 @@ function editedKeys(
   const keysBySource = new Map<string, Set<string>>();
   for (const file of targetChanges) {
     for (const change of file.changes) {
-      const edited = change.status === 'updated' && isFilledString(change.old_value) && isFilledString(change.value);
-      if (!edited || ignoreMatcher?.(change.key)) continue;
+      if (!isRewording(change) || ignoreMatcher?.(change.key)) continue;
 
       if (!keysBySource.has(file.source_path)) keysBySource.set(file.source_path, new Set());
       keysBySource.get(file.source_path)!.add(change.key);
