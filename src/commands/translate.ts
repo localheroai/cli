@@ -40,6 +40,7 @@ import {
   type SourceAlignmentResult
 } from '../utils/source-alignment.js';
 import { sendAlignedImport } from '../utils/aligned-import.js';
+import { leaveOutMovedCells } from '../utils/import-guard.js';
 import { keepAlignedCellsOnDisk } from '../utils/aligned-values-on-disk.js';
 import type {
   TranslationResult
@@ -347,21 +348,24 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     const branch = await getCurrentBranch();
     if (!branch) return;
 
+    const files = await leaveOutMovedCells(targetChanges, sourceLocale, console);
+    if (files.length === 0) return;
+
     let importResult: PullRequestImportResponse;
     try {
       importResult = await createPullRequestImport({
         projectId,
         branch,
         jobGroupId,
-        files: targetChanges
+        files
       });
     } catch (err) {
-      const changeCount = targetChanges.reduce((sum, file) => sum + file.changes.length, 0);
+      const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
       console.log(chalk.yellow(`⚠ Could not send ${pluralize(changeCount, 'changed value')} for review: ${(err as Error).message}`));
       return;
     }
 
-    reportImport(summarizeImport(targetChanges, sourceLocale, importResult), importResult);
+    reportImport(summarizeImport(files, sourceLocale, importResult), importResult);
   }
 
   function reportImport(summary: ImportSummary, importResult: PullRequestImportResponse): void {
@@ -473,7 +477,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     const branch = await getCurrentBranch();
     if (!branch) return;
-    await sendAlignedImport(alignedCells, { projectId, branch, jobGroupId }, { console });
+    await sendAlignedImport(alignedCells, { projectId, branch, jobGroupId, sourceLocale }, { console });
   }
 
   if (options.changedOnly && !isGitAvailable()) {

@@ -3,6 +3,7 @@ import { describe, it, expect, jest, beforeAll, beforeEach } from '@jest/globals
 const mockCreatePullRequestImport = jest.fn<any>();
 
 let sendAlignedImport: any;
+let importGuard: any;
 let PullRequestImportError: any;
 
 beforeAll(async () => {
@@ -13,9 +14,10 @@ beforeAll(async () => {
     createPullRequestImport: mockCreatePullRequestImport
   }));
   sendAlignedImport = (await import('../../src/utils/aligned-import.js')).sendAlignedImport;
+  importGuard = (await import('../../src/utils/import-guard.js')).importGuard;
 });
 
-const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1' };
+const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1', sourceLocale: 'en' };
 
 function cell(key: string, locale = 'fr', targetPath = `config/locales/${locale}.yml`) {
   return {
@@ -41,6 +43,7 @@ describe('sendAlignedImport', () => {
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [] });
     log = jest.fn();
     sleep = jest.fn<any>().mockResolvedValue(undefined);
+    importGuard.setDependencies({ env: {} });
   });
 
   function logged(): string {
@@ -76,6 +79,33 @@ describe('sendAlignedImport', () => {
           ]
         }
       ]
+    });
+  });
+
+  describe('when a sync moved the branch after our commit', () => {
+    beforeEach(() => {
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'our-commit' : 'sync-commit') : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: (file: { locale: string }) => (file.locale === 'en'
+          ? { 'profile.title': 'Your profile', 'profile.hint': 'Your profile' }
+          : { 'profile.title': 'Votre profil (relu)', 'profile.hint': 'Votre profil' })
+      });
+    });
+
+    it('leaves out the aligned value the sync changed', async () => {
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      const sent = mockCreatePullRequestImport.mock.calls[0][0].files;
+      expect(sent[0].changes.map((change: any) => change.key)).toEqual(['profile.hint']);
+      expect(logged()).toContain('Left out 1 value the branch changed after this run started');
+    });
+
+    it('sends nothing when the sync changed every aligned value', async () => {
+      await sendAlignedImport([cell('profile.title')], request, { console: { log }, sleep });
+
+      expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
     });
   });
 

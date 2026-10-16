@@ -11,6 +11,7 @@ const mockProcessTranslationBatches = jest.fn<any>();
 const mockKeepAlignedCellsOnDisk = jest.fn<any>();
 
 let translate: any;
+let importGuard: any;
 
 beforeAll(async () => {
   const actualGitChanges: any = await import('../../src/utils/git-changes.js');
@@ -68,6 +69,7 @@ beforeAll(async () => {
   }));
 
   translate = (await import('../../src/commands/translate.js')).translate;
+  importGuard = (await import('../../src/utils/import-guard.js')).importGuard;
 });
 
 const sourcePath = 'config/locales/en.yml';
@@ -103,6 +105,7 @@ describe('translate --changed-only summary', () => {
 
   beforeEach(() => {
     mockConsole = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    importGuard.setDependencies({ env: {} });
     mockFilterByGitChanges.mockReturnValue({});
     mockFinalizeTranslationJobs.mockResolvedValue({});
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 0, skipped: [], unchanged: [] });
@@ -201,6 +204,46 @@ describe('translate --changed-only summary', () => {
     expect(output).not.toContain('source text changed');
   });
 
+  describe('when the branch moved after the checkout', () => {
+    beforeEach(() => {
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'synced-tip') : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: () => ({ greeting: 'Bonjour (relu)', farewell: 'Au revoir' })
+      });
+      mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [], unchanged: [] });
+    });
+
+    function frenchEdits(values: Record<string, string>) {
+      return [{
+        path: targetPath,
+        source_path: sourcePath,
+        locale: 'fr',
+        format: 'yaml',
+        changes: Object.entries(values).map(([key, value]) => ({ key, status: 'updated', value }))
+      }];
+    }
+
+    it('sends only the values the newer commit left alone, and says how many it left out', async () => {
+      mockDetectTargetChanges.mockReturnValue(frenchEdits({ greeting: 'Bonjour', farewell: 'Au revoir' }));
+
+      await translate({ changedOnly: true }, deps);
+
+      const sent = mockCreatePullRequestImport.mock.calls[0][0].files;
+      expect(sent[0].changes.map((change: any) => change.key)).toEqual(['farewell']);
+      expect(loggedLines()).toContain('Left out 1 value the branch changed after this run started');
+    });
+
+    it('sends nothing when the newer commit changed every value, so nothing is withdrawn', async () => {
+      mockDetectTargetChanges.mockReturnValue(frenchEdits({ greeting: 'Bonjour' }));
+
+      await translate({ changedOnly: true }, deps);
+
+      expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    });
+  });
+
   it('fails without sending anything or reporting success when the project does not exist', async () => {
     mockDetectTargetChanges.mockReturnValue([targetChange('greeting')]);
     deps.settingsUtils.fetchSettings.mockRejectedValue(
@@ -263,6 +306,7 @@ describe('translate --changed-only aligning reworded source texts', () => {
   beforeEach(() => {
     process.env.GITHUB_ACTIONS = 'true';
     mockConsole = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    importGuard.setDependencies({ env: {} });
     mockFilterByGitChanges.mockReturnValue({});
     mockFinalizeTranslationJobs.mockResolvedValue({});
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [], unchanged: [] });

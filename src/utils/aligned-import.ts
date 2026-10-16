@@ -4,10 +4,11 @@ import {
   PullRequestImportError,
   type PullRequestImportParams
 } from '../api/pull-request-imports.js';
+import { leaveOutMovedCells } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { AlignedCell, Logger } from './source-alignment.js';
 
-type ImportRequest = Omit<PullRequestImportParams, 'files'>;
+type ImportRequest = Omit<PullRequestImportParams, 'files'> & { sourceLocale: string };
 
 interface ImportDependencies {
   console: Logger;
@@ -33,12 +34,14 @@ export async function sendAlignedImport(
   deps: ImportDependencies
 ): Promise<void> {
   const sleep = deps.sleep ?? defaultSleep;
+  const { sourceLocale, ...importRequest } = request;
+  const importFiles = await leaveOutMovedCells(buildImportFiles(cells), sourceLocale, deps.console);
   let importedCount = 0;
 
-  for (const files of chunkFiles(buildImportFiles(cells))) {
+  for (const files of chunkFiles(importFiles)) {
     const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
     try {
-      const response = await withRetries(() => createPullRequestImport({ ...request, files }), sleep);
+      const response = await withRetries(() => createPullRequestImport({ ...importRequest, files }), sleep);
       importedCount += response.imported_count;
     } catch (error) {
       deps.console.log(chalk.yellow(`⚠ Could not send ${changeCount} aligned values to Localhero: ${(error as Error).message}. They are committed to the branch and will be picked up on the next push.`));
