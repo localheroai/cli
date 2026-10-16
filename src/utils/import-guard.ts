@@ -26,11 +26,18 @@ const defaultDependencies: ImportGuardDependencies = {
 type ValuesAt = (file: FileLocation) => Record<string, unknown> | null;
 
 /**
+ * Where the values sent come from: the files as the run found or wrote them,
+ * or a commit of ours that landed on the branch (pushed, replayed or signed).
+ */
+export type SentValuesFrom = 'working-tree' | 'our-commit';
+
+/**
  * When the pull request branch moved after the commit this run started from (a
  * Localhero sync, a developer push), the newer commit owns every cell it
  * changed: importing ours would replace a value the branch no longer has. A
  * cell counts as changed when the tip holds it differently from that commit and
- * from the value we send; the latter is our own commit landing on the tip.
+ * from the value we send. A value our own commit landed must still be on the
+ * tip as we sent it: a newer commit may have set it back to the start value.
  */
 export const importGuard = {
   deps: { ...defaultDependencies },
@@ -56,7 +63,12 @@ export const importGuard = {
     }
   },
 
-  async leaveOutMovedCells(files: TargetChangeFile[], sourceLocale: string, logger: Logger): Promise<TargetChangeFile[]> {
+  async leaveOutMovedCells(
+    files: TargetChangeFile[],
+    sourceLocale: string,
+    logger: Logger,
+    valuesFrom: SentValuesFrom
+  ): Promise<TargetChangeFile[]> {
     const { env, git } = this.deps;
     const branch = env.GITHUB_HEAD_REF;
     if (env.GITHUB_ACTIONS !== 'true' || !branch || files.length === 0) return files;
@@ -74,14 +86,16 @@ export const importGuard = {
       }
       return files;
     }
-    if (!moved || !this.isInBranchHistory(baseline)) return files;
+    // Our landed commit must be on the tip, so a tip still at the start commit is no shortcut for it.
+    if (valuesFrom === 'working-tree' && !moved) return files;
+    if (!this.isInBranchHistory(baseline)) return files;
 
     const tip = this.valuesReader(TIP);
     const start = this.valuesReader(baseline);
     let leftOut = 0;
     const kept = files
       .map(file => {
-        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, tip, start));
+        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, valuesFrom, tip, start));
         leftOut += file.changes.length - changes.length;
         return { ...file, changes };
       })
@@ -152,14 +166,20 @@ export function recordImportBaseline(): void {
   importGuard.recordBaseline();
 }
 
-export function leaveOutMovedCells(files: TargetChangeFile[], sourceLocale: string, logger: Logger): Promise<TargetChangeFile[]> {
-  return importGuard.leaveOutMovedCells(files, sourceLocale, logger);
+export function leaveOutMovedCells(
+  files: TargetChangeFile[],
+  sourceLocale: string,
+  logger: Logger,
+  valuesFrom: SentValuesFrom
+): Promise<TargetChangeFile[]> {
+  return importGuard.leaveOutMovedCells(files, sourceLocale, logger, valuesFrom);
 }
 
 function changedOnTip(
   file: TargetChangeFile,
   change: TargetChange,
   sourceLocale: string,
+  valuesFrom: SentValuesFrom,
   tip: ValuesAt,
   start: ValuesAt
 ): boolean {
@@ -168,7 +188,10 @@ function changedOnTip(
     return !sameValue(atTip, start(cell)?.[change.key]) && !sameValue(atTip, sent);
   };
 
-  if (cellChanged(file, change.value)) return true;
+  const targetChanged = valuesFrom === 'our-commit'
+    ? !sameValue(tip(file)?.[change.key], change.value)
+    : cellChanged(file, change.value);
+  if (targetChanged) return true;
 
   const sourceFile = { path: file.source_path, format: path.extname(file.source_path).slice(1), locale: sourceLocale };
   return [change.source_value, change.aligned_source].some(source => source !== undefined && cellChanged(sourceFile, source));

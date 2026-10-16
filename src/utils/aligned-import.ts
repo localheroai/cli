@@ -4,11 +4,11 @@ import {
   PullRequestImportError,
   type PullRequestImportParams
 } from '../api/pull-request-imports.js';
-import { leaveOutMovedCells } from './import-guard.js';
+import { leaveOutMovedCells, type SentValuesFrom } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { AlignedCell, Logger } from './source-alignment.js';
 
-type ImportRequest = Omit<PullRequestImportParams, 'files'> & { sourceLocale: string };
+type ImportRequest = Omit<PullRequestImportParams, 'files'> & { sourceLocale: string; valuesFrom: SentValuesFrom };
 
 interface ImportDependencies {
   console: Logger;
@@ -34,14 +34,14 @@ export async function sendAlignedImport(
   deps: ImportDependencies
 ): Promise<void> {
   const sleep = deps.sleep ?? defaultSleep;
-  const { sourceLocale, ...importRequest } = request;
+  const { sourceLocale, valuesFrom, ...importRequest } = request;
   let importedCount = 0;
 
   for (const chunk of chunkFiles(buildImportFiles(cells))) {
     let files = chunk;
     // Checked again before every attempt: a sync can land between requests or during a retry's wait.
     const sendUnmoved = async () => {
-      files = await leaveOutMovedCells(files, sourceLocale, deps.console);
+      files = await leaveOutMovedCells(files, sourceLocale, deps.console, valuesFrom);
       return files.length === 0 ? null : createPullRequestImport({ ...importRequest, files });
     };
     try {

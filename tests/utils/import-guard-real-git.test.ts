@@ -110,7 +110,7 @@ describe('the import guard against a real remote', () => {
     await sendAlignedImport([{
       locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
       previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
-    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en' }, { console: { log } });
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en', valuesFrom: 'our-commit' }, { console: { log } });
 
     expect(mockCreatePullRequestImport).toHaveBeenCalledTimes(1);
     expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ key: 'greeting', value: 'Salut' });
@@ -129,7 +129,7 @@ describe('the import guard against a real remote', () => {
     await sendAlignedImport([{
       locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
       previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
-    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en' }, { console: { log } });
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en', valuesFrom: 'working-tree' }, { console: { log } });
 
     expect(mockCreatePullRequestImport).toHaveBeenCalledTimes(1);
     expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ key: 'greeting', value: 'Salut' });
@@ -165,7 +165,23 @@ describe('the import guard against a real remote', () => {
     await sendAlignedImport([{
       locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
       previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
-    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en' }, { console: { log } });
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en', valuesFrom: 'our-commit' }, { console: { log } });
+
+    expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+  });
+
+  it('leaves out a value our commit landed when a newer commit set it back before the import', async () => {
+    importGuard.recordBaseline();
+    commitFile(ours, FR_PATH, 'fr:\n  greeting: Salut\n', 'aligned');
+    expect(await githubService.pushWithRetry(BRANCH, TOKEN)).toBe('pushed');
+    git(sibling, `pull -q origin ${BRANCH}`);
+    commitFile(sibling, FR_PATH, 'fr:\n  greeting: Bonjour\n', 'restore');
+    git(sibling, `push -q origin HEAD:${BRANCH}`);
+
+    await sendAlignedImport([{
+      locale: 'fr', source_path: EN_PATH, target_path: FR_PATH, format: 'yml', key: 'greeting',
+      previous_source: 'Hi', source: 'Hello', target_base: 'Bonjour', target_current: 'Bonjour', value: 'Salut'
+    }], { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en', valuesFrom: 'our-commit' }, { console: { log } });
 
     expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
   });

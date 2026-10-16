@@ -17,7 +17,7 @@ beforeAll(async () => {
   importGuard = (await import('../../src/utils/import-guard.js')).importGuard;
 });
 
-const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1', sourceLocale: 'en' };
+const request = { projectId: 'proj', branch: 'feature/reword', jobGroupId: 'grp-1', sourceLocale: 'en', valuesFrom: 'our-commit' };
 
 function cell(key: string, locale = 'fr', targetPath = `config/locales/${locale}.yml`) {
   return {
@@ -117,7 +117,7 @@ describe('sendAlignedImport', () => {
   });
 
   describe('when a sync lands while the import is under way', () => {
-    let tip: { sha: string; moved: Set<string> };
+    let tip: { sha: string; values: Map<string, string> };
 
     function changedKeys(callIndex: number): string[] {
       return mockCreatePullRequestImport.mock.calls[callIndex][0].files
@@ -126,11 +126,16 @@ describe('sendAlignedImport', () => {
 
     function syncChanges(...keys: string[]) {
       tip.sha = 'sync-commit';
-      keys.forEach(key => tip.moved.add(key));
+      keys.forEach(key => tip.values.set(key, 'Profil (relu)'));
+    }
+
+    function restoreStartValue(key: string) {
+      tip.sha = 'restore-commit';
+      tip.values.set(key, 'Profil !');
     }
 
     beforeEach(() => {
-      tip = { sha: 'checkout', moved: new Set() };
+      tip = { sha: 'our-commit', values: new Map() };
       importGuard.setDependencies({
         env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
         git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : tip.sha) : ''),
@@ -138,7 +143,8 @@ describe('sendAlignedImport', () => {
         flatValuesAt: (file: { locale: string }, ref: string) => new Proxy({}, {
           get: (_target, key: string) => {
             if (file.locale === 'en') return 'Your profile';
-            return ref === 'FETCH_HEAD' && tip.moved.has(key) ? 'Profil (relu)' : 'Profil !';
+            if (ref === 'checkout') return 'Profil !';
+            return tip.values.get(key) ?? 'Votre profil';
           }
         })
       });
@@ -166,6 +172,33 @@ describe('sendAlignedImport', () => {
 
       expect(mockCreatePullRequestImport).toHaveBeenCalledTimes(1);
       expect(logged()).not.toContain('Could not');
+    });
+
+    it('leaves out a value a newer commit set back to the start value before the import', async () => {
+      restoreStartValue('profile.title');
+
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toEqual(['profile.hint']);
+    });
+
+    it('leaves out a value a newer commit set back to the start value before a retry', async () => {
+      mockCreatePullRequestImport
+        .mockRejectedValueOnce(new PullRequestImportError('Translation ingestion failed with status 502', 502))
+        .mockResolvedValueOnce({ imported_count: 1, skipped: [] });
+      sleep.mockImplementation(async () => restoreStartValue('profile.title'));
+
+      await sendAlignedImport([cell('profile.title'), cell('profile.hint')], request, { console: { log }, sleep });
+
+      expect(changedKeys(1)).toEqual(['profile.hint']);
+    });
+
+    it('keeps values not committed yet that the tip holds as at the start (--skip-commit)', async () => {
+      restoreStartValue('profile.title');
+
+      await sendAlignedImport([cell('profile.title')], { ...request, valuesFrom: 'working-tree' }, { console: { log }, sleep });
+
+      expect(changedKeys(0)).toEqual(['profile.title']);
     });
 
     it('checks the branch again before each request, and leaves out what a sync changed in between', async () => {

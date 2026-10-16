@@ -603,6 +603,21 @@ describe('translate --changed-only aligning reworded source texts', () => {
     expect(alignedImports()).toHaveLength(1);
   });
 
+  it('does not stage an aligned value a newer commit set back after ours landed', async () => {
+    const atStart = { fr: { 'reminders.remind_tomorrow': 'Rappel demain' }, en: { 'reminders.remind_tomorrow': 'Snooze until tomorrow' } };
+    importGuard.setDependencies({
+      env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+      git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'restore-commit') : ''),
+      fetchActionToken: async () => ({ token: null }),
+      flatValuesAt: (file: { locale: 'fr' | 'en' }) => atStart[file.locale]
+    });
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalled();
+    expect(alignedImports()).toHaveLength(0);
+  });
+
   describe('under --skip-commit, before the pipeline commits the aligned values', () => {
     const checkout = {
       fr: { 'reminders.remind_tomorrow': 'Rappel demain', 'reminders.later': 'Plus tard' },

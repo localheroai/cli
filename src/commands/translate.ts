@@ -348,7 +348,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     const branch = await getCurrentBranch();
     if (!branch) return;
 
-    const files = await leaveOutMovedCells(targetChanges, sourceLocale, console);
+    const files = await leaveOutMovedCells(targetChanges, sourceLocale, console, 'working-tree');
     if (files.length === 0) return;
 
     let importResult: PullRequestImportResponse;
@@ -477,7 +477,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     const branch = await getCurrentBranch();
     if (!branch) return;
-    await sendAlignedImport(alignedCells, { projectId, branch, jobGroupId, sourceLocale }, { console });
+    const valuesFrom = options.skipCommit ? 'working-tree' : 'our-commit';
+    await sendAlignedImport(alignedCells, { projectId, branch, jobGroupId, sourceLocale, valuesFrom }, { console });
   }
 
   if (options.changedOnly && !isGitAvailable()) {

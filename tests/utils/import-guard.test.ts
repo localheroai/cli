@@ -54,8 +54,8 @@ describe('leaveOutMovedCells', () => {
     return log.mock.calls.map(call => String(call[0])).join('\n');
   }
 
-  function guard(files: TargetChangeFile[]) {
-    return leaveOutMovedCells(files, 'en', { log });
+  function guard(files: TargetChangeFile[], valuesFrom: 'working-tree' | 'our-commit' = 'working-tree') {
+    return leaveOutMovedCells(files, 'en', { log }, valuesFrom);
   }
 
   it('leaves out a value a sync changed after the checkout and imports the rest', async () => {
@@ -339,6 +339,36 @@ describe('leaveOutMovedCells', () => {
     expect(await guard(files)).toEqual(files);
     expect(logged()).toContain('Could not check whether the branch moved during this run');
     expect(flatValuesAt).not.toHaveBeenCalled();
+  });
+
+  describe('for values our own commit landed', () => {
+    const aligned = () => frFile([{ key: 'greeting', status: 'updated', value: 'Salut', aligned_source: 'Hello' }]);
+
+    beforeEach(() => {
+      checkoutFiles = {
+        'config/locales/fr.yml#fr': { 'greeting': 'Bonjour' },
+        'config/locales/en.yml#en': { 'greeting': 'Hello' }
+      };
+    });
+
+    it('leaves out a value a newer commit set back to what it was when the run started', async () => {
+      tipFiles = { ...checkoutFiles };
+
+      expect(await guard([aligned()], 'our-commit')).toEqual([]);
+    });
+
+    it('leaves out a value whose commit the branch dropped, back to where the run started', async () => {
+      tipHead = CHECKOUT;
+      tipFiles = { ...checkoutFiles };
+
+      expect(await guard([aligned()], 'our-commit')).toEqual([]);
+    });
+
+    it('keeps a value the tip still holds as our commit landed it', async () => {
+      tipFiles = { ...checkoutFiles, 'config/locales/fr.yml#fr': { 'greeting': 'Salut' } };
+
+      expect(keys(await guard([aligned()], 'our-commit'))).toEqual(['fr:greeting']);
+    });
   });
 
   it('fetches the branch with the app token, through the URL and without a depth', async () => {
