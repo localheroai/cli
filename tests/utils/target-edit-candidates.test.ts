@@ -332,7 +332,7 @@ describe('collectTargetEditCandidates', () => {
     }]);
   });
 
-  test('checks nothing when more than 250 keys were edited', () => {
+  test('collects every edited key without printing anything, leaving the limit to the edit check', () => {
     const keys = Array.from({ length: 251 }, (_, i) => `key_${i}`);
     const yaml = (locale: string, suffix: string) => `${locale}:\n${keys.map(key => `  ${key}: "${locale} ${key}${suffix}"`).join('\n')}\n`;
     setupGit(
@@ -355,8 +355,8 @@ describe('collectTargetEditCandidates', () => {
       false
     );
 
-    expect(result).toEqual([]);
-    expect(String(log.mock.calls[0][0])).toContain('more than 250');
+    expect(result).toHaveLength(251);
+    expect(log).not.toHaveBeenCalled();
     log.mockRestore();
   });
 

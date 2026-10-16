@@ -113,6 +113,28 @@ describe('runTargetEditAlignment', () => {
     });
   });
 
+  it('checks at most 250 keys and says how many it left out once the server answered', async () => {
+    const candidates = Array.from({ length: 251 }, (_, i) => candidate(`key_${i}`));
+    mockCreateTargetEditAlignment.mockImplementation(respondWith(item => answered(item, 'no_trigger')));
+
+    await runTargetEditAlignment(candidates, request, deps);
+
+    const sent = mockCreateTargetEditAlignment.mock.calls.flatMap((call: any) => call[0].items);
+    expect(sent).toHaveLength(250);
+    expect(logged()).toContain('Not following 1 more key: more than 250 to check.');
+  });
+
+  it('says nothing about the limit when the feature is off or the server is older', async () => {
+    const candidates = Array.from({ length: 251 }, (_, i) => candidate(`key_${i}`));
+    mockCreateTargetEditAlignment.mockResolvedValueOnce({ enabled: false, items: [] });
+
+    await runTargetEditAlignment(candidates, request, deps);
+    mockCreateTargetEditAlignment.mockRejectedValueOnce(new TargetEditAlignmentRequestError('Not found', 404));
+    await runTargetEditAlignment(candidates, request, deps);
+
+    expect(mockConsole.log).not.toHaveBeenCalled();
+  });
+
   it('writes the updated source text into the source file', async () => {
     mockCreateTargetEditAlignment.mockImplementation(respondWith(updated));
 

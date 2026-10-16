@@ -45,6 +45,7 @@ interface UpdatedKey {
 }
 
 const MAX_ITEMS_PER_REQUEST = 25;
+const MAX_KEYS = 250;
 const NOT_FOUND_STATUS = 404;
 const INVALID_PARAMETERS_STATUS = 422;
 const UPDATED = 'updated';
@@ -66,11 +67,13 @@ export async function runTargetEditAlignment(
 ): Promise<TargetEditAlignmentResult> {
   const result = emptyTargetEditResult();
   const updatedKeys: UpdatedKey[] = [];
-  for (const chunk of chunked(candidates, MAX_ITEMS_PER_REQUEST)) {
+  let enabled = false;
+  for (const chunk of chunked(candidates.slice(0, MAX_KEYS), MAX_ITEMS_PER_REQUEST)) {
     try {
       const response = await createTargetEditAlignment({ ...request, items: chunk.map(toRequestItem) });
       if (!response.enabled) return result;
 
+      enabled = true;
       matchedItems(chunk, response.items).forEach((item, index) => {
         if (isUpdate(item)) {
           updatedKeys.push({ candidate: chunk[index], item });
@@ -84,6 +87,11 @@ export async function runTargetEditAlignment(
       if (error instanceof TargetEditAlignmentRequestError && error.status === NOT_FOUND_STATUS) return result;
       logRequestFailure(deps.console, error);
     }
+  }
+
+  const leftOut = candidates.length - MAX_KEYS;
+  if (enabled && leftOut > 0) {
+    deps.console.log(chalk.yellow(`Not following ${leftOut} more ${leftOut === 1 ? 'key' : 'keys'}: more than ${MAX_KEYS} to check.`));
   }
 
   for (const [sourcePath, fileKeys] of groupBy(updatedKeys, updated => updated.candidate.source_path)) {

@@ -1,5 +1,4 @@
 import { readFileSync } from 'fs';
-import chalk from 'chalk';
 import type { ProjectConfig, TranslationFile } from '../types/index.js';
 import { getBaseBranch, resolveCompareRef, extractLocaleContent, type FileDiff } from './git-changes.js';
 import { parseFile } from './files.js';
@@ -17,7 +16,6 @@ export interface TargetEditCandidate extends Omit<TargetEditItem, 'targets'> {
   targets: TargetEditCandidateTarget[];
 }
 
-const MAX_KEYS = 250;
 
 /**
  * Collect the keys whose translation or source text this branch changed, with
@@ -61,7 +59,7 @@ export function collectTargetEditCandidates(
     }
   }
 
-  return withinLimit(candidates);
+  return candidates;
 }
 
 const YAML_FORMATS = new Set(['yml', 'yaml']);
@@ -129,11 +127,4 @@ function editedKeys(
     }
   }
   return keysBySource;
-}
-
-function withinLimit(candidates: TargetEditCandidate[]): TargetEditCandidate[] {
-  if (candidates.length <= MAX_KEYS) return candidates;
-
-  console.log(chalk.yellow(`Not updating source texts to match ${candidates.length} edited translations: more than ${MAX_KEYS} keys to check.`));
-  return [];
 }
