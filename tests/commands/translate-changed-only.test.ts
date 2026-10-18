@@ -11,6 +11,7 @@ const mockProcessTranslationBatches = jest.fn<any>();
 const mockKeepAlignedCellsOnDisk = jest.fn<any>();
 
 let translate: any;
+let importGuard: any;
 
 beforeAll(async () => {
   const actualGitChanges: any = await import('../../src/utils/git-changes.js');
@@ -68,6 +69,7 @@ beforeAll(async () => {
   }));
 
   translate = (await import('../../src/commands/translate.js')).translate;
+  importGuard = (await import('../../src/utils/import-guard.js')).importGuard;
 });
 
 const sourcePath = 'config/locales/en.yml';
@@ -103,6 +105,7 @@ describe('translate --changed-only summary', () => {
 
   beforeEach(() => {
     mockConsole = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    importGuard.setDependencies({ env: {} });
     mockFilterByGitChanges.mockReturnValue({});
     mockFinalizeTranslationJobs.mockResolvedValue({});
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 0, skipped: [], unchanged: [] });
@@ -201,6 +204,48 @@ describe('translate --changed-only summary', () => {
     expect(output).not.toContain('source text changed');
   });
 
+  describe('when the branch moved after the checkout', () => {
+    beforeEach(() => {
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'synced-tip') : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: (_file: unknown, ref: string) => (ref === 'checkout'
+          ? { greeting: 'Bonjour', farewell: 'Au revoir' }
+          : { greeting: 'Bonjour (relu)', farewell: 'Au revoir' })
+      });
+      mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [], unchanged: [] });
+    });
+
+    function frenchEdits(values: Record<string, string>) {
+      return [{
+        path: targetPath,
+        source_path: sourcePath,
+        locale: 'fr',
+        format: 'yaml',
+        changes: Object.entries(values).map(([key, value]) => ({ key, status: 'updated', value }))
+      }];
+    }
+
+    it('sends only the values the newer commit left alone, and says how many it left out', async () => {
+      mockDetectTargetChanges.mockReturnValue(frenchEdits({ greeting: 'Bonjour', farewell: 'Au revoir' }));
+
+      await translate({ changedOnly: true }, deps);
+
+      const sent = mockCreatePullRequestImport.mock.calls[0][0].files;
+      expect(sent[0].changes.map((change: any) => change.key)).toEqual(['farewell']);
+      expect(loggedLines()).toContain('Left out 1 value the branch changed after this run started');
+    });
+
+    it('sends nothing when the newer commit changed every value, so nothing is withdrawn', async () => {
+      mockDetectTargetChanges.mockReturnValue(frenchEdits({ greeting: 'Bonjour' }));
+
+      await translate({ changedOnly: true }, deps);
+
+      expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    });
+  });
+
   it('fails without sending anything or reporting success when the project does not exist', async () => {
     mockDetectTargetChanges.mockReturnValue([targetChange('greeting')]);
     deps.settingsUtils.fetchSettings.mockRejectedValue(
@@ -263,6 +308,7 @@ describe('translate --changed-only aligning reworded source texts', () => {
   beforeEach(() => {
     process.env.GITHUB_ACTIONS = 'true';
     mockConsole = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    importGuard.setDependencies({ env: {} });
     mockFilterByGitChanges.mockReturnValue({});
     mockFinalizeTranslationJobs.mockResolvedValue({});
     mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [], unchanged: [] });
@@ -555,6 +601,70 @@ describe('translate --changed-only aligning reworded source texts', () => {
 
     expect(deps.gitUtils.autoCommitChanges).not.toHaveBeenCalled();
     expect(alignedImports()).toHaveLength(1);
+  });
+
+  it('does not stage an aligned value a newer commit set back after ours landed', async () => {
+    const atStart = { fr: { 'reminders.remind_tomorrow': 'Rappel demain' }, en: { 'reminders.remind_tomorrow': 'Snooze until tomorrow' } };
+    importGuard.setDependencies({
+      env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+      git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'restore-commit') : ''),
+      fetchActionToken: async () => ({ token: null }),
+      flatValuesAt: (file: { locale: 'fr' | 'en' }) => atStart[file.locale]
+    });
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalled();
+    expect(alignedImports()).toHaveLength(0);
+  });
+
+  describe('under --skip-commit, before the pipeline commits the aligned values', () => {
+    const checkout = {
+      fr: { 'reminders.remind_tomorrow': 'Rappel demain', 'reminders.later': 'Plus tard' },
+      en: { 'reminders.remind_tomorrow': 'Snooze until tomorrow', 'reminders.later': 'Snooze until tomorrow' }
+    };
+
+    function guardSees(tipHead: string, tip: Record<string, Record<string, string>>) {
+      importGuard.setDependencies({
+        env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+        git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : tipHead) : ''),
+        fetchActionToken: async () => ({ token: null }),
+        flatValuesAt: (file: { locale: 'fr' | 'en' }, ref: string) => (ref === 'checkout' ? checkout : tip)[file.locale]
+      });
+    }
+
+    function alignedKeys(): string[] {
+      return alignedImports().flatMap((params: any) => params.files.flatMap((file: any) => file.changes.map((change: any) => change.key)));
+    }
+
+    beforeEach(() => {
+      mockCollectAlignmentCandidates.mockReturnValue([candidate('reminders.remind_tomorrow'), candidate('reminders.later')]);
+    });
+
+    it('stages every aligned value when the branch has not moved', async () => {
+      guardSees('checkout', checkout);
+
+      await translate({ changedOnly: true, skipCommit: true }, deps);
+
+      expect(alignedKeys()).toEqual(['reminders.remind_tomorrow', 'reminders.later']);
+    });
+
+    it('stages every aligned value when a newer commit left their cells alone', async () => {
+      guardSees('unrelated-push', checkout);
+
+      await translate({ changedOnly: true, skipCommit: true }, deps);
+
+      expect(alignedKeys()).toEqual(['reminders.remind_tomorrow', 'reminders.later']);
+    });
+
+    it('leaves out only the aligned value a sync changed after the checkout', async () => {
+      guardSees('sync', { ...checkout, fr: { ...checkout.fr, 'reminders.remind_tomorrow': 'Rappel demain (relu)' } });
+
+      await translate({ changedOnly: true, skipCommit: true }, deps);
+
+      expect(alignedKeys()).toEqual(['reminders.later']);
+      expect(loggedLines()).toContain('Left out 1 value the branch changed after this run started');
+    });
   });
 
   it('never stages aligned values outside GitHub Actions', async () => {
