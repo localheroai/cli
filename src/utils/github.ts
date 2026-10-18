@@ -683,6 +683,10 @@ ${buildExtractStep(options)}      - name: Translate
       const { keysTranslated, languages } = translationSummary;
       summaryLines.push(`${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languages.join(', ')}`);
     }
+    const sourceTextsUpdated = translationSummary?.sourceTextsUpdated ?? 0;
+    if (sourceTextsUpdated > 0) {
+      summaryLines.push(`Updated ${sourceTextsUpdated} source ${sourceTextsUpdated > 1 ? 'texts' : 'text'} to match edited translations`);
+    }
     const keysAligned = translationSummary?.keysAligned ?? 0;
     if (keysAligned > 0) {
       const alignedLanguages = (translationSummary?.alignedLanguages ?? []).join(', ');

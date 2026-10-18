@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { importGuard, leaveOutMovedCells } from '../../src/utils/import-guard.js';
+import { importGuard, leaveOutMovedCells, triggerPathKey } from '../../src/utils/import-guard.js';
 import type { TargetChangeFile } from '../../src/utils/target-changes.js';
 
 const CHECKOUT = 'aaaaaaa';
@@ -368,6 +368,79 @@ describe('leaveOutMovedCells', () => {
       tipFiles = { ...checkoutFiles, 'config/locales/fr.yml#fr': { 'greeting': 'Salut' } };
 
       expect(keys(await guard([aligned()], 'our-commit'))).toEqual(['fr:greeting']);
+    });
+  });
+
+  describe('for a source text written to follow an edited translation', () => {
+    const enPath = 'config/locales/en.yml';
+    const svPath = 'config/locales/sv.yml';
+    const triggerPaths = new Map([[triggerPathKey(enPath, 'sv'), svPath]]);
+    const sourceCell = (): TargetChangeFile => ({
+      path: enPath, source_path: enPath, locale: 'en', format: 'yml',
+      changes: [{
+        key: 'published', status: 'updated', value: 'Published now', old_value: 'Published',
+        source_value: 'Published now', aligned_source: 'Publicerad nu', trigger_locale: 'sv'
+      }]
+    });
+    const nbCell = (): TargetChangeFile => ({
+      path: 'config/locales/nb.yml', source_path: enPath, locale: 'nb', format: 'yml',
+      changes: [{ key: 'published', status: 'updated', value: 'Publisert nå', source_value: 'Published now', aligned_source: 'Published now', trigger_locale: 'sv' }]
+    });
+
+    beforeEach(() => {
+      checkoutFiles = {
+        [`${enPath}#en`]: { 'published': 'Published' },
+        [`${svPath}#sv`]: { 'published': 'Publicerad nu' },
+        'config/locales/nb.yml#nb': { 'published': 'Publisert' }
+      };
+      tipFiles = {
+        [`${enPath}#en`]: { 'published': 'Published now' },
+        [`${svPath}#sv`]: { 'published': 'Publicerad nu' },
+        'config/locales/nb.yml#nb': { 'published': 'Publisert nå' }
+      };
+    });
+
+    function guardFollowing(files: TargetChangeFile[]) {
+      return leaveOutMovedCells(files, 'en', { log }, 'our-commit', triggerPaths);
+    }
+
+    it('keeps it, checking its aligned source against the edited translation, when nothing moved since our commit', async () => {
+      expect(keys(await guardFollowing([sourceCell(), nbCell()]))).toEqual(['en:published', 'nb:published']);
+    });
+
+    it('leaves it out when the tip changed the source text after the run started', async () => {
+      tipFiles[`${enPath}#en`] = { 'published': 'Published right now' };
+
+      expect(keys(await guardFollowing([sourceCell()]))).toEqual([]);
+    });
+
+    it('leaves it out when the tip changed the edited translation after the run started', async () => {
+      tipFiles[`${svPath}#sv`] = { 'published': 'Publicerad just nu' };
+
+      expect(keys(await guardFollowing([sourceCell()]))).toEqual([]);
+    });
+  });
+
+  describe('for a reverted edit', () => {
+    const reverted = () => ({
+      path: 'config/locales/sv.yml', source_path: 'config/locales/en.yml', locale: 'sv', format: 'yml',
+      changes: [{ key: 'published', status: 'reverted' as const, value: 'Publicerad', old_value: 'Publicerad' }]
+    });
+
+    beforeEach(() => {
+      checkoutFiles = { 'config/locales/sv.yml#sv': { 'published': 'Publicerad' } };
+    });
+
+    it('keeps it while the tip still holds the value sent', async () => {
+      tipFiles = { 'config/locales/sv.yml#sv': { 'published': 'Publicerad' } };
+
+      expect(keys(await guard([reverted()]))).toEqual(['sv:published']);
+    });
+
+    it('leaves it out once the tip holds another value', async () => {
+      tipFiles = { 'config/locales/sv.yml#sv': { 'published': 'Publicerad igen' } };
+
+      expect(keys(await guard([reverted()]))).toEqual([]);
     });
   });
 

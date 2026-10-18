@@ -156,6 +156,7 @@ export interface CommitSummary {
   languages: string[];
   keysAligned?: number;
   alignedLanguages?: string[];
+  sourceTextsUpdated?: number;
   viewUrl?: string;
   editors?: string[];
   otherEditors?: number;

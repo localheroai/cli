@@ -76,6 +76,15 @@ describe('keepAlignedCellsOnDisk', () => {
     expect(kept).toEqual([]);
   });
 
+  it('keeps a source text written to follow an edited translation', () => {
+    const source = path.join(dir, 'en.yml');
+
+    const kept = keepAlignedCellsOnDisk([cell('profile.title', 'Your profile', source, 'en')], 'en', { log });
+
+    expect(kept).toHaveLength(1);
+    expect(log).not.toHaveBeenCalled();
+  });
+
   it('drops cells whose source text changed after alignment', () => {
     const target = path.join(dir, 'fr.yml');
     writeFileSync(target, 'fr:\n  profile:\n    title: "Votre profil"\n    hint: "Votre profil"\n');

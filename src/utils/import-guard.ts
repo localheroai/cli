@@ -26,6 +26,16 @@ const defaultDependencies: ImportGuardDependencies = {
 type ValuesAt = (file: FileLocation) => Record<string, unknown> | null;
 
 /**
+ * Where each edited translation lives, by source file and locale. A source text
+ * written to follow an edit carries that edit as its aligned source.
+ */
+export type TriggerPaths = Map<string, string>;
+
+export function triggerPathKey(sourcePath: string, locale: string): string {
+  return `${sourcePath}\0${locale}`;
+}
+
+/**
  * Where the values sent come from: the files as the run found or wrote them,
  * or a commit of ours that landed on the branch (pushed, replayed or signed).
  */
@@ -67,7 +77,8 @@ export const importGuard = {
     files: TargetChangeFile[],
     sourceLocale: string,
     logger: Logger,
-    valuesFrom: SentValuesFrom
+    valuesFrom: SentValuesFrom,
+    triggerPaths: TriggerPaths = new Map()
   ): Promise<TargetChangeFile[]> {
     const { env, git } = this.deps;
     const branch = env.GITHUB_HEAD_REF;
@@ -95,7 +106,7 @@ export const importGuard = {
     let leftOut = 0;
     const kept = files
       .map(file => {
-        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, valuesFrom, tip, start));
+        const changes = file.changes.filter(change => !changedOnTip(file, change, sourceLocale, valuesFrom, triggerPaths, tip, start));
         leftOut += file.changes.length - changes.length;
         return { ...file, changes };
       })
@@ -170,9 +181,10 @@ export function leaveOutMovedCells(
   files: TargetChangeFile[],
   sourceLocale: string,
   logger: Logger,
-  valuesFrom: SentValuesFrom
+  valuesFrom: SentValuesFrom,
+  triggerPaths?: TriggerPaths
 ): Promise<TargetChangeFile[]> {
-  return importGuard.leaveOutMovedCells(files, sourceLocale, logger, valuesFrom);
+  return importGuard.leaveOutMovedCells(files, sourceLocale, logger, valuesFrom, triggerPaths);
 }
 
 function changedOnTip(
@@ -180,6 +192,7 @@ function changedOnTip(
   change: TargetChange,
   sourceLocale: string,
   valuesFrom: SentValuesFrom,
+  triggerPaths: TriggerPaths,
   tip: ValuesAt,
   start: ValuesAt
 ): boolean {
@@ -188,13 +201,37 @@ function changedOnTip(
     return !sameValue(atTip, start(cell)?.[change.key]) && !sameValue(atTip, sent);
   };
 
-  const targetChanged = valuesFrom === 'our-commit'
+  // A reverted change withdraws a proposal only while the tip still holds the value it names.
+  const mustHoldSentValue = valuesFrom === 'our-commit' || change.status === 'reverted';
+  const targetChanged = mustHoldSentValue
     ? !sameValue(tip(file)?.[change.key], change.value)
     : cellChanged(file, change.value);
   if (targetChanged) return true;
 
-  const sourceFile = { path: file.source_path, format: path.extname(file.source_path).slice(1), locale: sourceLocale };
-  return [change.source_value, change.aligned_source].some(source => source !== undefined && cellChanged(sourceFile, source));
+  const sourceFile = fileAt(file.source_path, sourceLocale);
+  if (change.source_value !== undefined && cellChanged(sourceFile, change.source_value)) return true;
+  if (change.aligned_source === undefined) return false;
+
+  const alignedTo = alignedSourceFile(file, change, sourceLocale, triggerPaths) ?? sourceFile;
+  return cellChanged(alignedTo, change.aligned_source);
+}
+
+// The source text that followed an edited translation is aligned to that
+// translation; every other cell is aligned to the source text.
+function alignedSourceFile(
+  file: TargetChangeFile,
+  change: TargetChange,
+  sourceLocale: string,
+  triggerPaths: TriggerPaths
+): FileLocation | null {
+  if (file.locale !== sourceLocale || !change.trigger_locale) return null;
+
+  const triggerPath = triggerPaths.get(triggerPathKey(file.source_path, change.trigger_locale));
+  return triggerPath ? fileAt(triggerPath, change.trigger_locale) : null;
+}
+
+function fileAt(filePath: string, locale: string): FileLocation {
+  return { path: filePath, format: path.extname(filePath).slice(1), locale };
 }
 
 // The server compares values in the form it stores them; a missing cell matches only another missing one.

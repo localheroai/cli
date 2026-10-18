@@ -121,6 +121,15 @@ describe('runSourceAlignment', () => {
     expect(result.enabled).toBe(true);
   });
 
+  it('keeps the locale of the edit an item follows on its aligned cell, without sending it', async () => {
+    mockCreateSourceAlignment.mockImplementation(echoResponse('aligned', { value: 'Votre profil' }));
+
+    const result = await runSourceAlignment([candidate('title', 'fr', { trigger_locale: 'sv' })], request, deps);
+
+    expect(mockCreateSourceAlignment.mock.calls[0][0].items[0]).not.toHaveProperty('trigger_locale');
+    expect(result.alignedCells[0].trigger_locale).toBe('sv');
+  });
+
   it('writes a multi-language file under the target locale', async () => {
     const viewPath = 'app/views/profile/show.i18n.yml';
     mockCreateSourceAlignment.mockImplementation(echoResponse('aligned', { value: 'Votre profil' }));

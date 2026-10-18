@@ -1,4 +1,7 @@
 import { describe, it, expect, jest, beforeAll, beforeEach, afterEach } from '@jest/globals';
+import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import path from 'path';
 import { ApiResponseError } from '../../src/types/index.js';
 
 const mockFilterByGitChanges = jest.fn<any>();
@@ -9,6 +12,8 @@ const mockCollectAlignmentCandidates = jest.fn<any>();
 const mockCreateSourceAlignment = jest.fn<any>();
 const mockProcessTranslationBatches = jest.fn<any>();
 const mockKeepAlignedCellsOnDisk = jest.fn<any>();
+const mockCollectTargetEditCandidates = jest.fn<any>();
+const mockCreateTargetEditAlignment = jest.fn<any>();
 
 let translate: any;
 let importGuard: any;
@@ -56,6 +61,16 @@ beforeAll(async () => {
     createSourceAlignment: mockCreateSourceAlignment
   }));
 
+  await jest.unstable_mockModule('../../src/utils/target-edit-candidates.js', () => ({
+    collectTargetEditCandidates: mockCollectTargetEditCandidates
+  }));
+
+  const actualTargetEditAlignments: any = await import('../../src/api/target-edit-alignments.js');
+  await jest.unstable_mockModule('../../src/api/target-edit-alignments.js', () => ({
+    ...actualTargetEditAlignments,
+    createTargetEditAlignment: mockCreateTargetEditAlignment
+  }));
+
   const actualProcessor: any = await import('../../src/utils/translation-processor.js');
   await jest.unstable_mockModule('../../src/utils/translation-processor.js', () => ({
     ...actualProcessor,
@@ -74,6 +89,10 @@ beforeAll(async () => {
 
 const sourcePath = 'config/locales/en.yml';
 const targetPath = 'config/locales/fr.yml';
+
+beforeEach(() => {
+  mockCollectTargetEditCandidates.mockReturnValue([]);
+});
 
 function sourceChange(key: string) {
   return {
@@ -674,5 +693,287 @@ describe('translate --changed-only aligning reworded source texts', () => {
 
     expect(deps.translationUtils.updateTranslationFile).toHaveBeenCalled();
     expect(alignedImports()).toHaveLength(0);
+  });
+});
+
+describe('translate --changed-only following an edited translation', () => {
+  const english = 'Your profile is published';
+  const englishNow = 'Your profile is published now';
+  const swedishNow = 'Din profil är publicerad nu';
+  const norwegian = 'Profilen din er publisert';
+  let dir: string;
+  let enPath: string;
+  let mockConsole: { log: jest.Mock; error: jest.Mock; warn: jest.Mock };
+  let deps: any;
+  const originalGithubActions = process.env.GITHUB_ACTIONS;
+
+  function englishFile(value: string): string {
+    return `en:\n  profile:\n    published: "${value}"\n`;
+  }
+
+  function stepACandidate() {
+    return {
+      source_path: enPath,
+      format: 'yml',
+      key: 'profile.published',
+      source_base: english,
+      source: english,
+      targets: [
+        { locale: 'sv', target_path: path.join(dir, 'sv.yml'), format: 'yml', writable: true, base: 'Din profil är publicerad', current: swedishNow },
+        { locale: 'nb', target_path: path.join(dir, 'nb.yml'), format: 'yml', writable: true, base: norwegian, current: norwegian }
+      ]
+    };
+  }
+
+  function stepAAnswer(extra: Record<string, unknown> = {}) {
+    return async (params: any) => ({
+      enabled: true,
+      items: params.items.map((item: any) => ({
+        source_path: item.source_path,
+        key: item.key,
+        status: 'updated',
+        trigger_locale: 'sv',
+        trigger_value: swedishNow,
+        source: englishNow,
+        align_locales: ['nb'],
+        trigger_at_base: false,
+        ...extra
+      }))
+    });
+  }
+
+  function svChange() {
+    return {
+      path: path.join(dir, 'sv.yml'),
+      source_path: enPath,
+      locale: 'sv',
+      format: 'yml',
+      changes: [{ key: 'profile.published', status: 'updated', value: swedishNow, old_value: 'Din profil är publicerad' }]
+    };
+  }
+
+  beforeAll(() => {
+    jest.spyOn(process, 'exit').mockImplementation((() => undefined) as any);
+  });
+
+  beforeEach(() => {
+    process.env.GITHUB_ACTIONS = 'true';
+    dir = mkdtempSync(path.join(tmpdir(), 'follow-edit-'));
+    enPath = path.join(dir, 'en.yml');
+    writeFileSync(enPath, englishFile(english));
+
+    mockConsole = { log: jest.fn(), error: jest.fn(), warn: jest.fn() };
+    mockFilterByGitChanges.mockReturnValue({});
+    mockFinalizeTranslationJobs.mockResolvedValue({});
+    mockCreatePullRequestImport.mockResolvedValue({ imported_count: 1, skipped: [], unchanged: [] });
+    mockDetectTargetChanges.mockReturnValue([svChange()]);
+    mockCollectAlignmentCandidates.mockReturnValue([]);
+    mockCollectTargetEditCandidates.mockReturnValue([stepACandidate()]);
+    mockCreateTargetEditAlignment.mockImplementation(stepAAnswer());
+    mockKeepAlignedCellsOnDisk.mockImplementation((cells: any[]) => cells);
+    mockCreateSourceAlignment.mockImplementation(alignedResponse('Profilen din er publisert nå'));
+
+    deps = {
+      console: mockConsole,
+      configUtils: {
+        getProjectConfig: jest.fn<any>().mockResolvedValue({
+          projectId: 'demo',
+          sourceLocale: 'en',
+          outputLocales: ['sv', 'nb'],
+          translationFiles: { paths: ['config/locales/'] }
+        }),
+        updateLastSyncedAt: jest.fn<any>().mockResolvedValue(true)
+      },
+      authUtils: { checkAuth: jest.fn<any>().mockResolvedValue(true) },
+      settingsUtils: { fetchSettings: jest.fn<any>().mockResolvedValue({ settings: { target_languages: [] } }) },
+      fileUtils: {
+        findTranslationFiles: jest.fn<any>().mockResolvedValue({
+          sourceFiles: [{ path: enPath, format: 'yml', locale: 'en', content: Buffer.from(englishFile(english)).toString('base64') }],
+          targetFilesByLocale: {
+            sv: [{ path: path.join(dir, 'sv.yml'), format: 'yml', locale: 'sv', content: '' }],
+            nb: [{ path: path.join(dir, 'nb.yml'), format: 'yml', locale: 'nb', content: '' }]
+          },
+          allFiles: [{ path: enPath, locale: 'en' }]
+        })
+      },
+      translationUtils: {
+        createTranslationJob: jest.fn(),
+        checkJobStatus: jest.fn(),
+        updateTranslationFile: jest.fn<any>().mockImplementation(async (filePath: string, values: Record<string, string>) => {
+          if (filePath === enPath) writeFileSync(enPath, englishFile(values['profile.published']));
+          return { updatedKeys: Object.keys(values), created: false };
+        }),
+        findMissingTranslations: jest.fn(),
+        batchKeysWithMissing: jest.fn<any>().mockReturnValue({ batches: [{}], errors: [] }),
+        findMissingTranslationsByLocale: jest.fn<any>().mockReturnValue({ missing: {}, removed: [] })
+      },
+      gitUtils: { autoCommitChanges: jest.fn<any>().mockResolvedValue('new') },
+      execUtils: { execSync: jest.fn() }
+    };
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    rmSync(dir, { recursive: true, force: true });
+    process.exitCode = undefined;
+    if (originalGithubActions === undefined) {
+      delete process.env.GITHUB_ACTIONS;
+    } else {
+      process.env.GITHUB_ACTIONS = originalGithubActions;
+    }
+  });
+
+  function loggedLines(): string {
+    return mockConsole.log.mock.calls.map((call) => String(call[0])).join('\n');
+  }
+
+  function alignedImport(): any {
+    return mockCreatePullRequestImport.mock.calls
+      .map((call: any) => call[0])
+      .find((params: any) => params.files.some((file: any) => file.changes.some((change: any) => change.aligned_source)));
+  }
+
+  function changeIn(params: any, locale: string): any {
+    return params.files.find((file: any) => file.locale === locale)?.changes[0];
+  }
+
+  it('writes the source text, aligns the other locales from it, commits, then stages both', async () => {
+    await translate({ changedOnly: true }, deps);
+
+    expect(deps.translationUtils.updateTranslationFile).toHaveBeenCalledWith(
+      enPath, { 'profile.published': englishNow }, 'en', enPath, undefined, expect.objectContaining({ projectId: 'demo' })
+    );
+    expect(mockCreateSourceAlignment).toHaveBeenCalledTimes(1);
+    expect(mockCreateSourceAlignment.mock.calls[0][0]).toMatchObject({ locale: 'nb' });
+    expect(mockCreateSourceAlignment.mock.calls[0][0].items).toEqual([expect.objectContaining({
+      key: 'profile.published',
+      previous_source: english,
+      source: englishNow,
+      target_base: norwegian,
+      target_current: norwegian
+    })]);
+    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalledWith('config/locales/', expect.objectContaining({
+      keysAligned: 1,
+      alignedLanguages: ['nb'],
+      sourceTextsUpdated: 1
+    }));
+    expect(changeIn(alignedImport(), 'en')).toMatchObject({ value: englishNow, aligned_source: swedishNow, trigger_locale: 'sv' });
+    expect(changeIn(alignedImport(), 'nb')).toMatchObject({ aligned_source: englishNow, trigger_locale: 'sv' });
+    expect(loggedLines()).toContain('profile.published: en updated to match the sv edit');
+  });
+
+  it('runs detection, the edit check and its write ahead of missing keys, alignment and the commit', async () => {
+    await translate({ changedOnly: true }, deps);
+
+    const order = [
+      mockDetectTargetChanges,
+      mockCreateTargetEditAlignment,
+      deps.translationUtils.updateTranslationFile,
+      deps.translationUtils.findMissingTranslationsByLocale,
+      mockFilterByGitChanges,
+      mockCollectAlignmentCandidates,
+      mockCreateSourceAlignment,
+      mockFinalizeTranslationJobs
+    ].map((mock: any) => mock.mock.invocationCallOrder[0]);
+    const [firstImport, secondImport] = mockCreatePullRequestImport.mock.invocationCallOrder;
+    order.push(firstImport, deps.gitUtils.autoCommitChanges.mock.invocationCallOrder[0], secondImport);
+
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+    expect(mockCreatePullRequestImport.mock.calls[0][0].files).toEqual([svChange()]);
+  });
+
+  it('looks for missing translations in the source text as written, so a missing locale is translated from it', async () => {
+    await translate({ changedOnly: true }, deps);
+
+    const sourceFiles = deps.translationUtils.findMissingTranslationsByLocale.mock.calls[0][0];
+    expect(Buffer.from(sourceFiles[0].content, 'base64').toString()).toContain(englishNow);
+  });
+
+  it('commits a run that only updates the source text', async () => {
+    mockCreateTargetEditAlignment.mockImplementation(stepAAnswer({ align_locales: [] }));
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(mockCreateSourceAlignment).not.toHaveBeenCalled();
+    expect(deps.gitUtils.autoCommitChanges).toHaveBeenCalledWith('config/locales/', expect.objectContaining({
+      keysAligned: 0,
+      alignedLanguages: [],
+      sourceTextsUpdated: 1
+    }));
+    expect(changeIn(alignedImport(), 'en')).toMatchObject({ value: englishNow, aligned_source: swedishNow });
+  });
+
+  it('aligns a key whose source text followed the edit from the edit check items instead of its first-pass rewording', async () => {
+    const pass1 = (key: string) => ({
+      locale: 'nb',
+      source_path: enPath,
+      target_path: path.join(dir, 'nb.yml'),
+      format: 'yml',
+      key,
+      previous_source: 'Old English',
+      source: english,
+      target_base: 'gammel',
+      target_current: norwegian
+    });
+    mockCollectAlignmentCandidates.mockReturnValue([pass1('profile.published'), pass1('profile.title')]);
+
+    await translate({ changedOnly: true }, deps);
+
+    const items = mockCreateSourceAlignment.mock.calls[0][0].items;
+    expect(items.map((item: any) => [item.key, item.previous_source])).toEqual([
+      ['profile.title', 'Old English'],
+      ['profile.published', english]
+    ]);
+  });
+
+  it('withdraws the edited translation\'s own proposal when the edit was undone', async () => {
+    const reverted = { ...stepACandidate(), source: englishNow };
+    reverted.targets[0] = { ...reverted.targets[0], current: 'Din profil är publicerad' };
+    mockCollectTargetEditCandidates.mockReturnValue([reverted]);
+    mockDetectTargetChanges.mockReturnValue([]);
+    mockCreateTargetEditAlignment.mockImplementation(stepAAnswer({
+      trigger_value: 'Din profil är publicerad',
+      source: english,
+      trigger_at_base: true
+    }));
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(mockCreatePullRequestImport.mock.calls[0][0].files).toEqual([{
+      path: path.join(dir, 'sv.yml'),
+      source_path: enPath,
+      locale: 'sv',
+      format: 'yml',
+      changes: [{ key: 'profile.published', status: 'reverted', value: 'Din profil är publicerad', old_value: 'Din profil är publicerad' }]
+    }]);
+  });
+
+  it('stops before asking about edited translations when a file could not be read', async () => {
+    const { recordUnreadableFile } = await import('../../src/utils/unreadable-files.js');
+    mockDetectTargetChanges.mockImplementation(() => {
+      recordUnreadableFile(path.join(dir, 'nb.yml'));
+      return [svChange()];
+    });
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(mockCreateTargetEditAlignment).not.toHaveBeenCalled();
+    expect(deps.translationUtils.updateTranslationFile).not.toHaveBeenCalled();
+    expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('runs as before on a server without the endpoint', async () => {
+    const { TargetEditAlignmentRequestError } = await import('../../src/api/target-edit-alignments.js');
+    mockCreateTargetEditAlignment.mockRejectedValue(new TargetEditAlignmentRequestError('Not found', 404));
+
+    await translate({ changedOnly: true }, deps);
+
+    expect(deps.translationUtils.updateTranslationFile).not.toHaveBeenCalled();
+    expect(mockCreateSourceAlignment).not.toHaveBeenCalled();
+    expect(deps.gitUtils.autoCommitChanges).not.toHaveBeenCalled();
+    expect(mockCreatePullRequestImport.mock.calls[0][0].files).toEqual([svChange()]);
+    expect(loggedLines()).not.toContain('source texts');
+    expect(loggedLines()).toContain('No changed keys need translation');
   });
 });

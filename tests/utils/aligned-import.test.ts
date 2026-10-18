@@ -82,6 +82,35 @@ describe('sendAlignedImport', () => {
     });
   });
 
+  it('keeps a source text that followed an edited translation when the branch moved only by our commit', async () => {
+    const valuesAt: Record<string, Record<string, Record<string, string>>> = {
+      checkout: { en: { published: 'Published' }, sv: { published: 'Publicerad nu' } },
+      FETCH_HEAD: { en: { published: 'Published now' }, sv: { published: 'Publicerad nu' } }
+    };
+    importGuard.setDependencies({
+      env: { GITHUB_ACTIONS: 'true', GITHUB_HEAD_REF: 'feature/reword', GITHUB_REPOSITORY: 'acme/shop', GITHUB_TOKEN: 'token' },
+      git: (args: string[]) => (args[0] === 'rev-parse' ? (args[1] === 'HEAD' ? 'checkout' : 'our-commit') : ''),
+      fetchActionToken: async () => ({ token: null }),
+      flatValuesAt: (file: { locale: string }, ref: string) => valuesAt[ref][file.locale]
+    });
+    importGuard.recordBaseline();
+    const sourcePath = 'config/locales/en.yml';
+    const sourceCell = {
+      ...cell('published', 'en', sourcePath),
+      source: 'Published now',
+      value: 'Published now',
+      trigger_locale: 'sv',
+      trigger_path: 'config/locales/sv.yml',
+      aligned_source: 'Publicerad nu'
+    };
+
+    await sendAlignedImport([sourceCell], request, { console: { log }, sleep });
+
+    const sent = mockCreatePullRequestImport.mock.calls[0][0].files;
+    expect(sent[0].changes).toEqual([expect.objectContaining({ key: 'published', aligned_source: 'Publicerad nu' })]);
+    expect(sent[0].changes[0]).not.toHaveProperty('trigger_path');
+  });
+
   describe('when a sync moved the branch after our commit', () => {
     beforeEach(() => {
       importGuard.setDependencies({
@@ -213,6 +242,41 @@ describe('sendAlignedImport', () => {
       expect(changedKeys(0)).toHaveLength(50);
       expect(changedKeys(1)).toEqual(['key_50']);
     });
+  });
+
+  it('marks values that follow an edited translation with the locale of that edit', async () => {
+    const sourcePath = 'config/locales/en.yml';
+    const sourceCell = {
+      ...cell('profile.published', 'en', sourcePath),
+      previous_source: 'Your profile is published',
+      source: 'Your profile is published now',
+      target_base: 'Your profile is published',
+      target_current: 'Your profile is published',
+      value: 'Your profile is published now',
+      trigger_locale: 'sv',
+      aligned_source: 'Din profil är publicerad nu'
+    };
+    const targetCell = { ...cell('profile.published', 'nb'), source: 'Your profile is published now', value: 'Profilen din er publisert nå', trigger_locale: 'sv' };
+
+    await sendAlignedImport([sourceCell, targetCell], request, { console: { log }, sleep });
+
+    const [enFile, nbFile] = mockCreatePullRequestImport.mock.calls[0][0].files;
+    expect(enFile).toEqual({
+      path: sourcePath,
+      source_path: sourcePath,
+      locale: 'en',
+      format: 'yml',
+      changes: [{
+        key: 'profile.published',
+        status: 'updated',
+        value: 'Your profile is published now',
+        old_value: 'Your profile is published',
+        source_value: 'Your profile is published now',
+        aligned_source: 'Din profil är publicerad nu',
+        trigger_locale: 'sv'
+      }]
+    });
+    expect(nbFile.changes[0]).toMatchObject({ aligned_source: 'Your profile is published now', trigger_locale: 'sv' });
   });
 
   it('keeps the locales of a multi-language file apart', async () => {

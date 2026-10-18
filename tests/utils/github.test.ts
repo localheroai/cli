@@ -480,6 +480,29 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
+    it('describes source texts updated to match edited translations on their own line', async () => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M locales/en.json');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('locales/**/*.json', {
+        keysTranslated: 0,
+        languages: [],
+        keysAligned: 1,
+        alignedLanguages: ['nb'],
+        sourceTextsUpdated: 2
+      });
+
+      const expectedMessage = 'Update translations\n\nUpdated 2 source texts to match edited translations\nAligned 1 key in nb to reworded source texts';
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
     it('includes co-author trailer when GITHUB_ACTOR is set', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';

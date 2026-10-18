@@ -186,6 +186,37 @@ describe('the import guard against a real remote', () => {
     expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
   });
 
+  describe('for a source text our commit wrote to follow an edited translation', () => {
+    const sourceCell = {
+      locale: 'en', source_path: EN_PATH, target_path: EN_PATH, format: 'yml', key: 'greeting',
+      previous_source: 'Hello', source: 'Hello now', target_base: 'Hello', target_current: 'Hello', value: 'Hello now',
+      trigger_locale: 'fr', trigger_path: FR_PATH, aligned_source: 'Bonjour'
+    };
+    const request = { projectId: 'proj', branch: BRANCH, jobGroupId: 'grp', sourceLocale: 'en', valuesFrom: 'our-commit' as const };
+
+    beforeEach(async () => {
+      importGuard.recordBaseline();
+      commitFile(ours, EN_PATH, 'en:\n  greeting: Hello now\n', 'follow');
+      expect(await githubService.pushWithRetry(BRANCH, TOKEN)).toBe('pushed');
+    });
+
+    it('sends it while the tip holds both texts as the run left them', async () => {
+      await sendAlignedImport([sourceCell], request, { console: { log } });
+
+      expect(mockCreatePullRequestImport.mock.calls[0][0].files[0].changes[0]).toMatchObject({ value: 'Hello now', aligned_source: 'Bonjour' });
+    });
+
+    it('leaves it out when a newer commit changed the edited translation', async () => {
+      git(sibling, `pull -q origin ${BRANCH}`);
+      commitFile(sibling, FR_PATH, 'fr:\n  greeting: Salut\n', 'another edit');
+      git(sibling, `push -q origin HEAD:${BRANCH}`);
+
+      await sendAlignedImport([sourceCell], request, { console: { log } });
+
+      expect(mockCreatePullRequestImport).not.toHaveBeenCalled();
+    });
+  });
+
   it('leaves out a value a sync committed after the checkout, reading the real tip', async () => {
     commitFile(sibling, FR_PATH, 'fr:\n  greeting: Bonjour à tous\n', 'sync');
     git(sibling, `push -q origin HEAD:${BRANCH}`);

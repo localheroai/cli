@@ -12,6 +12,8 @@ import type { ProjectConfig } from '../types/index.js';
 
 export interface AlignedCell extends AlignmentCandidate {
   value: string;
+  aligned_source?: string;
+  trigger_path?: string;
 }
 
 export interface LocaleAlignmentSummary {
@@ -36,7 +38,7 @@ export interface Logger {
   log: (message?: any, ...optionalParams: any[]) => void;
 }
 
-interface AlignmentDependencies {
+export interface AlignmentDependencies {
   console: Logger;
   config: ProjectConfig;
   updateTranslationFile: (
@@ -108,10 +110,15 @@ export async function runSourceAlignment(
   return result;
 }
 
-export function summarizeAlignedCells(cells: AlignedCell[]): { keysAligned: number; alignedLanguages: string[] } {
+export function summarizeAlignedCells(
+  cells: AlignedCell[],
+  sourceLocale: string
+): { keysAligned: number; alignedLanguages: string[]; sourceTextsUpdated: number } {
+  const targetCells = cells.filter(cell => cell.locale !== sourceLocale);
   return {
-    keysAligned: new Set(cells.map(cell => `${cell.source_path}\0${cell.key}`)).size,
-    alignedLanguages: [...new Set(cells.map(cell => cell.locale))]
+    keysAligned: new Set(targetCells.map(cell => `${cell.source_path}\0${cell.key}`)).size,
+    alignedLanguages: [...new Set(targetCells.map(cell => cell.locale))],
+    sourceTextsUpdated: cells.length - targetCells.length
   };
 }
 
@@ -255,7 +262,7 @@ function toRequestItem(candidate: AlignmentCandidate): SourceAlignmentItem {
   };
 }
 
-function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> {
+export function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> {
   const groups = new Map<string, T[]>();
   for (const value of values) {
     const key = keyOf(value);
@@ -264,7 +271,7 @@ function groupBy<T>(values: T[], keyOf: (value: T) => string): Map<string, T[]> 
   return groups;
 }
 
-function chunked<T>(values: T[], size: number): T[][] {
+export function chunked<T>(values: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < values.length; i += size) {
     chunks.push(values.slice(i, i + size));
