@@ -303,6 +303,7 @@ export const githubService = {
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       ${allPathEntries.join('\n      ')}
   repository_dispatch:
