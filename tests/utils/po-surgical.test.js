@@ -326,6 +326,58 @@ msgstr[1] "guessed many"
     });
   });
 
+  describe('Folding long values', () => {
+    const LONG_PLURAL = (word) => `{0, plural, =0 {No ${word} invitations pending} one {# ${word} invitation is waiting for a reply} other {# ${word} invitations are waiting for a reply}}`;
+
+    const singleLineCatalog = [
+      'msgid ""',
+      'msgstr ""',
+      '"Content-Type: text/plain; charset=utf-8\\n"',
+      '"Plural-Forms: nplurals=2; plural=(n != 1);\\n"',
+      '',
+      'msgid "Existing"',
+      `msgstr "${LONG_PLURAL('existing')}"`,
+      '',
+      'msgid "Pending"',
+      'msgstr ""',
+      '',
+      'msgid "{count, plural, one {# item} other {# items}}"',
+      'msgid_plural "{count, plural, one {# item} other {# items}}"',
+      'msgstr[0] ""',
+      'msgstr[1] ""',
+      ''
+    ].join('\n');
+
+    test('writes a long value on one line when no entry in the catalog is folded', () => {
+      const value = LONG_PLURAL('new');
+      expect(value.length).toBeGreaterThan(120);
+
+      const result = surgicalUpdatePoFile(singleLineCatalog, { Pending: value });
+
+      expect(result).toContain(`msgid "Pending"\nmsgstr "${value}"\n`);
+    });
+
+    test('writes long plural forms on one line when no entry in the catalog is folded', () => {
+      const value = LONG_PLURAL('new');
+      const key = '{count, plural, one {# item} other {# items}}';
+
+      const result = surgicalUpdatePoFile(singleLineCatalog, { [key]: value, [`${key}__plural_1`]: value });
+
+      expect(result).toContain(`msgstr[0] "${value}"\n`);
+      expect(result).toContain(`msgstr[1] "${value}"\n`);
+    });
+
+    test('still folds a long value when another entry in the catalog is folded', () => {
+      const original = loadFixture('multiline');
+      const value = LONG_PLURAL('new');
+
+      const result = surgicalUpdatePoFile(original, { 'Short message': value });
+
+      expect(result).toContain('msgid "Short message"\nmsgstr ""\n"');
+      expect(result).not.toContain(`msgstr "${value}"`);
+    });
+  });
+
   describe('Plural Forms Handling', () => {
     test('should update only changed plural form', () => {
       const original = loadFixture('plurals');

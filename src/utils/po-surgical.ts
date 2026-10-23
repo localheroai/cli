@@ -343,6 +343,7 @@ function processLineByLine(
   }
 ): string {
   const lines = content.split('\n');
+  const foldsMsgstr = catalogFoldsMsgstr(lines);
   const result: string[] = [];
   const parsed = po.parse(content);
   const entryNplurals = extractNPlurals(parsed.headers || {});
@@ -618,7 +619,7 @@ function processLineByLine(
 
       if (changesToMake.has(uniqueKey)) {
         const newValue = changesToMake.get(uniqueKey)!;
-        const originalFormat = detectMsgstrFormat(lines, i);
+        const originalFormat = detectMsgstrFormat(lines, i, foldsMsgstr);
         const formattedLines = formatMsgstrValue(newValue, originalFormat, 'msgstr');
         formattedLines.forEach(line => result.push(line));
 
@@ -670,7 +671,7 @@ function processLineByLine(
 
       if (keyToCheck && changesToMake.has(keyToCheck)) {
         const newValue = changesToMake.get(keyToCheck)!;
-        const originalFormat = detectMsgstrFormat(lines, i);
+        const originalFormat = detectMsgstrFormat(lines, i, foldsMsgstr);
         const formattedLines = formatMsgstrValue(newValue, originalFormat, `msgstr[${pluralIndex}]`);
         formattedLines.forEach(line => result.push(line));
 
@@ -939,10 +940,35 @@ interface MsgstrFormat {
   hasEmptyFirstLine: boolean;
   maxLineLength: number;
   indentation: string;
+  catalogFoldsMsgstr: boolean;
 }
 
-function detectMsgstrFormat(lines: string[], startIndex: number): MsgstrFormat {
+function catalogFoldsMsgstr(lines: string[]): boolean {
+  let previousWasEmptyMsgid = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    const next = lines[i + 1]?.trim() ?? '';
+
+    if (trimmed === 'msgid ""') {
+      previousWasEmptyMsgid = !next.startsWith('"');
+    } else if (trimmed.startsWith('msgstr')) {
+      const isHeaderMsgstr = previousWasEmptyMsgid;
+      previousWasEmptyMsgid = false;
+      if (!isHeaderMsgstr && next.startsWith('"')) {
+        return true;
+      }
+    } else if (trimmed.startsWith('msgid')) {
+      previousWasEmptyMsgid = false;
+    }
+  }
+
+  return false;
+}
+
+function detectMsgstrFormat(lines: string[], startIndex: number, foldsMsgstr: boolean): MsgstrFormat {
   const format: MsgstrFormat = {
+    catalogFoldsMsgstr: foldsMsgstr,
     isMultiline: false,
     hasEmptyFirstLine: false,
     maxLineLength: 80,
@@ -1025,7 +1051,7 @@ function formatMsgstrValue(value: string, format: MsgstrFormat, msgstrPrefix: st
 
   // Preserve single-line format if original was single-line and new value is reasonable length
   // Also prefer single-line for very short values when original was multiline but essentially empty
-  if (!format.isMultiline && value.length <= 120 && !value.includes('\n')) {
+  if (!format.isMultiline && !value.includes('\n') && (value.length <= 120 || !format.catalogFoldsMsgstr)) {
     lines.push(`${format.indentation}${msgstrPrefix} "${escapePoString(value)}"`);
     return lines;
   }
