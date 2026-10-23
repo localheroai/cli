@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.90] - 2026-10-23
+
+### Fixed
+- Long `.po` translations stay on one line in catalogs that don't wrap, such as Lingui's. Before, translations over 120 characters were wrapped, which made `lingui check sync` fail. Catalogs that already wrap are unchanged.
+
 ## [0.0.89] - 2026-10-23
 
 ### Fixed
