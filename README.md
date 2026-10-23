@@ -331,7 +331,7 @@ LocalHero.ai automatically translate your I18n files when you push changes. Duri
    - Add your API key as the value
 
 2. The workflow will:
-   - Run on push to pull requests
+   - Run on push to pull requests, when a draft pull request is marked ready for review, and when a label (such as `skip-translation`) is removed
    - Check for missing translations and add new/updated translations to the repo.
 
 🚧 **Skip translations on a PR**: Add the `skip-translation` label to any PR to skip the translation workflow. Useful when you're still working on copy changes.
