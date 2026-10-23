@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.89] - 2026-10-23
+
+### Fixed
+- The workflow `init` writes now also runs when a draft pull request is marked ready for review, and when a label such as `skip-translation` is removed. Before, GitHub only started it when the PR was opened, pushed to or reopened, so a draft that was marked ready, or a PR whose skip label was taken off, waited for the next push before it got translations. Workflows already in your repo are unchanged; to get the new triggers, add `types: [opened, synchronize, reopened, ready_for_review, unlabeled]` under `pull_request:`.
+
 ## [0.0.88] - 2026-10-18
 
 ### Added
