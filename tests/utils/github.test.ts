@@ -122,13 +122,13 @@ describe('githubService', () => {
       expect(result).toBe('/project/.github/workflows/localhero-translate.yml');
     });
 
-    it('runs pull_request on the default activity types plus ready_for_review, keeping the paths filter', async () => {
+    it('runs pull_request on the default activity types plus ready_for_review and unlabeled, keeping the paths filter', async () => {
       await createGitHubActionFile('/project', ['locales/**']);
 
       const fileContent = (mockFs.writeFile.mock.calls[0] as unknown[])[1] as string;
       const pullRequest = parse(fileContent).on.pull_request;
 
-      expect(pullRequest.types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review']);
+      expect(pullRequest.types).toEqual(['opened', 'synchronize', 'reopened', 'ready_for_review', 'unlabeled']);
       expect(pullRequest.paths).toEqual(['locales/**', 'localhero.json']);
     });
 
