@@ -898,6 +898,20 @@ describe('githubService', () => {
         expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
       });
 
+      it('amends in a shallow checkout, where the parent commit was not fetched', async () => {
+        stubGit([null], amendable);
+        const stubbed = mockExec.getMockImplementation()!;
+        mockExec.mockImplementation((cmd, ...rest) => {
+          if (cmd === 'git diff --cached --name-only HEAD~1') throw new Error("fatal: ambiguous argument 'HEAD~1'");
+          return stubbed(cmd, ...rest);
+        });
+
+        const result = await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+        expect(result).toBe('new');
+        expect(commands()).toContain("git commit --amend -m 'Sync translations'");
+      });
+
       it('skips without replaying when the branch moved, leaving the sync to be retried', async () => {
         stubGit([OUTPUT.staleInfo], amendable);
 
