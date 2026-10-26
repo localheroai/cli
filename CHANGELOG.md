@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.91] - 2026-10-26
+
+### Fixed
+- A sync from Localhero.ai finishes green when the pull request already has every translation it would write. Before, the Action failed with "nothing to commit": the commit that started the sync was left with no changes, which git refuses to amend. Now that commit is removed and the branch is left as it was before the sync.
+
 ## [0.0.90] - 2026-10-23
 
 ### Fixed
