@@ -511,6 +511,11 @@ ${buildExtractStep(options)}      - name: Translate
     return status.length > 0;
   },
 
+  hasStagedChangesSinceParent(): boolean {
+    const { exec } = this.deps;
+    return exec('git diff --cached --name-only HEAD~1').toString().trim().length > 0;
+  },
+
   canAmendLastCommit(isSyncMode: boolean): boolean {
     if (!isSyncMode) return false;
     const { exec } = this.deps;
@@ -650,7 +655,14 @@ ${buildExtractStep(options)}      - name: Translate
       }
 
       const canAmend = this.canAmendLastCommit(true);
-      this.commit(commitMessage, canAmend);
+      // Amending a trigger commit whose only change we just reverted would leave
+      // it empty, which git refuses. Dropping it keeps syncTriggerId off the branch.
+      const dropTriggerCommit = canAmend && !this.hasStagedChangesSinceParent();
+      if (dropTriggerCommit) {
+        exec('git reset --soft HEAD~1', { stdio: 'inherit' });
+      } else {
+        this.commit(commitMessage, canAmend);
+      }
 
       const token = await this.getTokenForPush();
       const outcome = await this.pushWithRetry(branchName, token, canAmend);
@@ -659,6 +671,10 @@ ${buildExtractStep(options)}      - name: Translate
         return 'skipped';
       }
 
+      if (dropTriggerCommit) {
+        log.log('No changes to commit - translations already up to date.');
+        return 'no-changes';
+      }
       if (canAmend) {
         log.log('✓ Commit amended and pushed to GitHub\n');
       } else {
