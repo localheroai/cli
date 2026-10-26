@@ -872,8 +872,45 @@ describe('githubService', () => {
     describe('amending the sync trigger commit', () => {
       const amendable = {
         'git log -1 --format=%ae': 'hi@localhero.ai',
-        'git log -1 --format= -p -- localhero.json': '+  "syncTriggerId": "sync_abc"'
+        'git log -1 --format= -p -- localhero.json': '+  "syncTriggerId": "sync_abc"',
+        'git diff --cached --name-only HEAD~1': 'locales/sv.json'
       };
+
+      it('amends the trigger commit with the synced translations', async () => {
+        stubGit([null], amendable);
+
+        const result = await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+        expect(result).toBe('new');
+        expect(commands()).toContain("git commit --amend -m 'Sync translations'");
+        expect(pushes()).toEqual([AMEND_PUSH]);
+      });
+
+      it('drops the trigger commit when the sync has nothing to add to the branch', async () => {
+        stubGit([null], { ...amendable, 'git diff --cached --name-only HEAD~1': '' });
+
+        const result = await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+        expect(result).toBe('no-changes');
+        expect(commands().filter(cmd => cmd.startsWith('git commit'))).toEqual([]);
+        expect(commands()).toContain('git reset --soft HEAD~1');
+        expect(pushes()).toEqual([AMEND_PUSH]);
+        expect(mockConsole.log).toHaveBeenCalledWith('No changes to commit - translations already up to date.');
+      });
+
+      it('amends in a shallow checkout, where the parent commit was not fetched', async () => {
+        stubGit([null], amendable);
+        const stubbed = mockExec.getMockImplementation()!;
+        mockExec.mockImplementation((cmd, ...rest) => {
+          if (cmd === 'git diff --cached --name-only HEAD~1') throw new Error("fatal: ambiguous argument 'HEAD~1'");
+          return stubbed(cmd, ...rest);
+        });
+
+        const result = await githubService.autoCommitSyncChanges(['locales/sv.json']);
+
+        expect(result).toBe('new');
+        expect(commands()).toContain("git commit --amend -m 'Sync translations'");
+      });
 
       it('skips without replaying when the branch moved, leaving the sync to be retried', async () => {
         stubGit([OUTPUT.staleInfo], amendable);

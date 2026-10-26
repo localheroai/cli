@@ -511,6 +511,16 @@ ${buildExtractStep(options)}      - name: Translate
     return status.length > 0;
   },
 
+  amendWouldBeEmpty(): boolean {
+    const { exec } = this.deps;
+    try {
+      return exec('git diff --cached --name-only HEAD~1', { stdio: 'pipe' }).toString().trim() === '';
+    } catch {
+      // A shallow checkout has no parent to compare with, and its amend is never empty.
+      return false;
+    }
+  },
+
   canAmendLastCommit(isSyncMode: boolean): boolean {
     if (!isSyncMode) return false;
     const { exec } = this.deps;
@@ -650,7 +660,14 @@ ${buildExtractStep(options)}      - name: Translate
       }
 
       const canAmend = this.canAmendLastCommit(true);
-      this.commit(commitMessage, canAmend);
+      // Amending a trigger commit whose only change we just reverted would leave
+      // it empty, which git refuses. Dropping it keeps syncTriggerId off the branch.
+      const dropTriggerCommit = canAmend && this.amendWouldBeEmpty();
+      if (dropTriggerCommit) {
+        exec('git reset --soft HEAD~1', { stdio: 'inherit' });
+      } else {
+        this.commit(commitMessage, canAmend);
+      }
 
       const token = await this.getTokenForPush();
       const outcome = await this.pushWithRetry(branchName, token, canAmend);
@@ -659,6 +676,10 @@ ${buildExtractStep(options)}      - name: Translate
         return 'skipped';
       }
 
+      if (dropTriggerCommit) {
+        log.log('No changes to commit - translations already up to date.');
+        return 'no-changes';
+      }
       if (canAmend) {
         log.log('✓ Commit amended and pushed to GitHub\n');
       } else {
