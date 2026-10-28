@@ -74,6 +74,7 @@ describe('--changed-only over synthesised plural categories', () => {
   }
 
   beforeEach(() => {
+    delete process.env.GITHUB_BASE_REF;
     originalCwd = process.cwd();
     repo = mkdtempSync(path.join(os.tmpdir(), 'changed-only-plurals-'));
     process.chdir(repo);

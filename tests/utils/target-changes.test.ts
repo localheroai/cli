@@ -66,6 +66,7 @@ function setupReadMock(contentByPath: Record<string, string>) {
 }
 
 beforeEach(() => {
+  delete process.env.GITHUB_BASE_REF;
   mockExecSync.mockReset();
   mockReadFileSync.mockReset();
 });
