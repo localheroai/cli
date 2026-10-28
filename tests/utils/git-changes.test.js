@@ -642,6 +642,22 @@ msgstr[1] "Delete items"
       );
     });
 
+    it('uses the pull request base over config baseBranch, so a stacked PR compares against its parent', () => {
+      mockConfig.translationFiles.baseBranch = 'master';
+      process.env.GITHUB_BASE_REF = 'feature-1';
+      const fileContent = JSON.stringify({ user: { name: 'Name' } });
+
+      setupGitMock({ oldContent: fileContent });
+      mockReadFileSync.mockReturnValue(fileContent);
+
+      filterByGitChanges(mockSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        expect.stringContaining('git show feature-1'),
+        expect.any(Object)
+      );
+    });
+
     it('defaults to main when no config or env var', () => {
       const fileContent = JSON.stringify({ user: { name: 'Name' } });
 

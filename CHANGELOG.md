@@ -4,6 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- In a stack of pull requests, each one now only translates its own keys. `translate --changed-only` (and `ci`) compares a pull request against its own base branch, even when `localhero.json` sets `baseBranch`. Before, the configured branch won, so every pull request in the stack was compared against `master` and translated the keys of the pull requests below it again. Runs outside a pull request still use `baseBranch`.
+
 ## [0.0.91] - 2026-10-26
 
 ### Fixed

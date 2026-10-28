@@ -171,7 +171,7 @@ npx @localheroai/cli translate --changed-only
 
 The command uses git to identify which keys have been added or modified in your translation files by comparing to your base branch. It then only translates those specific keys, not like the default, which finds all missing translations and translates them.
 
-You can customize the base branch in your `localhero.json`:
+On a GitHub pull request the base is the pull request's own base branch, so each pull request in a stack compares against the one below it. Elsewhere you can customize the base branch in your `localhero.json`:
 
 ```json
 {
