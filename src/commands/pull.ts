@@ -1,7 +1,7 @@
 import { syncService as defaultSyncService } from '../utils/sync-service.js';
 import { configService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
-import { isGitAvailable, getChangedKeysForProject } from '../utils/git-changes.js';
+import { isGitAvailable, getChangedKeysForProject, getBaseBranch } from '../utils/git-changes.js';
 import { checkAuth as defaultCheckAuth } from '../utils/auth.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from '../utils/po-utils.js';
 import { splitPluralKey, yamlPluralGroupBasesFromKeys } from '../utils/translation-utils.js';
@@ -156,7 +156,7 @@ export async function pull(
     const changedKeys = gitUtils.getChangedKeysForProject(sourceFiles, config, verbose);
 
     if (changedKeys === null) {
-      const baseBranch = config.translationFiles?.baseBranch || process.env.GITHUB_BASE_REF || 'main';
+      const baseBranch = getBaseBranch(config);
       const error = new Error('Could not determine changed keys.') as any;
       error.cliErrorMessage = `Could not determine changed keys.\n\nThe base branch '${baseBranch}' may not exist locally, or the changeset is too large.\nRun with --verbose for more details, or run without --changed-only to pull all updates.`;
       throw error;

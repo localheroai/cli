@@ -300,11 +300,12 @@ export function getChangedKeysForProject(
 }
 
 /**
- * Get base branch from config, environment, or default
+ * Get base branch: the pull request's base on GitHub Actions (a stacked PR targets its parent
+ * branch, not the default), else config, else main
  */
 export function getBaseBranch(config: ProjectConfig): string {
-  return config.translationFiles?.baseBranch
-    || process.env.GITHUB_BASE_REF
+  return process.env.GITHUB_BASE_REF
+    || config.translationFiles?.baseBranch
     || 'main';
 }
 

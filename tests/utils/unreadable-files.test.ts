@@ -21,6 +21,7 @@ describe('unreadable file tracking', () => {
     execSync(`git -c user.email=t@t -c user.name=t -c commit.gpgsign=false ${cmd}`, { stdio: 'pipe' });
 
   beforeEach(() => {
+    delete process.env.GITHUB_BASE_REF;
     resetUnreadableFiles();
     originalCwd = process.cwd();
     repo = mkdtempSync(path.join(os.tmpdir(), 'unreadable-'));
