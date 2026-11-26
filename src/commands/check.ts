@@ -256,6 +256,29 @@ interface CheckResult {
   changes: ChangeStatus;
   /** Raw text of each loaded file by path, for annotation line numbers. */
   fileContents: Record<string, string>;
+  /** Set when the project has article files, which check does not look into yet. */
+  articleNotice: string | null;
+}
+
+function articleNoticeFor(articlePaths: string[], configuredPaths: string[]): string | null {
+  if (articlePaths.length === 0) return null;
+
+  const folders = configuredPaths.filter((folder) => articlePaths.some((file) => file.startsWith(folder)));
+  const count = articlePaths.length === 1 ? '1 article file is' : `${articlePaths.length} article files are`;
+  const where = folders.length > 0 ? ` (${folders.join(', ')})` : '';
+  return `${count} not checked yet${where}. Key files were checked as usual.`;
+}
+
+function withoutArticles(found: TranslationFilesResult): TranslationFilesResult {
+  const keyFiles = (files: TranslationFile[]) => files.filter((file) => !file.documentFormat);
+  return {
+    ...found,
+    allFiles: keyFiles(found.allFiles),
+    sourceFiles: keyFiles(found.sourceFiles),
+    targetFilesByLocale: Object.fromEntries(
+      Object.entries(found.targetFilesByLocale).map(([locale, files]) => [locale, keyFiles(files)])
+    )
+  };
 }
 
 function failedResult(format: OutputFormat, sourceLocale = ''): CheckResult {
@@ -270,7 +293,8 @@ function failedResult(format: OutputFormat, sourceLocale = ''): CheckResult {
     detected: null,
     format,
     changes: null,
-    fileContents: {}
+    fileContents: {},
+    articleNotice: null
   };
 }
 
@@ -605,10 +629,16 @@ export async function runCheck(
     returnFullResult: true,
     sourceLocale,
     targetLocales,
+    documents: 'include',
     ...(format === 'json' ? { logger: { log: console.error } } : {}),
     ...(format === 'github' ? { logger: SILENT } : {})
   });
-  const discovered = result as TranslationFilesResult;
+  const found = result as TranslationFilesResult;
+  const articleNotice = articleNoticeFor(
+    found.allFiles.filter((file) => file.documentFormat).map((file) => file.path),
+    config.translationFiles.paths
+  );
+  const discovered = withoutArticles(found);
   const recovered = await recoverDuplicateKeyFiles(
     discovered.parseFailures ?? [],
     [sourceLocale, ...targetLocales],
@@ -695,7 +725,8 @@ export async function runCheck(
     detected,
     format,
     changes: changeStatus,
-    fileContents: rawContents(discovered.allFiles)
+    fileContents: rawContents(discovered.allFiles),
+    articleNotice
   };
 }
 
@@ -1041,6 +1072,9 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   const introduced = reports.map((r) => filterFindings(r, isIntroduced));
   const existingProblems = base ? problemsIn(reports.map((r) => filterFindings(r, isExisting)), sourceLocale).length : 0;
   const summaryPath = detectCiContext(deps.env).stepSummaryPath;
+
+  if (result.articleNotice && format === 'github') con.log(`::notice::${escapeAnnotationData(result.articleNotice)}`);
+  if (result.articleNotice && format === 'text') con.log(chalk.blue(`ℹ ${result.articleNotice}`));
 
   if (format === 'json') {
     if (unavailable) con.error(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));
