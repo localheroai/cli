@@ -16,6 +16,8 @@ export interface TranslationFileConfig {
   ignoreKeys?: string[];
 }
 
+export type DocumentFormat = 'markdown' | 'mdx' | 'html';
+
 // Translation file interface
 export interface TranslationFile {
   path: string;
@@ -26,6 +28,8 @@ export interface TranslationFile {
   content?: string;
   hasLanguageWrapper?: boolean;
   multiLanguage?: boolean;
+  /** Set when the file is a long-form document: one article, sent and written whole */
+  documentFormat?: DocumentFormat;
   translations?: Record<string, string>;
   keys?: string[];
 }
@@ -226,5 +230,7 @@ export interface TranslationFileOptions {
   includeNamespace?: boolean;
   verbose?: boolean;
   returnFullResult?: boolean;
+  /** Long-form documents are left out unless a command asks for them */
+  documents?: 'exclude' | 'include';
   logger?: { log: (message?: any, ...optionalParams: any[]) => void };
 }

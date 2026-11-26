@@ -1,0 +1,193 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`key files only: recorded API calls sends the same requests and writes the same files for a full translate run: files 1`] = `
+{
+  "locales/sv/common.yml": "sv:
+  greeting: Hej
+  farewell: sv farewell
+  nested:
+    title: sv nested.title
+",
+  "web/sv/app.json": "{
+  "save": "Spara",
+  "cancel": "sv cancel"
+}
+",
+}
+`;
+
+exports[`key files only: recorded API calls sends the same requests and writes the same files for a full translate run: requests 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/projects/keys-only-project/settings",
+  },
+  {
+    "body": {
+      "files": [
+        {
+          "content": {
+            "keys": {
+              "farewell": {
+                "sourceKey": "farewell",
+                "value": "Goodbye",
+              },
+              "nested.title": {
+                "sourceKey": "nested.title",
+                "value": "Settings",
+              },
+            },
+          },
+          "format": "yml",
+          "path": "locales/en/common.yml",
+          "target_paths": {
+            "sv": "locales/sv/common.yml",
+          },
+        },
+      ],
+      "job_group_id": "<job-group>",
+      "target_languages": [
+        "sv",
+      ],
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/translation_jobs",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/translation_jobs/job-1?include_translations=true",
+  },
+  {
+    "body": {
+      "files": [
+        {
+          "content": {
+            "keys": {
+              "cancel": {
+                "sourceKey": "cancel",
+                "value": "Cancel",
+              },
+            },
+          },
+          "format": "json",
+          "path": "web/en/app.json",
+          "target_paths": {
+            "sv": "web/sv/app.json",
+          },
+        },
+      ],
+      "job_group_id": "<job-group>",
+      "target_languages": [
+        "sv",
+      ],
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/translation_jobs",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/translation_jobs/job-2?include_translations=true",
+  },
+]
+`;
+
+exports[`key files only: recorded API calls sends the same requests for a changed-only run on a pull request branch: files 1`] = `
+"sv:
+  greeting: Hej
+  farewell: Hej då
+  added: sv added
+"
+`;
+
+exports[`key files only: recorded API calls sends the same requests for a changed-only run on a pull request branch: requests 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/projects/keys-only-project/settings",
+  },
+  {
+    "body": {
+      "branch": "feature/more-keys",
+      "files": [
+        {
+          "content": {
+            "keys": {
+              "added": {
+                "sourceKey": "added",
+                "value": "Added on the branch",
+              },
+            },
+          },
+          "format": "yml",
+          "path": "locales/en/common.yml",
+          "target_paths": {
+            "sv": "locales/sv/common.yml",
+          },
+        },
+      ],
+      "job_group_id": "<job-group>",
+      "target_languages": [
+        "sv",
+      ],
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/translation_jobs",
+  },
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/translation_jobs/job-1?include_translations=true",
+  },
+  {
+    "body": {
+      "branch": "feature/more-keys",
+      "commit_sha": null,
+      "job_group_id": "<job-group>",
+      "pr_key_manifest": {
+        "locales/en/common.yml": [
+          {
+            "name": "added",
+          },
+        ],
+      },
+      "removed_key_manifest": {
+        "legacy/en/legacy.yml": [
+          {
+            "name": "old_title",
+          },
+        ],
+      },
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/translation_jobs/finalize",
+  },
+  {
+    "body": {
+      "branch": "feature/more-keys",
+      "files": [
+        {
+          "changes": [
+            {
+              "key": "farewell",
+              "source_value": "Goodbye",
+              "status": "added",
+              "value": "Hej då",
+            },
+          ],
+          "format": "yml",
+          "locale": "sv",
+          "path": "locales/sv/common.yml",
+          "source_path": "locales/en/common.yml",
+        },
+      ],
+      "job_group_id": "<job-group>",
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/pull_request_imports",
+  },
+]
+`;
