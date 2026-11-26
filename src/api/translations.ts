@@ -1,7 +1,7 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest, getApiHost } from './client.js';
 import { getCurrentBranch } from '../utils/git.js';
-import type { KeyIdentifier, SkippedLanguage } from '../types/index.js';
+import type { KeyIdentifier, SkippedDocument, SkippedLanguage } from '../types/index.js';
 
 // Source file for translation
 export interface SourceFile {
@@ -37,6 +37,7 @@ export interface TranslationJobsResponse {
     short_url: string;
   };
   skipped_languages?: SkippedLanguage[];
+  skipped_documents?: SkippedDocument[];
 }
 
 /**
@@ -73,7 +74,8 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
     jobs: response.jobs,
     totalJobs: response.jobs.length,
     ...(response.job_group && { job_group: response.job_group }),
-    ...(response.skipped_languages && { skipped_languages: response.skipped_languages })
+    ...(response.skipped_languages && { skipped_languages: response.skipped_languages }),
+    ...(response.skipped_documents && { skipped_documents: response.skipped_documents })
   };
 }
 

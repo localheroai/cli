@@ -111,6 +111,20 @@ describe('translations API', () => {
       ]);
     });
 
+    it('passes skipped_documents through to the caller', async () => {
+      mockGetCurrentBranch.mockResolvedValueOnce('feature/articles');
+      const skipped = [{ path: 'articles/en/export-reports.md', language: 'sv', reason: 'new_language_waits_for_updates' }];
+      mockApiRequest.mockResolvedValueOnce({ jobs: [], skipped_documents: skipped });
+
+      const result = await createTranslationJob({
+        projectId: 'proj_123',
+        sourceFiles: [{ path: 'articles/en/export-reports.md', content: 'x', format: 'markdown' }],
+        targetLocales: ['sv']
+      });
+
+      expect(result.skipped_documents).toEqual(skipped);
+    });
+
     it('returns an empty jobs no-op instead of throwing (#432)', async () => {
       // The backend returns { jobs: [] } when no key is eligible for translation
       // (e.g. only a `.one` form for an other-only locale). That is a benign

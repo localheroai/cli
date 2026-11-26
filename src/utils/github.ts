@@ -705,6 +705,11 @@ ${buildExtractStep(options)}      - name: Translate
       const { keysTranslated, languages } = translationSummary;
       summaryLines.push(`${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languages.join(', ')}`);
     }
+    const articlesTranslated = translationSummary?.articlesTranslated ?? 0;
+    if (articlesTranslated > 0) {
+      const articleLanguages = (translationSummary?.articleLanguages ?? []).join(', ');
+      summaryLines.push(`${articlesTranslated} ${articlesTranslated > 1 ? 'articles' : 'article'} in ${articleLanguages}`);
+    }
     const sourceTextsUpdated = translationSummary?.sourceTextsUpdated ?? 0;
     if (sourceTextsUpdated > 0) {
       summaryLines.push(`Updated ${sourceTextsUpdated} source ${sourceTextsUpdated > 1 ? 'texts' : 'text'} to match edited translations`);

@@ -1,17 +1,36 @@
 import { describe, it, expect } from '@jest/globals';
 import {
   MAX_DOCUMENT_CHARACTERS,
+  buildDocumentBatches,
   documentFormatFor,
   documentKeyName,
   documentLength,
   documentLocale,
   documentTargetPath,
+  findMissingDocuments,
   isDocumentPath,
+  leaveOutUnsupportedDocuments,
   patternNamesExtension,
   toLfText
 } from '../../src/utils/documents.js';
 
+import type { TranslationFile } from '../../src/types/index.js';
+
 const locales = ['en', 'sv', 'de', 'pt-BR'];
+
+function article(filePath: string, locale: string, text: string, documentFormat: TranslationFile['documentFormat'] = 'markdown'): TranslationFile {
+  return {
+    path: filePath,
+    format: filePath.split('.').pop() as string,
+    locale,
+    documentFormat,
+    content: Buffer.from(text).toString('base64')
+  };
+}
+
+function envelope(batch: { sourceFile: { content: string } }): unknown {
+  return JSON.parse(Buffer.from(batch.sourceFile.content, 'base64').toString());
+}
 
 describe('documentFormatFor', () => {
   it.each([
@@ -141,5 +160,155 @@ describe('patternNamesExtension', () => {
     expect(patternNamesExtension('**/*.{json,yml,yaml,po,pot}', 'md')).toBe(false);
     expect(patternNamesExtension('**/*', 'md')).toBe(false);
     expect(patternNamesExtension(undefined, 'md')).toBe(false);
+  });
+});
+
+describe('findMissingDocuments', () => {
+  const config = { sourceLocale: 'en', outputLocales: ['sv', 'de'] };
+  const english = '# Export a report\n\nOpen **Reports**.\n';
+
+  it('lists every output locale without a target file, at the target path', () => {
+    const missing = findMissingDocuments([article('articles/en/export-reports.md', 'en', english)], { sv: [], de: [] }, config);
+
+    expect(missing).toEqual({
+      'sv:articles/en/export-reports.md': {
+        locale: 'sv',
+        path: 'articles/en/export-reports.md',
+        targetPath: 'articles/sv/export-reports.md',
+        keys: { 'export-reports.md': { value: english } },
+        keyCount: 1
+      },
+      'de:articles/en/export-reports.md': {
+        locale: 'de',
+        path: 'articles/en/export-reports.md',
+        targetPath: 'articles/de/export-reports.md',
+        keys: { 'export-reports.md': { value: english } },
+        keyCount: 1
+      }
+    });
+  });
+
+  it('leaves out a locale whose target file has text', () => {
+    const targets = { sv: [article('articles/sv/export-reports.md', 'sv', '# Exportera\n')], de: [] };
+
+    const missing = findMissingDocuments([article('articles/en/export-reports.md', 'en', english)], targets, config);
+
+    expect(Object.keys(missing)).toEqual(['de:articles/en/export-reports.md']);
+  });
+
+  it('counts an empty or whitespace target as missing', () => {
+    const targets = {
+      sv: [article('articles/sv/export-reports.md', 'sv', '')],
+      de: [article('articles/de/export-reports.md', 'de', ' \n\n')]
+    };
+
+    const missing = findMissingDocuments([article('articles/en/export-reports.md', 'en', english)], targets, config);
+
+    expect(Object.keys(missing).sort()).toEqual(['de:articles/en/export-reports.md', 'sv:articles/en/export-reports.md']);
+  });
+
+  it('pairs by the exact target path, not by a file name in another folder', () => {
+    const targets = { sv: [article('articles/sv/other/nested-guide.md', 'sv', '# Guide\n')], de: [] };
+
+    const missing = findMissingDocuments([article('articles/en/sub/nested-guide.md', 'en', '# Guide\n')], targets, config);
+
+    expect(missing['sv:articles/en/sub/nested-guide.md'].targetPath).toBe('articles/sv/sub/nested-guide.md');
+  });
+
+  it('sends an article whose text holds a marker that skips a key', () => {
+    const text = '# Draft checklist\n\nName the branch `wip_checklist` or use __skip_translation__.\n';
+
+    const missing = findMissingDocuments([article('articles/en/draft-checklist.md', 'en', text)], { sv: [], de: [] }, config);
+
+    expect(missing['sv:articles/en/draft-checklist.md'].keys).toEqual({ 'draft-checklist.md': { value: text } });
+  });
+
+  it('holds the LF text of a CRLF source', () => {
+    const missing = findMissingDocuments([article('articles/en/windows.md', 'en', '# Title\r\n\r\nBody\r\n')], { sv: [], de: [] }, config);
+
+    expect(missing['sv:articles/en/windows.md'].keys).toEqual({ 'windows.md': { value: '# Title\n\nBody\n' } });
+  });
+});
+
+describe('buildDocumentBatches', () => {
+  const config = { sourceLocale: 'en', outputLocales: ['sv', 'de'] };
+  const english = '# Export a report\n\nPress {{ui.save}} 🎉\n';
+
+  function missingFor(filePath: string, text: string) {
+    return findMissingDocuments([article(filePath, 'en', text)], { sv: [], de: [] }, config);
+  }
+
+  it('builds one batch per article with all its locales', () => {
+    const missing = {
+      ...missingFor('articles/en/export-reports.md', english),
+      ...missingFor('articles/en/sub/nested-guide.md', '# Guide\n')
+    };
+
+    const { batches, refused } = buildDocumentBatches(missing);
+
+    expect(refused).toEqual([]);
+    expect(batches).toHaveLength(2);
+    expect(batches[0]).toMatchObject({
+      sourceFilePath: 'articles/en/export-reports.md',
+      localeEntries: ['sv:articles/en/export-reports.md', 'de:articles/en/export-reports.md'],
+      locales: ['sv', 'de']
+    });
+  });
+
+  it('sends the article as one key holding only its value, in the markdown wire format', () => {
+    const { batches } = buildDocumentBatches(missingFor('articles/en/export-reports.md', english));
+
+    expect(batches[0].sourceFile.path).toBe('articles/en/export-reports.md');
+    expect(batches[0].sourceFile.format).toBe('markdown');
+    expect(Object.keys(batches[0].sourceFile).sort()).toEqual(['content', 'format', 'path']);
+    expect(envelope(batches[0])).toEqual({ keys: { 'export-reports.md': { value: english } } });
+  });
+
+  it('refuses an article over the limit and builds no batch for it', () => {
+    const tooLong = 'a'.repeat(MAX_DOCUMENT_CHARACTERS + 1);
+
+    const { batches, refused } = buildDocumentBatches(missingFor('articles/en/long-read.md', tooLong));
+
+    expect(batches).toEqual([]);
+    expect(refused).toEqual([
+      { path: 'articles/en/long-read.md', reason: `the article has ${MAX_DOCUMENT_CHARACTERS + 1} characters, the limit is ${MAX_DOCUMENT_CHARACTERS}` }
+    ]);
+  });
+
+  it('counts the limit in code points', () => {
+    const atLimit = '🎉'.repeat(MAX_DOCUMENT_CHARACTERS);
+
+    const { batches, refused } = buildDocumentBatches(missingFor('articles/en/party.md', atLimit));
+
+    expect(refused).toEqual([]);
+    expect(batches).toHaveLength(1);
+  });
+
+  it('refuses an empty article', () => {
+    const { batches, refused } = buildDocumentBatches(missingFor('articles/en/empty.md', ' \n'));
+
+    expect(batches).toEqual([]);
+    expect(refused).toEqual([{ path: 'articles/en/empty.md', reason: 'the article is empty' }]);
+  });
+});
+
+describe('leaveOutUnsupportedDocuments', () => {
+  it('drops MDX and HTML from every list and names the source ones', () => {
+    const key = { path: 'categories/en/topics.yml', format: 'yml', locale: 'en' };
+    const markdown = article('articles/en/export-reports.md', 'en', '# Export\n');
+    const mdx = article('articles/en/widget.mdx', 'en', '# Widget\n', 'mdx');
+    const html = article('articles/sv/page.html', 'sv', '<h1>Sida</h1>', 'html');
+
+    const result = leaveOutUnsupportedDocuments({
+      allFiles: [key, markdown, mdx, html],
+      sourceFiles: [key, markdown, mdx],
+      targetFilesByLocale: { sv: [html] },
+      parseFailures: []
+    });
+
+    expect(result.allFiles).toEqual([key, markdown]);
+    expect(result.sourceFiles).toEqual([key, markdown]);
+    expect(result.targetFilesByLocale).toEqual({ sv: [] });
+    expect(result.unsupported).toEqual([{ path: 'articles/en/widget.mdx', reason: 'MDX articles are not supported yet' }]);
   });
 });

@@ -158,6 +158,8 @@ export interface GitHubInstallationTokenResponse {
 export interface CommitSummary {
   keysTranslated: number;
   languages: string[];
+  articlesTranslated?: number;
+  articleLanguages?: string[];
   keysAligned?: number;
   alignedLanguages?: string[];
   sourceTextsUpdated?: number;
@@ -199,6 +201,14 @@ export interface KeyIdentifier {
 // disabled for the locale), reported in the translation job creation response.
 export interface SkippedLanguage {
   code: string;
+  reason: string;
+}
+
+// An article and language the backend took no job for, reported in the
+// translation job creation response.
+export interface SkippedDocument {
+  path: string;
+  language: string;
   reason: string;
 }
 

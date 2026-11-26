@@ -29,7 +29,19 @@ import { detectTargetChanges, type TargetChangeFile } from '../utils/target-chan
 import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
 import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
-import { processTranslationBatches } from '../utils/translation-processor.js';
+import {
+  processTranslationBatches,
+  processDocumentBatches,
+  emptyDocumentResult,
+  type DocumentOutcome,
+  type DocumentResult
+} from '../utils/translation-processor.js';
+import {
+  buildDocumentBatches,
+  findMissingDocuments,
+  leaveOutUnsupportedDocuments,
+  type DocumentRefusal
+} from '../utils/documents.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import { collectAlignmentCandidates, type AlignmentCandidate } from '../utils/alignment-candidates.js';
@@ -195,6 +207,16 @@ function reportUnreadableFiles(unreadable: string[]): void {
   console.error(chalk.yellow('\nNothing was sent for translation. Check that the paths in localhero.json resolve from the directory holding that file.\n'));
 }
 
+const SKIPPED_FOR_UPDATES = 'new_language_waits_for_updates';
+
+function byStatus(result: DocumentResult, status: DocumentOutcome['status']): DocumentOutcome[] {
+  return result.outcomes.filter(outcome => outcome.status === status);
+}
+
+function keyFilesOnly<T extends { documentFormat?: string }>(files: T[]): T[] {
+  return files.filter(file => !file.documentFormat);
+}
+
 function isProjectNotFound(error: unknown): boolean {
   return error instanceof ApiResponseError && error.code === PROJECT_NOT_FOUND_CODE;
 }
@@ -305,8 +327,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.log(chalk.gray(`  Translation files: ${config.translationFiles.paths.join(', ')}`));
   }
 
-  const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true });
-  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [] } = result as TranslationFilesResult;
+  const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true, documents: 'include' });
+  const { parseFailures = [] } = result as TranslationFilesResult;
+  const { sourceFiles, targetFilesByLocale, allFiles, unsupported } = leaveOutUnsupportedDocuments(result as TranslationFilesResult);
+  const keySourceFiles = keyFilesOnly(sourceFiles);
+  const sourceDocuments = sourceFiles.filter(file => file.documentFormat);
+  const keyTargetFilesByLocale = Object.fromEntries(
+    Object.entries(targetFilesByLocale).map(([locale, files]) => [locale, keyFilesOnly(files)])
+  );
 
   if (parseFailures.length > 0) {
     console.error(chalk.red(`\n✖ ${parseFailures.length} translation file(s) failed to parse and were skipped:`));
@@ -352,6 +380,50 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   const translationPaths = config.translationFiles.paths.join(' ');
   const jobGroupId = nanoid();
   let alignment: SourceAlignmentResult | null = null;
+
+  // A refused article is a warning; a failed one is an error and fails the run.
+  function annotate(level: 'warning' | 'error', text: string): void {
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      console.log(`::${level}::${escapeAnnotationData(text)}`);
+    } else if (level === 'error') {
+      console.error(chalk.red(`✖ ${text}`));
+    } else {
+      console.log(chalk.yellow(`⚠ ${text}`));
+    }
+  }
+
+  function reportRefusedArticles(refused: DocumentRefusal[]): void {
+    for (const { path, reason } of refused) {
+      annotate('warning', `Article skipped: ${path}, ${reason}`);
+    }
+  }
+
+  function reportArticles(documentResult: DocumentResult): void {
+    const written = byStatus(documentResult, 'written');
+    if (written.length > 0) {
+      const articles = new Set(written.map(outcome => outcome.path)).size;
+      const languages = [...new Set(written.map(outcome => outcome.locale))];
+      console.log(`» Translated ${pluralize(articles, 'article')} in ${languages.join(', ')}`);
+    }
+
+    for (const { path, locale, reason } of byStatus(documentResult, 'skipped')) {
+      console.log(chalk.blue(reason === SKIPPED_FOR_UPDATES
+        ? `ℹ Not translated yet: ${path} (${locale}). New languages for existing articles come with article updates.`
+        : `ℹ Not translated: ${path} (${locale}), ${reason}`));
+    }
+    for (const { path, locale, reason } of byStatus(documentResult, 'refused')) {
+      annotate('warning', `Article skipped: ${path} (${locale}), ${reason}`);
+    }
+    for (const { path, locale, reason } of byStatus(documentResult, 'failed')) {
+      annotate('error', `Article not translated: ${path} (${locale}), ${reason}`);
+    }
+
+    const notSent = new Set(byStatus(documentResult, 'not_sent').map(outcome => outcome.path)).size;
+    if (documentResult.stopped && notSent > 0) {
+      const verb = notSent === 1 ? 'was' : 'were';
+      annotate('error', `${pluralize(notSent, 'article')} ${verb} not translated: ${documentResult.stopped.message}`);
+    }
+  }
 
   async function sendPullRequestImport(targetChanges: TargetChangeFile[]): Promise<void> {
     if (targetChanges.length === 0) return;
@@ -445,7 +517,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     projectConfig: ProjectConfig
   ): Promise<TargetEditAlignmentResult> {
     const candidates = detectedChanges
-      ? collectTargetEditCandidates(detectedChanges, sourceFiles, targetFilesByLocale, projectConfig, !!verbose, ignoreMatcher)
+      ? collectTargetEditCandidates(detectedChanges, keySourceFiles, keyTargetFilesByLocale, projectConfig, !!verbose, ignoreMatcher)
       : [];
     if (candidates.length === 0) return emptyTargetEditResult();
 
@@ -459,7 +531,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
     );
     reportTargetEditAlignment(result, console);
-    refreshFileContent([...sourceFiles, ...Object.values(targetFilesByLocale).flat()], result.writtenPaths);
+    refreshFileContent([...keySourceFiles, ...Object.values(keyTargetFilesByLocale).flat()], result.writtenPaths);
     return result;
   }
 
@@ -556,15 +628,18 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     targetEdits = await followEditedTranslations(detectedChanges, config);
   }
 
+  reportRefusedArticles(unsupported);
+
   const findResult = translationUtils.findMissingTranslationsByLocale(
-    sourceFiles,
-    targetFilesByLocale,
+    keySourceFiles,
+    keyTargetFilesByLocale,
     config,
     !!verbose,
     console,
     { ignoreMatcher }
   );
-  let missingByLocale = findResult.missing;
+  const allMissingDocuments = findMissingDocuments(sourceDocuments, targetFilesByLocale, config);
+  let missingByLocale: Record<string, MissingLocaleEntry> = { ...findResult.missing, ...allMissingDocuments };
 
   const ignoreSummary = summarizeRemoved(findResult.removed, config.translationFiles?.ignoreKeys ?? []);
   if (verbose && (ignoreSummary.totalKeysIgnored > 0 || ignoreSummary.zeroMatchPatterns.length > 0)) {
@@ -586,7 +661,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     if (filtered !== null) {
       const alignmentCandidates = detectedChanges
-        ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
+        ? collectAlignmentCandidates(detectedChanges, keySourceFiles, keyTargetFilesByLocale, config, !!verbose, ignoreMatcher)
         : [];
       alignment = addSourceCells(
         await alignRewordedSourceTexts(replaceAlignmentCandidates(alignmentCandidates, targetEdits), config),
@@ -642,7 +717,12 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
   }
 
-  const { batches, errors } = translationUtils.batchKeysWithMissing(sourceFiles, missingByLocale);
+  const isDocumentEntry = ([entryKey]: [string, MissingLocaleEntry]): boolean => entryKey in allMissingDocuments;
+  const missingKeys = Object.fromEntries(Object.entries(missingByLocale).filter(entry => !isDocumentEntry(entry)));
+  const missingDocuments = Object.fromEntries(Object.entries(missingByLocale).filter(isDocumentEntry));
+
+  const { batches, errors } = translationUtils.batchKeysWithMissing(keySourceFiles, missingKeys);
+  const { batches: documentBatches, refused: refusedDocuments } = buildDocumentBatches(missingDocuments);
 
   if (errors.length > 0) {
     console.error(chalk.red('\n✖ Errors occurred while preparing translation jobs:'));
@@ -656,12 +736,20 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   try {
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
-      missingByLocale as any,
+      missingKeys as any,
       config,
       !!verbose,
       { console, translationUtils },
       jobGroupId
     );
+
+    reportRefusedArticles(refusedDocuments);
+    const documentResult = documentBatches.length > 0
+      ? await processDocumentBatches(documentBatches, missingDocuments as any, config, !!verbose, { console, translationUtils }, jobGroupId)
+      : emptyDocumentResult();
+    const articlesWritten = byStatus(documentResult, 'written');
+    const articlesFailed = byStatus(documentResult, 'failed').length > 0 || documentResult.stopped !== null;
+    const wroteTranslations = translationResult.uniqueKeysTranslated.size > 0 || articlesWritten.length > 0;
 
     if (manifest !== null) {
       await sendFinalize(manifest, removedManifest);
@@ -683,7 +771,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       if (translationResult.uniqueKeysTranslated.size > 0) {
         console.log(`» Successfully updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
-    } else if (parseFailures.length > 0) {
+    } else if (parseFailures.length > 0 || articlesFailed) {
       if (translationResult.uniqueKeysTranslated.size > 0) {
         console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
@@ -694,27 +782,37 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
 
-    if (translationResult.uniqueKeysTranslated.size > 0) {
-      if (translationResult.jobGroupShortUrl) {
-        console.log(`» View results at: ${translationResult.jobGroupShortUrl}`);
+    reportArticles(documentResult);
+
+    const jobGroupShortUrl = translationResult.jobGroupShortUrl || documentResult.jobGroupShortUrl;
+    if (wroteTranslations) {
+      if (jobGroupShortUrl) {
+        console.log(`» View results at: ${jobGroupShortUrl}`);
       } else if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
         const jobIdsParam = translationResult.allJobIds.join(',');
         console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
       }
     }
 
-    if (translationResult.uniqueKeysTranslated.size > 0 || alignment?.alignedCells.length) {
+    if (wroteTranslations || alignment?.alignedCells.length) {
       runPostTranslateCommand(config.postTranslateCommand);
       await commitChanges({
         keysTranslated: translationResult.uniqueKeysTranslated.size,
         languages: translationResult.languages,
-        viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
+        ...(articlesWritten.length > 0 && {
+          articlesTranslated: new Set(articlesWritten.map(outcome => outcome.path)).size,
+          articleLanguages: [...new Set(articlesWritten.map(outcome => outcome.locale))]
+        }),
+        viewUrl: jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
       });
     }
 
-    if (translationResult.failedLanguages.length > 0 && translationResult.uniqueKeysTranslated.size === 0) {
+    if (translationResult.failedLanguages.length > 0 && !wroteTranslations) {
       process.exit(1);
       return;
+    }
+    if (articlesFailed) {
+      process.exitCode = 1;
     }
   } catch (error) {
     if (error instanceof ApiResponseError) {
