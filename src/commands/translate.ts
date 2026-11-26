@@ -43,6 +43,7 @@ import {
   leaveOutUnsupportedDocuments,
   type DocumentRefusal
 } from '../utils/documents.js';
+import { findDocumentsToResend } from '../utils/document-resend.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import { collectAlignmentCandidates, type AlignmentCandidate } from '../utils/alignment-candidates.js';
@@ -712,12 +713,16 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   if (options.changedOnly) {
     targetChanges = withRevertedChanges(detectedChanges ?? [], targetEdits.revertedChanges);
 
-    const filtered = filterByGitChanges(
+    const changedMissing = filterByGitChanges(
       sourceFiles,
       missingByLocale,
       config,
       !!verbose
     );
+    // A new article reworded after its translation was committed is missing nothing, yet out of date.
+    const resend = changedMissing ? findDocumentsToResend(sourceDocuments, targetFilesByLocale, config) : {};
+    Object.assign(allMissingDocuments, resend);
+    const filtered = changedMissing && { ...changedMissing, ...resend };
 
     if (stoppedOnUnreadableFiles()) return;
 

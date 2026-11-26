@@ -15,6 +15,7 @@ import {
 
 export type CommitResult = 'no-changes' | 'new' | 'skipped';
 export const MISSING_TOKEN_ERROR = 'GITHUB_TOKEN is not set';
+export const TRANSLATE_COMMIT_SUBJECT = 'Update translations';
 export const MISSING_BRANCH_ERROR = 'Could not determine branch name from GITHUB_HEAD_REF';
 type SkippedCommit = 'skipped-overlap' | 'skipped-uncertain';
 type SignedCommitResult = Exclude<CommitResult, 'skipped'> | SkippedCommit;
@@ -698,7 +699,7 @@ ${buildExtractStep(options)}      - name: Translate
    * Co-authored-by trailer derived from GITHUB_ACTOR.
    */
   buildTranslateCommitMessage(translationSummary?: CommitSummary): string {
-    let commitMessage = 'Update translations';
+    let commitMessage = TRANSLATE_COMMIT_SUBJECT;
 
     const summaryLines: string[] = [];
     if (translationSummary && translationSummary.keysTranslated > 0) {

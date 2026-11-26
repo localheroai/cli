@@ -259,4 +259,21 @@ describe('translate --changed-only with articles', () => {
     });
     expect(runner.output()).toContain('Articles are not enabled for this project');
   });
+
+  it('translates a new article again when its English changed after the translation was committed', async () => {
+    write('articles/en/invite-teammates.md', '# Invite teammates\n\nOpen **Team**.\n');
+    commitAll('add an article');
+    write('articles/sv/invite-teammates.md', '# (sv) Invite teammates\n\nOpen **Team**.\n');
+    commitAll('Update translations');
+    const reworded = '# Invite teammates\n\nOpen **Team** and press Invite.\n';
+    write('articles/en/invite-teammates.md', reworded);
+    commitAll('reword the new article');
+    const runner = translateRunner(config);
+
+    await runner.run({ changedOnly: true });
+
+    expect(articleJobs()).toEqual(['articles/en/invite-teammates.md']);
+    expect(readFileSync('articles/sv/invite-teammates.md', 'utf-8')).toBe(translatedText(reworded, 'sv'));
+    expect(runner.autoCommitChanges.mock.calls[0][1]).toMatchObject({ articlesTranslated: 1, articleLanguages: ['sv'] });
+  });
 });
