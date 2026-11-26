@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { execSync } from 'child_process';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
-import { createTranslationJob, checkJobStatus, finalizeTranslationJobs } from '../api/translations.js';
+import { createTranslationJob, checkJobStatus, finalizeTranslationJobs, FinalizeError } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
 import { fetchSettings } from '../api/settings.js';
@@ -27,7 +27,7 @@ import { GitHubGraphQLError } from '../utils/github-graphql.js';
 import { escapeAnnotationData } from '../utils/ci-context.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
-import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
+import { createPullRequestImport, PullRequestImportError, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
 import {
   processTranslationBatches,
@@ -39,6 +39,7 @@ import {
 import {
   buildDocumentBatches,
   findMissingDocuments,
+  isDocumentPath,
   leaveOutUnsupportedDocuments,
   type DocumentRefusal
 } from '../utils/documents.js';
@@ -208,6 +209,12 @@ function reportUnreadableFiles(unreadable: string[]): void {
 }
 
 const SKIPPED_FOR_UPDATES = 'new_language_waits_for_updates';
+const DOCUMENTS_OFF_CODE = 'document_file';
+const DOCUMENT_IMPORT_FILES_PER_REQUEST = 10;
+
+function withoutDocuments<T>(manifest: Record<string, T> | null): Record<string, T> | null {
+  return manifest && Object.fromEntries(Object.entries(manifest).filter(([path]) => !isDocumentPath(path)));
+}
 
 function byStatus(result: DocumentResult, status: DocumentOutcome['status']): DocumentOutcome[] {
   return result.outcomes.filter(outcome => outcome.status === status);
@@ -432,8 +439,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     if (!branch) return;
 
     const files = await leaveOutMovedCells(targetChanges, sourceLocale, console, 'working-tree');
-    if (files.length === 0) return;
+    const keyFiles = files.filter(file => !isDocumentPath(file.path));
+    if (keyFiles.length > 0) {
+      await sendKeyFileImport(branch, keyFiles);
+    }
+    await sendDocumentImports(branch, files.filter(file => isDocumentPath(file.path)));
+  }
 
+  async function sendKeyFileImport(branch: string, files: TargetChangeFile[]): Promise<void> {
     let importResult: PullRequestImportResponse;
     try {
       importResult = await createPullRequestImport({
@@ -449,6 +462,44 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
 
     reportImport(summarizeImport(files, sourceLocale, importResult), importResult);
+  }
+
+  // Articles never share a request with key files, and go at most ten files at a time.
+  async function sendDocumentImports(branch: string, files: TargetChangeFile[]): Promise<void> {
+    let sent = 0;
+    let unchanged = 0;
+    let sourceArticles = 0;
+
+    for (let start = 0; start < files.length; start += DOCUMENT_IMPORT_FILES_PER_REQUEST) {
+      const chunk = files.slice(start, start + DOCUMENT_IMPORT_FILES_PER_REQUEST);
+      try {
+        const importResult = await createPullRequestImport({ projectId, branch, jobGroupId, files: chunk });
+        const summary = summarizeImport(chunk, sourceLocale, importResult);
+        sent += summary.importedCount;
+        unchanged += summary.unchangedCount;
+        sourceArticles += summary.sourceTextsImported;
+        for (const skipped of importResult.skipped) {
+          console.log(chalk.yellow(`  Skipped ${skipped.path} (${skipped.reason})`));
+        }
+      } catch (err) {
+        const reason = err instanceof PullRequestImportError && err.code
+          ? `${err.serverMessage ?? err.message} (${err.code})`
+          : (err as Error).message;
+        console.log(chalk.yellow(`⚠ Could not send ${pluralize(files.length - start, 'article file')} for review: ${reason}`));
+        break;
+      }
+    }
+
+    if (sent > 0) {
+      console.log(`» Sent ${pluralize(sent, 'article file')} from this PR for review`);
+    }
+    if (unchanged > 0) {
+      console.log(chalk.dim(`» ${pluralize(unchanged, 'article file')} already ${unchanged === 1 ? 'matches' : 'match'}`));
+    }
+    if (sourceArticles > 0) {
+      const kept = sourceArticles === 1 ? 'Its translations were' : 'Their translations were';
+      console.log(chalk.blue(`ℹ ${pluralize(sourceArticles, 'source article')} changed. ${kept} kept and are not updated yet.`));
+    }
   }
 
   function reportImport(summary: ImportSummary, importResult: PullRequestImportResponse): void {
@@ -471,18 +522,29 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     manifest: Record<string, any>,
     removedManifest: Record<string, any> | null
   ): Promise<void> {
-    try {
+    const finalize = async (prKeyManifest: Record<string, any>, removedKeyManifest: Record<string, any> | null) => {
       const branch = await getCurrentBranch();
       await finalizeTranslationJobs({
         projectId,
         jobGroupId,
-        prKeyManifest: manifest,
-        removedKeyManifest: removedManifest,
+        prKeyManifest,
+        removedKeyManifest,
         commitSha: process.env.GITHUB_SHA,
         branch: branch || undefined
       });
       if (verbose) {
         console.log(chalk.dim('Sent key manifest for PR reconciliation'));
+      }
+    };
+
+    try {
+      try {
+        await finalize(manifest, removedManifest);
+      } catch (err) {
+        if (!(err instanceof FinalizeError) || err.code !== DOCUMENTS_OFF_CODE) throw err;
+        // With articles switched off the key files must still be reconciled.
+        await finalize(withoutDocuments(manifest) ?? {}, withoutDocuments(removedManifest));
+        console.log(chalk.yellow('⚠ Articles are not enabled for this project. Key files were reconciled without them.'));
       }
     } catch (err) {
       if (verbose) {

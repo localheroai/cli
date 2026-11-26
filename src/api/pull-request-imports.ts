@@ -1,5 +1,6 @@
 import { getApiKey } from '../utils/auth.js';
 import { getApiHost } from './client.js';
+import { readErrorBody, type ApiErrorBody } from './error-body.js';
 import type { TargetChangeFile } from '../utils/target-changes.js';
 
 export interface PullRequestImportParams {
@@ -24,11 +25,15 @@ export interface PullRequestImportResponse {
 
 export class PullRequestImportError extends Error {
   readonly status: number;
+  readonly code?: string;
+  readonly serverMessage?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, error?: ApiErrorBody) {
     super(message);
     this.name = 'PullRequestImportError';
     this.status = status;
+    this.code = error?.code;
+    this.serverMessage = error?.message;
   }
 }
 
@@ -52,7 +57,11 @@ export async function createPullRequestImport(
   });
 
   if (!response.ok) {
-    throw new PullRequestImportError(`Translation ingestion failed with status ${response.status}`, response.status);
+    throw new PullRequestImportError(
+      `Translation ingestion failed with status ${response.status}`,
+      response.status,
+      await readErrorBody(response)
+    );
   }
 
   return response.json() as Promise<PullRequestImportResponse>;

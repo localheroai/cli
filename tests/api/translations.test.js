@@ -273,6 +273,20 @@ describe('translations API', () => {
       })).rejects.toThrow('Finalize failed with status 500');
     });
 
+    it('carries the error code of a refused finalize', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: async () => ({ error: { code: 'document_file', message: 'Articles are not enabled for this project' } })
+      });
+
+      await expect(finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: { 'articles/en/export-reports.md': [{ name: 'export-reports.md' }] }
+      })).rejects.toMatchObject({ message: 'Finalize failed with status 422', code: 'document_file' });
+    });
+
     it('omits removed_key_manifest when not provided', async () => {
       await finalizeTranslationJobs({
         projectId: 'proj_123',

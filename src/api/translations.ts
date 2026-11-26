@@ -1,5 +1,6 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest, getApiHost } from './client.js';
+import { readErrorBody } from './error-body.js';
 import { getCurrentBranch } from '../utils/git.js';
 import type { KeyIdentifier, SkippedDocument, SkippedLanguage } from '../types/index.js';
 
@@ -189,6 +190,16 @@ export interface FinalizeParams {
   branch?: string;
 }
 
+export class FinalizeError extends Error {
+  readonly code?: string;
+
+  constructor(status: number, code?: string) {
+    super(`Finalize failed with status ${status}`);
+    this.name = 'FinalizeError';
+    this.code = code;
+  }
+}
+
 export async function finalizeTranslationJobs(params: FinalizeParams): Promise<void> {
   const apiKey = await getApiKey();
   const apiHost = getApiHost();
@@ -214,6 +225,6 @@ export async function finalizeTranslationJobs(params: FinalizeParams): Promise<v
   });
 
   if (!response.ok) {
-    throw new Error(`Finalize failed with status ${response.status}`);
+    throw new FinalizeError(response.status, (await readErrorBody(response))?.code);
   }
 }

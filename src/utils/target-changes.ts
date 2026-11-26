@@ -11,6 +11,7 @@ import {
 import { parseFile, flattenTranslations } from './files.js';
 import { findTargetFile } from './translation-utils.js';
 import { recordUnreadableFile } from './unreadable-files.js';
+import { documentTargetPath, WIRE_FORMAT_MARKDOWN } from './documents.js';
 
 export interface TargetChange {
   key: string;
@@ -75,6 +76,11 @@ export function detectTargetChanges(
         continue;
       }
 
+      if (targetFile.documentFormat) {
+        result.push(documentChangeFile(targetFile.path, sourcePath, locale, changes));
+        continue;
+      }
+
       totalChanges += changes.length;
       if (totalChanges > MAX_TOTAL_CHANGES) {
         return skipIngestion(`more than ${MAX_TOTAL_CHANGES} changed values`);
@@ -95,6 +101,13 @@ export function detectTargetChanges(
 
     const allChanges = detectFileChanges(sourceFile, resolvedRef, verbose);
     let updatedChanges = allChanges.filter(c => c.status === 'updated');
+
+    if (sourceFile.documentFormat) {
+      if (updatedChanges.length > 0) {
+        result.push(documentChangeFile(sourceFile.path, sourceFile.path, config.sourceLocale, updatedChanges));
+      }
+      continue;
+    }
 
     if (ignoreMatcher) {
       updatedChanges = updatedChanges.filter(c => !ignoreMatcher(c.key));
@@ -119,6 +132,17 @@ export function detectTargetChanges(
   }
 
   return result;
+}
+
+// An article travels whole and is never hydrated from a source value. Articles stay
+// outside the change limit, which guards key files against a runaway diff.
+function documentChangeFile(
+  filePath: string,
+  sourcePath: string,
+  locale: string,
+  changes: TargetChange[]
+): TargetChangeFile {
+  return { path: filePath, source_path: sourcePath, locale, format: WIRE_FORMAT_MARKDOWN, changes };
 }
 
 function skipIngestion(reason: string): null {
@@ -223,8 +247,17 @@ function sourcePathFor(
   }
 
   const sourceLocale = config.sourceLocale;
+  if (targetFile.documentFormat) {
+    const knownLocales = [sourceLocale, ...(config.outputLocales ?? [])];
+    return sourceFiles.find(sourceFile =>
+      sourceFile.documentFormat && documentTargetPath(sourceFile.path, locale, knownLocales) === targetFile.path
+    )?.path ?? null;
+  }
+
+  const keyTargetFiles = targetFiles.filter(file => !file.documentFormat);
   const match = sourceFiles.find((sourceFile) => {
-    const paired = findTargetFile(targetFiles, locale, sourceFile, sourceLocale);
+    if (sourceFile.documentFormat) return false;
+    const paired = findTargetFile(keyTargetFiles, locale, sourceFile, sourceLocale);
     return paired?.path === targetFile.path;
   });
 
