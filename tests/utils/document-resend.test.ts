@@ -137,4 +137,21 @@ describe('findDocumentsToResend', () => {
 
     expect(await resend()).toEqual({});
   });
+
+  it('ignores a translation commit from before the branch for an article added again under the same slug', async () => {
+    execSync('git checkout -q main', { stdio: 'pipe' });
+    write('articles/en/returning.md', '# Returning\n\nThe first text.\n');
+    commitAll('add an article');
+    write('articles/sv/returning.md', '# Tillbaka\n\nDen första texten.\n');
+    commitAll('Update translations');
+    rmSync('articles/en/returning.md');
+    rmSync('articles/sv/returning.md');
+    commitAll('remove the article');
+    execSync('git checkout -q -b feature/returning', { stdio: 'pipe' });
+    write('articles/en/returning.md', '# Returning\n\nA new text.\n');
+    write('articles/sv/returning.md', '# Tillbaka\n\nEn handskriven text.\n');
+    commitAll('add the article again with its translation');
+
+    expect(await resend()).toEqual({});
+  });
 });

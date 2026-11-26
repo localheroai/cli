@@ -9,10 +9,11 @@ function git(args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
 }
 
-// The newest commit of ours that wrote the target. A sync commit does not count:
+// The newest commit of ours on this branch that wrote the target. A sync commit does not count:
 // it writes the text Localhero holds, which says nothing about the English it was made from.
-function lastTranslateCommit(targetPath: string): string | null {
-  const commits = git(['log', '--format=%H%x00%s', '--', targetPath]).split('\n').map(line => line.split('\0'));
+// Neither does a commit from before the branch: it belongs to an earlier article of the same name.
+function lastTranslateCommit(targetPath: string, mergeBase: string): string | null {
+  const commits = git(['log', '--format=%H%x00%s', `${mergeBase}..HEAD`, '--', targetPath]).split('\n').map(line => line.split('\0'));
   const ours = commits.find(([, subject]) => subject === TRANSLATE_COMMIT_SUBJECT);
   return ours ? ours[0] : null;
 }
@@ -55,7 +56,7 @@ export function findDocumentsToResend(
       for (const [entryKey, entry] of Object.entries(candidates)) {
         if (!translated(entry) || hasUncommittedChanges(entry.targetPath)) continue;
 
-        const commit = lastTranslateCommit(entry.targetPath);
+        const commit = lastTranslateCommit(entry.targetPath, mergeBase);
         const [name, current] = Object.entries(entry.keys)[0];
         const madeFrom = commit ? flatValuesAt(source, commit)?.[name] : undefined;
         if (typeof madeFrom === 'string' && madeFrom !== current.value) {
