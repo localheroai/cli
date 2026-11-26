@@ -80,6 +80,23 @@ function setupGitMock({
   });
 }
 
+function emptyMsgstrSourcePo(filesPlural) {
+  return `msgid ""
+msgstr ""
+"Plural-Forms: nplurals=2; plural=(n != 1);\\n"
+
+msgid "%s file"
+msgid_plural "${filesPlural}"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid "One folder"
+msgid_plural "%(count)s folders"
+msgstr[0] ""
+msgstr[1] ""
+`;
+}
+
 describe('git-changes module (object-based diff)', () => {
   let mockConfig;
   let mockSourceFiles;
@@ -589,6 +606,37 @@ msgstr[1] "Delete items"
       // Verify the context prefix (pipe character) doesn't interfere with plural suffix matching
       const keys = Object.keys(result['es:locales/en.po'].keys);
       expect(keys.every(k => k.startsWith('action-label|'))).toBe(true);
+    });
+
+    it('treats a msgid_plural change as a change to every form when the source msgstr is empty', () => {
+      const poSourceFiles = [
+        { path: 'locales/en.po', format: 'po', locale: 'en' }
+      ];
+
+      setupGitMock({ oldContent: emptyMsgstrSourcePo('%s files') });
+      mockReadFileSync.mockReturnValue(emptyMsgstrSourcePo('%(count)s files'));
+
+      mockMissingByLocale['pl:locales/en.po'] = {
+        locale: 'pl',
+        path: 'locales/en.po',
+        targetPath: 'locales/pl.po',
+        keys: {
+          '%s file': { value: '%s file', sourceKey: '%s file' },
+          '%s file__plural_1': { value: '%(count)s files', sourceKey: '%s file__plural_1' },
+          '%s file__plural_2': { value: '%(count)s files', sourceKey: '%s file__plural_2' },
+          'One folder': { value: 'One folder', sourceKey: 'One folder' },
+          'One folder__plural_1': { value: '%(count)s folders', sourceKey: 'One folder__plural_1' }
+        },
+        keyCount: 5
+      };
+
+      const result = filterByGitChanges(poSourceFiles, mockMissingByLocale, mockConfig, false);
+
+      expect(Object.keys(result['pl:locales/en.po'].keys)).toEqual([
+        '%s file',
+        '%s file__plural_1',
+        '%s file__plural_2'
+      ]);
     });
   });
 
@@ -1344,6 +1392,21 @@ describe('getManifestForFinalize', () => {
 
     expect(result).toEqual({
       'locales/en.json': [{ name: 'farewell' }]
+    });
+  });
+
+  it('lists every form of a PO entry whose msgid_plural changed', () => {
+    const sourceFiles = [
+      { path: 'locales/en.po', format: 'po', locale: 'en' }
+    ];
+
+    setupGitMock({ oldContent: emptyMsgstrSourcePo('%s files') });
+    mockReadFileSync.mockReturnValue(emptyMsgstrSourcePo('%(count)s files'));
+
+    const result = gitDiffModule.getManifestForFinalize(sourceFiles, mockConfig, false);
+
+    expect(result).toEqual({
+      'locales/en.po': [{ name: '%s file' }, { name: '%s file__plural_1' }]
     });
   });
 
