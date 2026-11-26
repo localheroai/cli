@@ -355,6 +355,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     process.exitCode = 1;
   }
 
+  reportRefusedArticles(unsupported);
+
   if (!allFiles || allFiles.length === 0) {
     console.error(chalk.red('\n✖ No translation files found in the specified paths.\n'));
     process.exit(1);
@@ -696,8 +698,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     targetEdits = await followEditedTranslations(detectedChanges, config);
   }
 
-  reportRefusedArticles(unsupported);
-
   const findResult = translationUtils.findMissingTranslationsByLocale(
     keySourceFiles,
     keyTargetFilesByLocale,
@@ -827,7 +827,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       await sendFinalize(manifest, removedManifest);
     }
 
-    await sendPullRequestImport(targetChanges);
+    // An article this run translated again holds new text; the text read before the run is not sent for review.
+    const rewritten = new Set(articlesWritten.map(outcome => outcome.targetPath));
+    await sendPullRequestImport(targetChanges.filter(file => !rewritten.has(file.path)));
 
     const translatedLocales = new Set(translationResult.languages);
     const onlySkipped = translationResult.skippedLanguages.filter((locale) => !translatedLocales.has(locale));

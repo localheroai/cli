@@ -98,4 +98,16 @@ describe('check with articles', () => {
 
     expect(articleNotice(result.log)).toEqual([]);
   });
+
+  it('says so and exits 0 for a project that holds only articles', async () => {
+    rmSync('categories', { recursive: true });
+
+    const result = await runCheck('**/*.md');
+
+    expect(articleNotice(result.log)).toEqual([
+      expect.stringContaining('7 article files are not checked yet (articles/). There are no key files to check.')
+    ]);
+    expect(result.error).toEqual([]);
+    expect(result.exitCode).toBe(0);
+  });
 });

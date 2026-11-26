@@ -260,13 +260,14 @@ interface CheckResult {
   articleNotice: string | null;
 }
 
-function articleNoticeFor(articlePaths: string[], configuredPaths: string[]): string | null {
+function articleNoticeFor(articlePaths: string[], configuredPaths: string[], keyFileCount: number): string | null {
   if (articlePaths.length === 0) return null;
 
   const folders = configuredPaths.filter((folder) => articlePaths.some((file) => file.startsWith(folder)));
   const count = articlePaths.length === 1 ? '1 article file is' : `${articlePaths.length} article files are`;
   const where = folders.length > 0 ? ` (${folders.join(', ')})` : '';
-  return `${count} not checked yet${where}. Key files were checked as usual.`;
+  const keyFiles = keyFileCount > 0 ? 'Key files were checked as usual.' : 'There are no key files to check.';
+  return `${count} not checked yet${where}. ${keyFiles}`;
 }
 
 function withoutArticles(found: TranslationFilesResult): TranslationFilesResult {
@@ -634,11 +635,16 @@ export async function runCheck(
     ...(format === 'github' ? { logger: SILENT } : {})
   });
   const found = result as TranslationFilesResult;
+  const discovered = withoutArticles(found);
   const articleNotice = articleNoticeFor(
     found.allFiles.filter((file) => file.documentFormat).map((file) => file.path),
-    config.translationFiles.paths
+    config.translationFiles.paths,
+    discovered.allFiles.length
   );
-  const discovered = withoutArticles(found);
+  // A project of articles only has nothing check can look into yet; that is no failure.
+  if (articleNotice && discovered.allFiles.length === 0 && (discovered.parseFailures ?? []).length === 0) {
+    return { ...failedResult(format, sourceLocale), exitCode: 0, articleNotice };
+  }
   const recovered = await recoverDuplicateKeyFiles(
     discovered.parseFailures ?? [],
     [sourceLocale, ...targetLocales],
@@ -1065,6 +1071,8 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   const result = await runCheck(options, deps);
   const { reports, sourceLocale, keyCount, format, changes, fileContents } = result;
   process.exitCode = result.exitCode;
+  if (result.articleNotice && format === 'github') con.log(`::notice::${escapeAnnotationData(result.articleNotice)}`);
+  if (result.articleNotice && format === 'text') con.log(chalk.blue(`ℹ ${result.articleNotice}`));
   if (result.aborted) return;
 
   const unavailable = changes !== null && 'error' in changes ? changes.error : null;
@@ -1072,9 +1080,6 @@ export async function check(options: CheckOptions = {}, deps: CheckDependencies 
   const introduced = reports.map((r) => filterFindings(r, isIntroduced));
   const existingProblems = base ? problemsIn(reports.map((r) => filterFindings(r, isExisting)), sourceLocale).length : 0;
   const summaryPath = detectCiContext(deps.env).stepSummaryPath;
-
-  if (result.articleNotice && format === 'github') con.log(`::notice::${escapeAnnotationData(result.articleNotice)}`);
-  if (result.articleNotice && format === 'text') con.log(chalk.blue(`ℹ ${result.articleNotice}`));
 
   if (format === 'json') {
     if (unavailable) con.error(chalk.yellow(`⚠ ${unavailableMessage(unavailable)}`));

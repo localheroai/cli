@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
-import { cpSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -224,5 +224,21 @@ describe('translate with articles', () => {
     );
     expect(existsSync('articles/sv/en.md')).toBe(false);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('names the unsupported articles when a project holds nothing else', async () => {
+    rmSync('categories', { recursive: true });
+    rmSync('articles', { recursive: true });
+    mkdirSync('articles/en', { recursive: true });
+    writeFileSync('articles/en/widget.mdx', '# Widget\n');
+    const runner = translateRunner({
+      ...config,
+      translationFiles: { paths: ['articles/'], pattern: '**/*.mdx' }
+    });
+
+    await runner.run();
+
+    expect(runner.output()).toContain('Article skipped: articles/en/widget.mdx, MDX articles are not supported yet');
+    expect(api.callsTo('/translation_jobs')).toEqual([]);
   });
 });

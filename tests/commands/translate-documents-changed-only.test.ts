@@ -8,6 +8,7 @@ import {
   installFakeApi,
   useTestEnvironment,
   errorResponse,
+  jsonResponse,
   translatedText,
   type FakeApi,
   type RecordedCall
@@ -275,5 +276,24 @@ describe('translate --changed-only with articles', () => {
     expect(articleJobs()).toEqual(['articles/en/invite-teammates.md']);
     expect(readFileSync('articles/sv/invite-teammates.md', 'utf-8')).toBe(translatedText(reworded, 'sv'));
     expect(runner.autoCommitChanges.mock.calls[0][1]).toMatchObject({ articlesTranslated: 1, articleLanguages: ['sv'] });
+    expect(JSON.stringify(importCalls())).not.toContain('articles/sv/invite-teammates.md');
+  });
+
+  it('still sends the committed translation for review when translating the article again fails', async () => {
+    api.restore();
+    api = installFakeApi((_call, job) => job
+      ? jsonResponse({ status: 'failed', language: { code: 'sv' }, error_details: 'structure check failed' })
+      : undefined);
+    write('articles/en/invite-teammates.md', '# Invite teammates\n\nOpen **Team**.\n');
+    commitAll('add an article');
+    write('articles/sv/invite-teammates.md', '# Bjud in kollegor\n');
+    commitAll('Update translations');
+    write('articles/en/invite-teammates.md', '# Invite teammates\n\nOpen **Team** and press Invite.\n');
+    commitAll('reword the new article');
+
+    await translateRunner(config).run({ changedOnly: true });
+
+    expect(importCalls().flatMap(call => call.body.files.map((file: any) => file.path))).toEqual(['articles/sv/invite-teammates.md']);
+    expect(process.exitCode).toBe(1);
   });
 });
