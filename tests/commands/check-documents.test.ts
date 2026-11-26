@@ -110,4 +110,14 @@ describe('check with articles', () => {
     expect(result.error).toEqual([]);
     expect(result.exitCode).toBe(0);
   });
+
+  it('still prints a JSON report for a project that holds only articles', async () => {
+    rmSync('categories', { recursive: true });
+
+    const result = await runCheck('**/*.md', { json: true });
+
+    expect(result.log).toHaveLength(1);
+    expect(JSON.parse(result.log[0])).toMatchObject({ sourceLocale: 'en', sourceFiles: [], keyCount: 0, locales: [] });
+    expect(result.exitCode).toBe(0);
+  });
 });

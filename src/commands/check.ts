@@ -643,7 +643,7 @@ export async function runCheck(
   );
   // A project of articles only has nothing check can look into yet; that is no failure.
   if (articleNotice && discovered.allFiles.length === 0 && (discovered.parseFailures ?? []).length === 0) {
-    return { ...failedResult(format, sourceLocale), exitCode: 0, articleNotice };
+    return { ...failedResult(format, sourceLocale), aborted: false, exitCode: 0, articleNotice };
   }
   const recovered = await recoverDuplicateKeyFiles(
     discovered.parseFailures ?? [],
