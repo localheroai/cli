@@ -11,7 +11,8 @@ import {
   isDocumentPath,
   leaveOutUnsupportedDocuments,
   patternNamesExtension,
-  toLfText
+  toLfText,
+  validateDocumentCells
 } from '../../src/utils/documents.js';
 
 import type { TranslationFile } from '../../src/types/index.js';
@@ -310,5 +311,29 @@ describe('leaveOutUnsupportedDocuments', () => {
     expect(result.sourceFiles).toEqual([key, markdown]);
     expect(result.targetFilesByLocale).toEqual({ sv: [] });
     expect(result.unsupported).toEqual([{ path: 'articles/en/widget.mdx', reason: 'MDX articles are not supported yet' }]);
+  });
+});
+
+describe('validateDocumentCells', () => {
+  const text = '# Exportera\n';
+
+  it('accepts one text or null named after the file, and ignores key files', () => {
+    expect(() => validateDocumentCells([
+      { path: 'articles/sv/export-reports.md', translations: [{ key: 'export-reports.md', value: text }] },
+      { path: 'articles/sv/notes.MD', translations: [{ key: 'notes.MD', value: null }] },
+      { path: 'categories/sv/topics.yml', translations: [{ key: 'a', value: ['x'] }, { key: 'b', value: { one: 'x' } }] }
+    ])).not.toThrow();
+  });
+
+  it.each([
+    ['no translation', []],
+    ['two translations', [{ key: 'export-reports.md', value: text }, { key: 'title', value: 'Rubrik' }]],
+    ['another key', [{ key: 'title', value: text }]],
+    ['an object value', [{ key: 'export-reports.md', value: { title: 'Rubrik' } }]],
+    ['a list value', [{ key: 'export-reports.md', value: ['Rubrik'] }]],
+    ['a number value', [{ key: 'export-reports.md', value: 3 }]]
+  ])('throws naming the file for %s', (_name, translations) => {
+    expect(() => validateDocumentCells([{ path: 'articles/sv/export-reports.md', translations }]))
+      .toThrow('articles/sv/export-reports.md');
   });
 });

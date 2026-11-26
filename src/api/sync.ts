@@ -12,11 +12,14 @@ export interface OldValue {
   superseded_at: string;
 }
 
+// Tells the server this CLI writes articles whole; without it a sync holding an article is refused.
+const DOCUMENTS_CAPABILITY = 'documents';
+
 export interface SyncTranslation {
   key: string;
   name: string;
   context?: string;
-  value: TranslationValue;
+  value: TranslationValue | null;
   old_values?: OldValue[];
   file_references?: string[];
   updated_at: string;
@@ -81,6 +84,7 @@ export async function getSyncTranslations(
   if (version) {
     queryParams.set('version', version.toString());
   }
+  queryParams.append('capabilities[]', DOCUMENTS_CAPABILITY);
 
   return apiRequest(`/api/v1/translation_syncs/${syncId}?${queryParams}`, { apiKey });
 }

@@ -203,3 +203,25 @@ export function buildDocumentBatches(
 
   return { batches: [...batchesByPath.values()], refused: [...refused.values()] };
 }
+
+interface SyncCell {
+  path: string;
+  translations: Array<{ key: string; value: unknown }>;
+}
+
+/**
+ * A synced article arrives as one translation named after its file, holding the
+ * whole text or null. Anything else would be written wrong, so the sync fails
+ * before the first file is touched.
+ */
+export function validateDocumentCells(files: SyncCell[]): void {
+  for (const file of files.filter(candidate => isDocumentPath(candidate.path))) {
+    const [translation] = file.translations;
+    const valid = file.translations.length === 1 &&
+      translation.key === documentKeyName(file.path) &&
+      (translation.value === null || typeof translation.value === 'string');
+    if (!valid) {
+      throw new Error(`Unexpected article content for ${file.path}. Nothing was written.`);
+    }
+  }
+}

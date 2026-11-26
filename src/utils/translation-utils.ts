@@ -7,6 +7,7 @@ import {
 import { TranslationBatch } from './translation-processor.js';
 import { findMissingPoTranslations, createUniqueKey, PLURAL_PREFIX, PLURAL_SUFFIX_REGEX } from './po-utils.js';
 import { filterKeys, RemovedKey } from './ignore-keys.js';
+import { documentTargetPath, isDocumentPath } from './documents.js';
 
 const POT_EXTENSION = '.pot';
 
@@ -779,6 +780,13 @@ export function findSourceFileForTarget(
   sourceLocale: string
 ): TranslationFile | undefined {
   const target = path.resolve(targetPath);
+  if (isDocumentPath(targetPath)) {
+    return sourceFiles.find(sourceFile => {
+      const articleTarget = sourceFile.documentFormat && documentTargetPath(sourceFile.path, targetLocale, [sourceLocale]);
+      return articleTarget ? path.resolve(articleTarget) === target : false;
+    });
+  }
+
   const matches = sourceFiles.filter(sourceFile => {
     const resolved = { ...sourceFile, path: path.resolve(sourceFile.path) };
     const candidates = resolved.multiLanguage
