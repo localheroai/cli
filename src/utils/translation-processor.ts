@@ -691,6 +691,24 @@ function isNetworkError(error: unknown): boolean {
   return !(error instanceof ApiResponseError) && typeof (error as { cliErrorMessage?: unknown })?.cliErrorMessage === 'string';
 }
 
+function settle(result: DocumentResult, entry: MissingTranslationEntry, status: DocumentStatus, reason?: string): void {
+  result.outcomes.push({
+    path: entry.path,
+    locale: entry.locale,
+    targetPath: entry.targetPath,
+    status,
+    ...(reason && { reason })
+  });
+}
+
+function matchingLocale<T>(byLanguage: Map<string, T>, locale: string): T | undefined {
+  return [...byLanguage.entries()].find(([language]) => localeCodesMatch(language, locale))?.[1];
+}
+
+function includesLocale(languages: Set<string>, locale: string): boolean {
+  return [...languages].some(language => localeCodesMatch(language, locale));
+}
+
 function stopReason(error: unknown): DocumentResult['stopped'] {
   if (error instanceof ApiResponseError && STOP_CODES.has(error.code)) {
     return { code: error.code, message: error.message };
@@ -714,15 +732,6 @@ async function processDocumentBatch(
 ): Promise<void> {
   const { console, translationUtils } = deps;
   const entries = batch.localeEntries.map(entryKey => missingByLocale[entryKey]);
-  const settle = (entry: MissingTranslationEntry, status: DocumentStatus, reason?: string): void => {
-    result.outcomes.push({
-      path: entry.path,
-      locale: entry.locale,
-      targetPath: entry.targetPath,
-      status,
-      ...(reason && { reason })
-    });
-  };
 
   let response: TranslationJobResponse;
   try {
@@ -731,11 +740,11 @@ async function processDocumentBatch(
     const stopped = stopReason(error);
     if (stopped) {
       result.stopped ??= stopped;
-      entries.forEach(entry => settle(entry, 'not_sent'));
+      entries.forEach(entry => settle(result, entry, 'not_sent'));
       return;
     }
     const refused = error instanceof ApiResponseError && REFUSAL_CODES.has(error.code);
-    entries.forEach(entry => settle(entry, refused ? 'refused' : 'failed', errorMessage(error)));
+    entries.forEach(entry => settle(result, entry, refused ? 'refused' : 'failed', errorMessage(error)));
     return;
   }
 
@@ -799,19 +808,14 @@ async function processDocumentBatch(
     });
   }
 
-  const matching = <T>(byLanguage: Map<string, T>, locale: string): T | undefined =>
-    [...byLanguage.entries()].find(([language]) => localeCodesMatch(language, locale))?.[1];
-  const includes = (languages: Set<string>, locale: string): boolean =>
-    [...languages].some(language => localeCodesMatch(language, locale));
-
   for (const entry of entries) {
-    const skipReason = matching(skipReasons, entry.locale);
-    if (includes(stats.languages, entry.locale)) {
-      settle(entry, 'written');
-    } else if (skipReason !== undefined || includes(stats.skippedLanguages, entry.locale)) {
-      settle(entry, 'skipped', skipReason ?? 'auto_translate_disabled');
+    const skipReason = matchingLocale(skipReasons, entry.locale);
+    if (includesLocale(stats.languages, entry.locale)) {
+      settle(result, entry, 'written');
+    } else if (skipReason !== undefined || includesLocale(stats.skippedLanguages, entry.locale)) {
+      settle(result, entry, 'skipped', skipReason ?? 'auto_translate_disabled');
     } else {
-      settle(entry, 'failed', matching(failures, entry.locale) ?? 'the server returned no translation');
+      settle(result, entry, 'failed', matchingLocale(failures, entry.locale) ?? 'the server returned no translation');
     }
   }
 }
@@ -848,8 +852,7 @@ export async function processDocumentBatches(
 
   for (const batch of queue) {
     for (const entryKey of batch.localeEntries) {
-      const entry = missingByLocale[entryKey];
-      result.outcomes.push({ path: entry.path, locale: entry.locale, targetPath: entry.targetPath, status: 'not_sent' });
+      settle(result, missingByLocale[entryKey], 'not_sent');
     }
   }
 

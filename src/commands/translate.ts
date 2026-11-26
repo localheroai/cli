@@ -68,10 +68,12 @@ import {
   type TargetEditAlignmentResult
 } from '../utils/target-edit-alignment.js';
 import type {
+  MissingByLocale,
   TranslationResult
 } from '../utils/translation-processor.js';
 import type {
   CommitSummary,
+  KeyIdentifier,
   ProjectConfig,
   TranslationConfig,
   TranslationFileOptions,
@@ -336,8 +338,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true, documents: 'include' });
-  const { parseFailures = [] } = result as TranslationFilesResult;
-  const { sourceFiles, targetFilesByLocale, allFiles, unsupported } = leaveOutUnsupportedDocuments(result as TranslationFilesResult);
+  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [], unsupported } =
+    leaveOutUnsupportedDocuments(result as TranslationFilesResult);
   const keySourceFiles = keyFilesOnly(sourceFiles);
   const sourceDocuments = sourceFiles.filter(file => file.documentFormat);
   const keyTargetFilesByLocale = Object.fromEntries(
@@ -523,7 +525,10 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     manifest: Record<string, any>,
     removedManifest: Record<string, any> | null
   ): Promise<void> {
-    const finalize = async (prKeyManifest: Record<string, any>, removedKeyManifest: Record<string, any> | null) => {
+    async function finalize(
+      prKeyManifest: Record<string, KeyIdentifier[]>,
+      removedKeyManifest: Record<string, KeyIdentifier[]> | null
+    ): Promise<void> {
       const branch = await getCurrentBranch();
       await finalizeTranslationJobs({
         projectId,
@@ -536,7 +541,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       if (verbose) {
         console.log(chalk.dim('Sent key manifest for PR reconciliation'));
       }
-    };
+    }
 
     try {
       try {
@@ -803,7 +808,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   try {
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
-      missingKeys as any,
+      missingKeys as MissingByLocale,
       config,
       !!verbose,
       { console, translationUtils },
@@ -812,7 +817,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     reportRefusedArticles(refusedDocuments);
     const documentResult = documentBatches.length > 0
-      ? await processDocumentBatches(documentBatches, missingDocuments as any, config, !!verbose, { console, translationUtils }, jobGroupId)
+      ? await processDocumentBatches(documentBatches, missingDocuments as MissingByLocale, config, !!verbose, { console, translationUtils }, jobGroupId)
       : emptyDocumentResult();
     const articlesWritten = byStatus(documentResult, 'written');
     const articlesFailed = byStatus(documentResult, 'failed').length > 0 || documentResult.stopped !== null;
