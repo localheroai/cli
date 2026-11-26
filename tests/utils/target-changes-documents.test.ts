@@ -88,6 +88,13 @@ describe('detectTargetChanges with articles', () => {
     expect(await detect()).toEqual([]);
   });
 
+  it('never sends an article that holds only whitespace', async () => {
+    write('articles/sv/topics.md', '\n\n');
+    write('articles/en/topics.md', ' \n');
+
+    expect(await detect()).toEqual([]);
+  });
+
   it('skips an article translation without an English article at its source path', async () => {
     write('articles/sv/orphan.md', '# Ensam\n');
 

@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { check, type CheckOptions } from '../../src/commands/check.js';
 import { findTranslationFiles } from '../../src/utils/files.js';
+import { execSync } from 'child_process';
+import { runGit, type GitRunner } from '../../src/utils/check-git.js';
 import { fakeGit } from '../helpers/fake-git.js';
 
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/documents');
@@ -15,7 +17,12 @@ describe('check with articles', () => {
   let directory: string;
   let originalCwd: string;
 
-  async function runCheck(pattern: string, options: CheckOptions = {}, env: Record<string, string> = {}) {
+  async function runCheck(
+    pattern: string,
+    options: CheckOptions = {},
+    env: Record<string, string> = {},
+    git: GitRunner = fakeGit({ isRepo: false })
+  ) {
     const log = jest.fn();
     const error = jest.fn();
     await check(options, {
@@ -32,7 +39,7 @@ describe('check with articles', () => {
       projectDetection: { detectProjectType: jest.fn() },
       fsUtils: { listFiles: jest.fn(), findLocaleDirs: jest.fn(), readFile: jest.fn() },
       env,
-      git: fakeGit({ isRepo: false }),
+      git,
       appendFile: jest.fn()
     } as never);
     const printed = (mock: jest.Mock) => mock.mock.calls.map(call => String(call[0]));
@@ -119,5 +126,40 @@ describe('check with articles', () => {
     expect(result.log).toHaveLength(1);
     expect(JSON.parse(result.log[0])).toMatchObject({ sourceLocale: 'en', sourceFiles: [], keyCount: 0, locales: [] });
     expect(result.exitCode).toBe(0);
+  });
+
+  describe('compared with the base branch', () => {
+    function git(command: string): void {
+      execSync(`git -c user.email=t@t -c user.name=t -c commit.gpgsign=false ${command}`, { stdio: 'pipe' });
+    }
+
+    beforeEach(() => {
+      execSync('git init -q -b main', { stdio: 'pipe' });
+      git('add -A');
+      git('commit -qm base');
+      git('checkout -q -b feature/articles');
+      writeFileSync('articles/en/export-reports.md', '# Export a report\n\nReworded on the branch.\n');
+      rmSync('articles/en/notes-en.md');
+      rmSync('articles/sv/export-reports.md');
+      writeFileSync('articles/en/added.md', '# Added on the branch\n');
+      writeFileSync('categories/en/topics.yml', 'en:\n  topics:\n    billing: Billing\n    reports: Reports\n    teams: Teams\n');
+      git('add -A');
+      git('commit -qm "branch changes"');
+    });
+
+    it.each([
+      ['text', {}],
+      ['JSON', { json: true }],
+      ['GitHub', { format: 'github' as const }]
+    ])('reports the same %s findings and exit code with and without articles', async (_name, options) => {
+      const without = await runCheck(KEY_FILES_ONLY, { ...options, changedOnly: true }, {}, runGit);
+      const withArticles = await runCheck(WITH_ARTICLES, { ...options, changedOnly: true }, {}, runGit);
+
+      expect(without.log.join('\n')).toContain('topics.teams');
+      expect(withArticles.log.filter(line => !line.includes('article'))).toEqual(without.log);
+      expect(withArticles.error).toEqual(without.error);
+      expect(withArticles.exitCode).toBe(1);
+      expect(without.exitCode).toBe(1);
+    });
   });
 });

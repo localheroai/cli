@@ -153,6 +153,7 @@ describe('translate --changed-only with articles', () => {
     await translateRunner(config).run({ changedOnly: true });
 
     expect(articleJobs()).toEqual([]);
+    expect(JSON.stringify(api.calls.filter(call => /alignments/.test(call.path)))).not.toContain('.md');
     expect(importCalls()).toHaveLength(2);
     const [keyImport, documentImport] = importCalls();
     expect(keyImport.body.files.map((file: any) => file.path)).toEqual(['categories/sv/topics.yml']);
@@ -189,6 +190,7 @@ describe('translate --changed-only with articles', () => {
     }]);
     expect(runner.output()).toContain('1 source article changed. Its translations were kept and are not updated yet.');
     expect(runner.output()).not.toContain('align them from the Localhero comment');
+    expect(api.calls.filter(call => /alignments/.test(call.path))).toEqual([]);
   });
 
   it('sends article files ten to a request', async () => {

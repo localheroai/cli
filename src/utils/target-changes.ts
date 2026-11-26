@@ -167,6 +167,8 @@ function detectFileChanges(
       // The source side does translate arrays, as one key holding the whole
       // sequence, so a hand-edited array here is not ingested as a human edit.
       if (typeof value !== 'string' || value === '') continue;
+      // A blank article is never sent.
+      if (targetFile.documentFormat && value.trim() === '') continue;
 
       const oldValue = oldFlat[key];
       if (typeof oldValue === 'string') {
