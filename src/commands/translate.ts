@@ -32,16 +32,14 @@ import { summarizeImport, type ImportSummary } from '../utils/import-summary.js'
 import {
   processTranslationBatches,
   processDocumentBatches,
-  emptyDocumentResult,
-  type DocumentOutcome,
-  type DocumentResult
+  emptyDocumentResult
 } from '../utils/translation-processor.js';
+import { articleReporter, byStatus, pluralize } from '../utils/article-report.js';
 import {
   buildDocumentBatches,
   findMissingDocuments,
   isDocumentPath,
-  leaveOutUnsupportedDocuments,
-  type DocumentRefusal
+  leaveOutUnsupportedDocuments
 } from '../utils/documents.js';
 import { findDocumentsToResend } from '../utils/document-resend.js';
 import {
@@ -187,10 +185,6 @@ const defaultDeps: TranslationDependencies = {
 
 const PROJECT_NOT_FOUND_CODE = 'project_not_found';
 
-function pluralize(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
 const COMMIT_FAILURE_FIXES: Record<string, string> = {
   [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
 };
@@ -219,7 +213,6 @@ function reportUnreadableFiles(unreadable: string[]): void {
   console.error(chalk.yellow('\nNothing was sent for translation. Check that the paths in localhero.json resolve from the directory holding that file.\n'));
 }
 
-const SKIPPED_FOR_UPDATES = 'new_language_waits_for_updates';
 const DOCUMENTS_OFF_CODE = 'document_file';
 const DOCUMENT_IMPORT_FILES_PER_REQUEST = 10;
 
@@ -227,9 +220,6 @@ function withoutDocuments<T>(manifest: Record<string, T> | null): Record<string,
   return manifest && Object.fromEntries(Object.entries(manifest).filter(([path]) => !isDocumentPath(path)));
 }
 
-function byStatus(result: DocumentResult, status: DocumentOutcome['status']): DocumentOutcome[] {
-  return result.outcomes.filter(outcome => outcome.status === status);
-}
 
 function keyFilesOnly<T extends { documentFormat?: string }>(files: T[]): T[] {
   return files.filter(file => !file.documentFormat);
@@ -297,6 +287,7 @@ async function fetchLocalePluralCategories(
 
 export async function translate(options: TranslationOptions = {}, deps: TranslationDependencies = defaultDeps): Promise<void> {
   const { console, configUtils, authUtils, settingsUtils, fileUtils, translationUtils, gitUtils, execUtils } = deps;
+  const { reportArticles, reportRefusedArticles } = articleReporter(console);
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
@@ -401,50 +392,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   const jobGroupId = nanoid();
   let alignment: SourceAlignmentResult | null = null;
   let articleUpdates = emptyDocumentAlignment();
-
-  // A refused article is a warning; a failed one is an error and fails the run.
-  function annotate(level: 'warning' | 'error', text: string): void {
-    if (process.env.GITHUB_ACTIONS === 'true') {
-      console.log(`::${level}::${escapeAnnotationData(text)}`);
-    } else if (level === 'error') {
-      console.error(chalk.red(`✖ ${text}`));
-    } else {
-      console.log(chalk.yellow(`⚠ ${text}`));
-    }
-  }
-
-  function reportRefusedArticles(refused: DocumentRefusal[]): void {
-    for (const { path, reason } of refused) {
-      annotate('warning', `Article skipped: ${path}, ${reason}`);
-    }
-  }
-
-  function reportArticles(documentResult: DocumentResult): void {
-    const written = byStatus(documentResult, 'written');
-    if (written.length > 0) {
-      const articles = new Set(written.map(outcome => outcome.path)).size;
-      const languages = [...new Set(written.map(outcome => outcome.locale))];
-      console.log(`» Translated ${pluralize(articles, 'article')} in ${languages.join(', ')}`);
-    }
-
-    for (const { path, locale, reason } of byStatus(documentResult, 'skipped')) {
-      console.log(chalk.blue(reason === SKIPPED_FOR_UPDATES
-        ? `ℹ Not translated yet: ${path} (${locale}). New languages for existing articles come with article updates.`
-        : `ℹ Not translated: ${path} (${locale}), ${reason}`));
-    }
-    for (const { path, locale, reason } of byStatus(documentResult, 'refused')) {
-      annotate('warning', `Article skipped: ${path} (${locale}), ${reason}`);
-    }
-    for (const { path, locale, reason } of byStatus(documentResult, 'failed')) {
-      annotate('error', `Article not translated: ${path} (${locale}), ${reason}`);
-    }
-
-    const notSent = new Set(byStatus(documentResult, 'not_sent').map(outcome => outcome.path)).size;
-    if (documentResult.stopped && notSent > 0) {
-      const verb = notSent === 1 ? 'was' : 'were';
-      annotate('error', `${pluralize(notSent, 'article')} ${verb} not translated: ${documentResult.stopped.message}`);
-    }
-  }
 
   async function sendPullRequestImport(targetChanges: TargetChangeFile[]): Promise<void> {
     if (targetChanges.length === 0) return;
