@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.93] - 2026-11-27
+
+### Added
+- Long-form Markdown articles can be translated next to key files. Add `md` to `translationFiles.pattern` and `translate` and `ci` pick up articles under the configured paths, writing each translation at the same path with the locale folder swapped (`articles/en/x.md` to `articles/sv/x.md`). A new article is translated in full. When the English of an article already on the base branch changes in a pull request, its translations are updated paragraph by paragraph; paragraphs a reviewer edited keep their wording. `ci` in sync mode writes an article edited on Localhero.ai as a whole file. Articles over 20,000 characters, empty ones, MDX and HTML are skipped with a warning. Needs articles turned on for the project on Localhero.ai. Projects whose pattern doesn't name `md` work exactly as before.
+
+### Fixed
+- A `.po` change to only `msgid_plural` is now seen as a changed key. Before, catalogs with empty source `msgstr` (Django's default) compared every plural form as empty on both sides, so a reworded plural wasn't translated on the pull request.
+
 ## [0.0.92] - 2026-10-28
 
 ### Fixed
