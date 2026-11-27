@@ -216,7 +216,8 @@ describe('translate --changed-only with an edited article', () => {
   it.each([
     [{ status: 'aligned', value: UPDATED, anchor_digest: 'a1', hand_updates: 1 }, 'sv: export-reports.md updated, 1 paragraph needs a hand update (edited by a reviewer)'],
     [{ status: 'aligned', value: UPDATED, anchor_digest: 'a1', hand_updates: 3 }, 'sv: export-reports.md updated, 3 paragraphs need a hand update (edited by a reviewer)'],
-    [{ status: 'unchanged', hand_updates: 2 }, 'sv: export-reports.md already up to date, 2 paragraphs need a hand update (edited by a reviewer)'],
+    [{ status: 'unchanged', hand_updates: 1 }, 'sv: export-reports.md not updated, 1 paragraph needs a hand update (edited by a reviewer)'],
+    [{ status: 'unchanged', hand_updates: 2 }, 'sv: export-reports.md not updated, 2 paragraphs need a hand update (edited by a reviewer)'],
     [{ status: 'skipped', reason: 'edited_in_pr' }, 'sv: export-reports.md not updated: its translation was edited in this pull request'],
     [{ status: 'skipped', reason: 'translation_unpaired' }, 'sv: export-reports.md not updated: its translation does not follow the source paragraph by paragraph'],
     [{ status: 'skipped', reason: 'translation_out_of_sync' }, 'sv: export-reports.md not updated: its translation was made from an older source text'],
@@ -233,6 +234,7 @@ describe('translate --changed-only with an edited article', () => {
     await runner.run({ changedOnly: true });
 
     expect(runner.output()).toContain(`  ${line}`);
+    expect(runner.output()).not.toMatch(/already fits?|already up to date/);
   });
 
   it('writes nothing and commits nothing for an article that is unchanged or skipped', async () => {

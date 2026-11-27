@@ -224,7 +224,8 @@ function describe(outcome: DocumentUpdateOutcome): string | null {
 
   if (outcome.status === 'updated') return `${article} updated${note}`;
   if (outcome.status === 'not_updated') return `${article} not updated: ${outcome.reason}`;
-  return note ? `${article} already up to date${note}` : null;
+  // Nothing was written: the only changes sit under paragraphs a person edited.
+  return note ? `${article} not updated${note}` : null;
 }
 
 export function reportDocumentAlignment(result: DocumentAlignmentResult, logger: Logger): void {
