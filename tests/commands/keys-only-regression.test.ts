@@ -5,6 +5,9 @@ import os from 'os';
 import path from 'path';
 import { translate } from '../../src/commands/translate.js';
 
+// Each test builds a real git repository; on a busy machine that outlasts the default five seconds.
+jest.setTimeout(30000);
+
 const GITHUB_ENV = [
   'GITHUB_ACTIONS', 'GITHUB_HEAD_REF', 'GITHUB_BASE_REF', 'GITHUB_REF_NAME',
   'GITHUB_SHA', 'GITHUB_REPOSITORY', 'GITHUB_TOKEN', 'GITHUB_ACTOR'

@@ -44,6 +44,14 @@ import {
   type DocumentRefusal
 } from '../utils/documents.js';
 import { findDocumentsToResend } from '../utils/document-resend.js';
+import {
+  collectDocumentAlignmentCandidates,
+  emptyDocumentAlignment,
+  reportDocumentAlignment,
+  runDocumentAlignment,
+  summarizeUpdatedArticles,
+  type DocumentAlignmentResult
+} from '../utils/document-alignment.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import { collectAlignmentCandidates, type AlignmentCandidate } from '../utils/alignment-candidates.js';
@@ -392,6 +400,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   const translationPaths = config.translationFiles.paths.join(' ');
   const jobGroupId = nanoid();
   let alignment: SourceAlignmentResult | null = null;
+  let articleUpdates = emptyDocumentAlignment();
 
   // A refused article is a warning; a failed one is an error and fails the run.
   function annotate(level: 'warning' | 'error', text: string): void {
@@ -501,7 +510,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     if (unchanged > 0) {
       console.log(chalk.dim(`» ${pluralize(unchanged, 'article file')} already ${unchanged === 1 ? 'matches' : 'match'}`));
     }
-    if (sourceArticles > 0) {
+    if (sourceArticles > 0 && !articleUpdates.available) {
       const kept = sourceArticles === 1 ? 'Its translations were' : 'Their translations were';
       console.log(chalk.blue(`ℹ ${pluralize(sourceArticles, 'source article')} changed. ${kept} kept and are not updated yet.`));
     }
@@ -580,6 +589,33 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return result;
   }
 
+  // Asked whatever the project's setting for reworded keys is.
+  async function updateEditedArticles(
+    detectedChanges: TargetChangeFile[],
+    projectConfig: ProjectConfig
+  ): Promise<DocumentAlignmentResult> {
+    const candidates = collectDocumentAlignmentCandidates(detectedChanges, targetFilesByLocale, projectConfig, !!verbose);
+    if (candidates.length === 0) return emptyDocumentAlignment();
+
+    const branch = await getCurrentBranch();
+    if (!branch) return emptyDocumentAlignment();
+
+    const headSha = await getHeadSha();
+    const result = await runDocumentAlignment(
+      candidates,
+      { projectId, branch, jobGroupId, ...(headSha && { headSha }) },
+      { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
+    );
+    reportDocumentAlignment(result, console);
+    return result;
+  }
+
+  // An article updated in this run holds new text; the text read before the run is not sent for review.
+  function withoutUpdatedArticles(changes: TargetChangeFile[]): TargetChangeFile[] {
+    const updated = new Set(articleUpdates.alignedCells.map(cell => cell.target_path));
+    return changes.filter(file => !updated.has(file.path));
+  }
+
   // Runs before missing keys are looked for: a locale without the key is then
   // translated from the source text as written here.
   async function followEditedTranslations(
@@ -636,7 +672,12 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   // Aligned values are staged on the PR only once they are in the branch: after a
   // commit that landed, or right after writing when the pipeline commits itself.
   async function commitChanges(summary: CommitSummary): Promise<void> {
-    const alignedCells = keepAlignedCellsOnDisk(alignment?.alignedCells ?? [], sourceLocale, console);
+    const alignedCells = keepAlignedCellsOnDisk(
+      [...(alignment?.alignedCells ?? []), ...articleUpdates.alignedCells],
+      sourceLocale,
+      console
+    );
+    const isArticle = (cell: { target_path: string }): boolean => isDocumentPath(cell.target_path);
     let inBranch = false;
 
     if (options.skipCommit) {
@@ -645,8 +686,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       try {
         const result = await gitUtils.autoCommitChanges(translationPaths, {
           ...summary,
-          ...summarizeAlignedCells(alignedCells, sourceLocale),
-          viewUrl: summary.viewUrl || alignment?.shortUrl || undefined
+          ...summarizeAlignedCells(alignedCells.filter(cell => !isArticle(cell)), sourceLocale),
+          ...summarizeUpdatedArticles(alignedCells.filter(isArticle)),
+          viewUrl: summary.viewUrl || alignment?.shortUrl || articleUpdates.shortUrl || undefined
         });
         inBranch = result === 'new';
       } catch (error) {
@@ -739,13 +781,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
         await alignRewordedSourceTexts(replaceAlignmentCandidates(alignmentCandidates, targetEdits), config),
         targetEdits.sourceCells
       );
+      articleUpdates = await updateEditedArticles(detectedChanges ?? [], config);
 
       if (Object.keys(filtered).length === 0) {
         if (manifest !== null) {
           await sendFinalize(manifest, removedManifest);
         }
-        await sendPullRequestImport(targetChanges);
-        if (alignment?.alignedCells.length) {
+        await sendPullRequestImport(withoutUpdatedArticles(targetChanges));
+        if (alignment?.alignedCells.length || articleUpdates.alignedCells.length) {
           runPostTranslateCommand(config.postTranslateCommand);
           await commitChanges({ keysTranslated: 0, languages: [] });
         }
@@ -829,7 +872,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
 
     // An article this run translated again holds new text; the text read before the run is not sent for review.
     const rewritten = new Set(articlesWritten.map(outcome => outcome.targetPath));
-    await sendPullRequestImport(targetChanges.filter(file => !rewritten.has(file.path)));
+    await sendPullRequestImport(withoutUpdatedArticles(targetChanges).filter(file => !rewritten.has(file.path)));
 
     const translatedLocales = new Set(translationResult.languages);
     const onlySkipped = translationResult.skippedLanguages.filter((locale) => !translatedLocales.has(locale));
@@ -868,7 +911,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
 
-    if (wroteTranslations || alignment?.alignedCells.length) {
+    if (wroteTranslations || alignment?.alignedCells.length || articleUpdates.alignedCells.length) {
       runPostTranslateCommand(config.postTranslateCommand);
       await commitChanges({
         keysTranslated: translationResult.uniqueKeysTranslated.size,

@@ -20,6 +20,7 @@ export interface TargetChange {
   old_value?: string | null;
   source_value?: string;
   aligned_source?: string;
+  aligned_from_digest?: string;
   trigger_locale?: string;
 }
 

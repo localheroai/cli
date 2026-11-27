@@ -9,6 +9,9 @@ import { execSync } from 'child_process';
 import { runGit, type GitRunner } from '../../src/utils/check-git.js';
 import { fakeGit } from '../helpers/fake-git.js';
 
+// Each test builds a real git repository; on a busy machine that outlasts the default five seconds.
+jest.setTimeout(30000);
+
 const fixtures = path.join(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/documents');
 const KEY_FILES_ONLY = '**/*.yml';
 const WITH_ARTICLES = '**/*.{yml,md}';

@@ -14,6 +14,7 @@ import type { ProjectConfig } from '../../src/types/index.js';
 export interface TranslateRun {
   output: () => string;
   autoCommitChanges: jest.Mock<any>;
+  execSync: jest.Mock<any>;
   run: (options?: TranslationOptions) => Promise<void>;
 }
 
@@ -21,10 +22,11 @@ export interface TranslateRun {
  * Runs the translate command with its real file, git and API modules. Only the
  * configuration, the API key check and the commit are stand-ins.
  */
-export function translateRunner(config: Partial<ProjectConfig>): TranslateRun {
+export function translateRunner(config: Partial<ProjectConfig>, commitResult = 'no-changes'): TranslateRun {
   const lines: string[] = [];
   const record = (...parts: unknown[]) => { lines.push(parts.map(String).join(' ')); };
-  const autoCommitChanges = jest.fn<any>(async () => 'no-changes');
+  const autoCommitChanges = jest.fn<any>(async () => commitResult);
+  const execSync = jest.fn<any>();
 
   const deps: any = {
     console: { log: record, error: record, warn: record },
@@ -44,12 +46,13 @@ export function translateRunner(config: Partial<ProjectConfig>): TranslateRun {
       findMissingTranslationsByLocale
     },
     gitUtils: { autoCommitChanges },
-    execUtils: { execSync: jest.fn() }
+    execUtils: { execSync }
   };
 
   return {
     output: () => lines.join('\n'),
     autoCommitChanges,
+    execSync,
     run: (options = {}) => translate(options, deps)
   };
 }

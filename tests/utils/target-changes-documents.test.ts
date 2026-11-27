@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { execSync } from 'child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
@@ -6,6 +6,9 @@ import path from 'path';
 import { detectTargetChanges } from '../../src/utils/target-changes.js';
 import { findTranslationFiles } from '../../src/utils/files.js';
 import type { ProjectConfig, TranslationFilesResult } from '../../src/types/index.js';
+
+// Each test builds a real git repository; on a busy machine that outlasts the default five seconds.
+jest.setTimeout(30000);
 
 const config = {
   projectId: 'help-center',

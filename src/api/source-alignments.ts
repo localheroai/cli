@@ -28,6 +28,10 @@ export interface SourceAlignmentResultItem {
   status: 'aligned' | 'unchanged' | 'skipped';
   value?: string;
   reason?: string;
+  /** Articles only: identifies the text the update was made from, echoed back on its import. */
+  anchor_digest?: string;
+  /** Articles only: paragraphs a person edited that need a hand update. */
+  hand_updates?: number;
 }
 
 export interface SourceAlignmentResponse {
@@ -39,11 +43,13 @@ export interface SourceAlignmentResponse {
 
 export class SourceAlignmentRequestError extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = 'SourceAlignmentRequestError';
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -72,7 +78,7 @@ export async function createSourceAlignment(
 
   if (!response.ok) {
     const message = body?.error?.message || `Alignment request failed with status ${response.status}`;
-    throw new SourceAlignmentRequestError(message, response.status);
+    throw new SourceAlignmentRequestError(message, response.status, body?.error?.code);
   }
 
   if (!body || !Array.isArray(body.items)) {

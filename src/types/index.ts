@@ -160,6 +160,8 @@ export interface CommitSummary {
   languages: string[];
   articlesTranslated?: number;
   articleLanguages?: string[];
+  articlesUpdated?: number;
+  articleUpdateLanguages?: string[];
   keysAligned?: number;
   alignedLanguages?: string[];
   sourceTextsUpdated?: number;

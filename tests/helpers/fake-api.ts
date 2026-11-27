@@ -78,6 +78,11 @@ export function installFakeApi(respond: Responder = () => undefined): FakeApi {
       return jsonResponse({ status: 'completed', language: { code: job.language }, translations: { data } });
     }
 
+    // A server without article updates refuses an article at this endpoint.
+    if (url.pathname.endsWith('/source_alignments') && call.body.items.some((item: any) => item.format === 'markdown')) {
+      return errorResponse(422, 'document_file', 'Article updates are not available yet');
+    }
+
     if (url.pathname.endsWith('/settings')) {
       return jsonResponse({ settings: { target_languages: [] } });
     }
