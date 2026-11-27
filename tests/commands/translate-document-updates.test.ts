@@ -314,6 +314,27 @@ describe('translate --changed-only with an edited article', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('counts two articles with the same file name in different folders as two', async () => {
+    git('checkout -q main');
+    write('articles/en/billing/index.md', '# Billing\n');
+    write('articles/sv/billing/index.md', '# Fakturering\n');
+    write('articles/en/reports/index.md', '# Reports\n');
+    write('articles/sv/reports/index.md', '# Rapporter\n');
+    commitAll('two articles named index');
+    git('checkout -q feature/reword-article');
+    git('merge -q main');
+    git('checkout -q main -- articles/en/export-reports.md');
+    rewordEnglish('articles/en/billing/index.md');
+    rewordEnglish('articles/en/reports/index.md');
+    commitAll('reword both');
+    serve(call => (isArticleAlignment(call) ? errorResponse(402, 'insufficient_credits', 'Insufficient credits') : undefined));
+    const runner = translateRunner(config);
+
+    await runner.run({ changedOnly: true });
+
+    expect(runner.output()).toContain('Out of Localhero credits: 2 articles were not updated');
+  });
+
   it('warns about credits in plain words outside GitHub Actions', async () => {
     serve(call => (isArticleAlignment(call) ? errorResponse(402, 'insufficient_credits', 'Insufficient credits') : undefined));
     const runner = translateRunner(config);

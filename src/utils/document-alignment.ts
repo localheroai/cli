@@ -40,6 +40,7 @@ const SKIP_REASONS: Record<string, string> = {
 export interface DocumentUpdateOutcome {
   locale: string;
   name: string;
+  sourcePath: string;
   status: 'updated' | 'unchanged' | 'not_updated';
   reason?: string;
   handUpdates?: number;
@@ -193,8 +194,8 @@ async function alignDocument(
   }
 }
 
-function outcomeFor(candidate: AlignmentCandidate): Pick<DocumentUpdateOutcome, 'locale' | 'name'> {
-  return { locale: candidate.locale, name: candidate.key };
+function outcomeFor(candidate: AlignmentCandidate): Pick<DocumentUpdateOutcome, 'locale' | 'name' | 'sourcePath'> {
+  return { locale: candidate.locale, name: candidate.key, sourcePath: candidate.source_path };
 }
 
 function reasonInWords(item: SourceAlignmentResultItem): string {
@@ -234,7 +235,7 @@ export function reportDocumentAlignment(result: DocumentAlignmentResult, logger:
   for (const line of lines.sort()) logger.log(`  ${line}`);
 
   // One line that shows in the pull request's checks; the run itself does not fail, as for reworded keys.
-  const withoutCredits = new Set(result.outcomes.filter(outcome => outcome.reason === OUT_OF_CREDITS).map(outcome => outcome.name)).size;
+  const withoutCredits = new Set(result.outcomes.filter(outcome => outcome.reason === OUT_OF_CREDITS).map(outcome => outcome.sourcePath)).size;
   if (withoutCredits > 0) {
     const articles = withoutCredits === 1 ? '1 article was' : `${withoutCredits} articles were`;
     const warning = `Out of Localhero credits: ${articles} not updated`;
