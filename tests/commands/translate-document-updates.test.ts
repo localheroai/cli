@@ -265,9 +265,63 @@ describe('translate --changed-only with an edited article', () => {
 
     expect(articleAlignments().length).toBeLessThanOrEqual(2);
     expect(readFileSync(SWEDISH, 'utf-8')).toBe(swedishBefore);
-    expect(runner.output()).toContain('Articles were not updated: Articles are not enabled for this project');
+    expect(runner.output()).toContain('Articles are switched off for this project; they were not updated.');
+    expect(runner.output()).not.toContain('Articles are not enabled for this project');
     expect(runner.output()).toContain('2 source articles changed. Their translations were kept and are not updated yet.');
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('says in words that Localhero could not be reached', async () => {
+    api.restore();
+    const realFetch = global.fetch;
+    api = installFakeApi();
+    const fake = global.fetch;
+    global.fetch = (async (input: any, init: any) => {
+      if (String(input).endsWith('/source_alignments')) throw new TypeError('fetch failed');
+      return fake(input, init);
+    }) as any;
+    const runner = translateRunner(config);
+
+    try {
+      await runner.run({ changedOnly: true });
+    } finally {
+      global.fetch = realFetch;
+    }
+
+    expect(runner.output()).toContain("  sv: export-reports.md not updated: couldn't reach Localhero");
+    expect(runner.output()).not.toContain('fetch failed');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it.each([
+    ['a refused request', (call: RecordedCall) => errorResponse(402, 'insufficient_credits', 'Insufficient credits')],
+    ['a skipped article', (call: RecordedCall) => answer(call, { status: 'skipped', reason: 'insufficient_credits' })]
+  ])('warns once in the pull request checks when credits ran out, for %s', async (_name, respond) => {
+    process.env.GITHUB_ACTIONS = 'true';
+    serve(call => (isArticleAlignment(call) ? respond(call) : undefined));
+    rewordEnglish('articles/en/en.md');
+    commitAll('reword a second article');
+    const runner = translateRunner(config);
+
+    await runner.run({ changedOnly: true });
+
+    const output = runner.output();
+    expect(output).toContain('  sv: en.md not updated: out of Localhero credits');
+    expect(output).toContain('  sv: export-reports.md not updated: out of Localhero credits');
+    expect(output.split('\n').filter(line => line.startsWith('::warning::'))).toEqual([
+      '::warning::Out of Localhero credits: 2 articles were not updated'
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('warns about credits in plain words outside GitHub Actions', async () => {
+    serve(call => (isArticleAlignment(call) ? errorResponse(402, 'insufficient_credits', 'Insufficient credits') : undefined));
+    const runner = translateRunner(config);
+
+    await runner.run({ changedOnly: true });
+
+    expect(runner.output()).toContain('Out of Localhero credits: 1 article was not updated');
+    expect(runner.output()).not.toContain('::warning::');
   });
 
   it('goes on with the next article when one request fails', async () => {

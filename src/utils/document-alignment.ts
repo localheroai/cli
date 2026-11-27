@@ -11,12 +11,19 @@ import type { AlignedCell, AlignmentDependencies, Logger } from './source-alignm
 import type { TargetChangeFile } from './target-changes.js';
 import { documentTargetPath, isDocumentPath, toLfText, WIRE_FORMAT_MARKDOWN } from './documents.js';
 import { flatValuesAt, getBaseBranch, resolveCompareRef } from './git-changes.js';
+import { escapeAnnotationData } from './ci-context.js';
 
 const CONCURRENCY = 4;
 const NOT_FOUND_STATUS = 404;
 const DOCUMENTS_OFF_CODE = 'document_file';
 const ALREADY_ALIGNED = 'already_aligned';
 const INCOMPLETE_ANSWER = 'the answer from Localhero was incomplete';
+const OUT_OF_CREDITS_CODE = 'insufficient_credits';
+const PAYMENT_REQUIRED_STATUS = 402;
+const OUT_OF_CREDITS = 'out of Localhero credits';
+const UNREACHABLE = "couldn't reach Localhero";
+const DOCUMENTS_OFF = 'Articles are switched off for this project; they were not updated.';
+const TIMEOUT_ERROR_NAMES = new Set(['TimeoutError', 'AbortError']);
 
 const SKIP_REASONS: Record<string, string> = {
   edited_in_pr: 'its translation was edited in this pull request',
@@ -26,7 +33,8 @@ const SKIP_REASONS: Record<string, string> = {
   too_many_changes: 'more than half of the article was rewritten',
   too_large: 'the article is too large',
   validation_failed: 'the updated text did not pass the checks',
-  not_mainline: 'the article is new in a pull request that has not merged'
+  not_mainline: 'the article is new in a pull request that has not merged',
+  [OUT_OF_CREDITS_CODE]: OUT_OF_CREDITS
 };
 
 export interface DocumentUpdateOutcome {
@@ -128,7 +136,7 @@ export async function runDocumentAlignment(
 ): Promise<DocumentAlignmentResult> {
   const result: DocumentAlignmentResult = { ...emptyDocumentAlignment(), available: candidates.length > 0 };
   const queue = [...candidates];
-  let unavailable: string | null = null;
+  let switchedOff = false;
 
   const worker = async (): Promise<void> => {
     while (queue.length > 0 && result.available) {
@@ -138,17 +146,17 @@ export async function runDocumentAlignment(
       } catch (error) {
         if (error instanceof SourceAlignmentRequestError && (error.status === NOT_FOUND_STATUS || error.code === DOCUMENTS_OFF_CODE)) {
           result.available = false;
-          unavailable = error.code === DOCUMENTS_OFF_CODE ? error.message : null;
+          switchedOff = error.code === DOCUMENTS_OFF_CODE;
         } else {
-          result.outcomes.push({ ...outcomeFor(candidate), status: 'not_updated', reason: (error as Error).message });
+          result.outcomes.push({ ...outcomeFor(candidate), status: 'not_updated', reason: failureInWords(error) });
         }
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, candidates.length) }, worker));
 
-  if (unavailable) {
-    deps.console.log(chalk.yellow(`⚠ Articles were not updated: ${unavailable}`));
+  if (switchedOff) {
+    deps.console.log(chalk.yellow(`⚠ ${DOCUMENTS_OFF}`));
   }
   return result;
 }
@@ -194,6 +202,16 @@ function reasonInWords(item: SourceAlignmentResultItem): string {
   return SKIP_REASONS[reason] ?? reason.replace(/_/g, ' ');
 }
 
+// Node's fetch rejects with a TypeError when the connection fails, and with a timeout or abort error when it times out.
+function failureInWords(error: unknown): string {
+  if (error instanceof SourceAlignmentRequestError) {
+    const outOfCredits = error.status === PAYMENT_REQUIRED_STATUS || error.code === OUT_OF_CREDITS_CODE;
+    return outOfCredits ? OUT_OF_CREDITS : error.message;
+  }
+  const unreachable = error instanceof TypeError || (error instanceof Error && TIMEOUT_ERROR_NAMES.has(error.name));
+  return unreachable ? UNREACHABLE : (error as Error).message;
+}
+
 function handUpdateNote(count: number): string {
   const paragraphs = count === 1 ? '1 paragraph needs' : `${count} paragraphs need`;
   return `, ${paragraphs} a hand update (edited by a reviewer)`;
@@ -214,6 +232,14 @@ export function reportDocumentAlignment(result: DocumentAlignmentResult, logger:
 
   logger.log('» Article updates:');
   for (const line of lines.sort()) logger.log(`  ${line}`);
+
+  // One line that shows in the pull request's checks; the run itself does not fail, as for reworded keys.
+  const withoutCredits = new Set(result.outcomes.filter(outcome => outcome.reason === OUT_OF_CREDITS).map(outcome => outcome.name)).size;
+  if (withoutCredits > 0) {
+    const articles = withoutCredits === 1 ? '1 article was' : `${withoutCredits} articles were`;
+    const warning = `Out of Localhero credits: ${articles} not updated`;
+    logger.log(process.env.GITHUB_ACTIONS === 'true' ? `::warning::${escapeAnnotationData(warning)}` : chalk.yellow(`⚠ ${warning}`));
+  }
 }
 
 export function summarizeUpdatedArticles(cells: AlignedCell[]): { articlesUpdated?: number; articleUpdateLanguages?: string[] } {
