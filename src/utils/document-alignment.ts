@@ -9,13 +9,14 @@ import type { ProjectConfig, TranslationFile } from '../types/index.js';
 import type { AlignmentCandidate } from './alignment-candidates.js';
 import type { AlignedCell, AlignmentDependencies, Logger } from './source-alignment.js';
 import type { TargetChangeFile } from './target-changes.js';
-import { documentKeyName, documentTargetPath, isDocumentPath, toLfText, WIRE_FORMAT_MARKDOWN } from './documents.js';
+import { documentTargetPath, isDocumentPath, toLfText, WIRE_FORMAT_MARKDOWN } from './documents.js';
 import { flatValuesAt, getBaseBranch, resolveCompareRef } from './git-changes.js';
 
 const CONCURRENCY = 4;
 const NOT_FOUND_STATUS = 404;
 const DOCUMENTS_OFF_CODE = 'document_file';
 const ALREADY_ALIGNED = 'already_aligned';
+const INCOMPLETE_ANSWER = 'the answer from Localhero was incomplete';
 
 const SKIP_REASONS: Record<string, string> = {
   edited_in_pr: 'its translation was edited in this pull request',
@@ -85,8 +86,15 @@ export function collectDocumentAlignmentCandidates(
       if (targetCurrent.trim() === '') continue;
 
       // A translation added in this branch is sent for review as it is; there is no earlier text to update.
-      const targetBase = textAt(target, mergeBase);
-      if (targetBase === null) continue;
+      let targetBase: unknown;
+      try {
+        targetBase = flatValuesAt(target, mergeBase)?.[change.key];
+      } catch (error) {
+        const reason = `git could not read its translation on the base branch (${(error as Error).message.trim()})`;
+        console.log(chalk.yellow(`⚠ ${locale}: ${change.key} not updated: ${reason}`));
+        continue;
+      }
+      if (typeof targetBase !== 'string') continue;
 
       candidates.set(`${locale}\0${target.path}`, {
         locale,
@@ -103,15 +111,6 @@ export function collectDocumentAlignmentCandidates(
   }
 
   return [...candidates.values()];
-}
-
-function textAt(file: TranslationFile, ref: string): string | null {
-  try {
-    const value = flatValuesAt(file, ref)?.[documentKeyName(file.path)];
-    return typeof value === 'string' ? value : null;
-  } catch {
-    return null;
-  }
 }
 
 type AlignmentRequest = Omit<SourceAlignmentParams, 'locale' | 'items'>;
@@ -169,6 +168,11 @@ async function alignDocument(
 
   result.shortUrl = response.job_group?.short_url ?? result.shortUrl;
   const handUpdates = answer.hand_updates && answer.hand_updates > 0 ? { handUpdates: answer.hand_updates } : {};
+
+  // An update without its text or its digest cannot be written and sent for review as one.
+  if (answer.status === 'aligned' && (typeof answer.value !== 'string' || !answer.anchor_digest)) {
+    throw new Error(INCOMPLETE_ANSWER);
+  }
 
   if (answer.status === 'aligned' && typeof answer.value === 'string') {
     await deps.updateTranslationFile(item.target_path, { [item.key]: answer.value }, locale, item.source_path, undefined, deps.config);

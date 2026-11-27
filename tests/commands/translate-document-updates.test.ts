@@ -312,6 +312,22 @@ describe('translate --changed-only with an edited article', () => {
     expect(articleAlignments().every(call => typeof call.body.items[0].target_base === 'string')).toBe(true);
   });
 
+  it.each([
+    ['no digest', { status: 'aligned', value: UPDATED }],
+    ['an empty digest', { status: 'aligned', value: UPDATED, anchor_digest: '' }],
+    ['no text', { status: 'aligned', anchor_digest: 'a1b2c3' }]
+  ])('writes and commits nothing for an updated answer with %s', async (_name, fields) => {
+    serve(call => (isArticleAlignment(call) ? answer(call, fields) : undefined));
+    const runner = translateRunner(config, 'new');
+
+    await runner.run({ changedOnly: true });
+
+    expect(readFileSync(SWEDISH, 'utf-8')).toBe(swedishBefore);
+    expect(runner.autoCommitChanges).not.toHaveBeenCalled();
+    expect(JSON.stringify(importCalls())).not.toContain('aligned_source');
+    expect(runner.output()).toContain('  sv: export-reports.md not updated: the answer from Localhero was incomplete');
+  });
+
   it('reports an update the server no longer takes and keeps going', async () => {
     serve((call) => {
       if (isArticleAlignment(call)) return answer(call, { status: 'aligned', value: UPDATED, anchor_digest: 'a1b2c3' });
