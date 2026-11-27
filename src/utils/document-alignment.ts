@@ -68,7 +68,8 @@ export function collectDocumentAlignmentCandidates(
   if (!mergeBase) return [];
 
   const knownLocales = [config.sourceLocale, ...config.outputLocales];
-  const candidates: AlignmentCandidate[] = [];
+  // Overlapping configured paths list a file more than once.
+  const candidates = new Map<string, AlignmentCandidate>();
 
   for (const file of edited) {
     const change = file.changes.find(candidate => candidate.status === 'updated' && typeof candidate.old_value === 'string');
@@ -82,7 +83,7 @@ export function collectDocumentAlignmentCandidates(
       const targetCurrent = toLfText(Buffer.from(target.content ?? '', 'base64').toString());
       if (targetCurrent.trim() === '') continue;
 
-      candidates.push({
+      candidates.set(`${locale}\0${target.path}`, {
         locale,
         source_path: file.path,
         target_path: target.path,
@@ -96,7 +97,7 @@ export function collectDocumentAlignmentCandidates(
     }
   }
 
-  return candidates;
+  return [...candidates.values()];
 }
 
 function textAt(file: TranslationFile, ref: string): string | null {

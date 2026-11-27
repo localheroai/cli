@@ -136,6 +136,16 @@ describe('translate --changed-only with an edited article', () => {
     expect(api.callsTo('/translation_jobs')).toEqual([]);
   });
 
+  it('asks once for an article that two configured paths both hold', async () => {
+    const overlapping = { ...config, translationFiles: { ...config.translationFiles, paths: ['articles/', 'articles/en/', 'articles/sv/'] } };
+
+    await translateRunner(overlapping, 'new').run({ changedOnly: true });
+
+    expect(articleAlignments()).toHaveLength(1);
+    const aligned = importCalls().filter(call => JSON.stringify(call.body).includes('aligned_source'));
+    expect(aligned.flatMap(call => call.body.files).map(file => file.changes.length)).toEqual([1]);
+  });
+
   it('writes the updated article whole and commits it', async () => {
     const runner = translateRunner(config);
 
