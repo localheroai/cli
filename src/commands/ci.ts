@@ -9,6 +9,7 @@ import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { toConfigLocale, isWritableLocale, skippedLocalesLine } from '../utils/translation-processor.js';
 import { findTranslationFiles } from '../utils/files.js';
 import { findSourceFileForTarget } from '../utils/translation-utils.js';
+import { isDocumentPath, validateDocumentCells } from '../utils/documents.js';
 import { ProjectConfig, TranslationFile, TranslationFilesResult } from '../types/index.js';
 
 export type CiOptions = TranslationOptions;
@@ -79,7 +80,8 @@ async function findSourceFiles(config: ProjectConfig): Promise<TranslationFile[]
     parseContent: false,
     includeContent: false,
     extractKeys: false,
-    returnFullResult: true
+    returnFullResult: true,
+    documents: 'include'
   }) as TranslationFilesResult;
   return result.sourceFiles;
 }
@@ -182,6 +184,8 @@ async function runSyncMode(
     throw new Error(`Failed to fetch translations (page ${currentPage}/${totalPages}): ${errorMessage}`);
   }
 
+  validateDocumentCells(allFiles);
+
   if (verbose) {
     console.log(chalk.gray(`  Total files to update: ${allFiles.length}\n`));
   }
@@ -206,6 +210,11 @@ async function runSyncMode(
 
     if (relativePath.startsWith('..') || path.isAbsolute(relativePath)) {
       console.error(chalk.yellow(`  ⚠️  Skipping invalid path: ${file.path}`));
+      continue;
+    }
+
+    // An article without a value has nothing to write, and no file to commit.
+    if (isDocumentPath(file.path) && file.translations[0].value === null) {
       continue;
     }
 

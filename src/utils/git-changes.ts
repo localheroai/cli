@@ -8,6 +8,7 @@ import { splitPluralKey, yamlPluralGroupBasesFromKeys } from './translation-util
 import { parseFile, flattenTranslations, extractLocaleFromPath } from './files.js';
 import { PLURAL_SUFFIX_REGEX, extractBaseKeys } from './po-utils.js';
 import { recordUnreadableFile } from './unreadable-files.js';
+import { documentFormatFor, documentLocale, isDocumentPath, patternNamesExtension, WIRE_FORMAT_MARKDOWN } from './documents.js';
 
 type FileWithPath = { path: string };
 
@@ -770,6 +771,16 @@ export function enumerateDeletedSourceFiles(
     if (!isWithinConfiguredPaths(deletedPath, configuredPaths)) continue;
 
     const ext = pathExt(deletedPath);
+    const documentFormat = documentFormatFor(deletedPath);
+    if (documentFormat) {
+      const optedIn = documentFormat === WIRE_FORMAT_MARKDOWN &&
+        patternNamesExtension(config.translationFiles?.pattern, ext.slice(1));
+      const locale = documentLocale(deletedPath, knownLocales);
+      if (optedIn && locale?.toLowerCase() === sourceLocale.toLowerCase()) {
+        synthetic.push({ path: deletedPath, format: ext.slice(1), locale: sourceLocale, documentFormat });
+      }
+      continue;
+    }
     if (!SUPPORTED_EXTENSIONS.includes(ext)) continue;
 
     const format = ext.slice(1).toLowerCase();
@@ -926,11 +937,12 @@ function filterIgnoredKeys(
 
   const out = new Map<string, KeyIdentifier[]>();
   for (const [path, keys] of perFile.entries()) {
+    // An article's one key is its file name; ignoreKeys names keys inside key files.
     // ignoreKeys does not support PO files (import-service warns about this),
     // and PO context means a manifest name like "date.foo" does not line up
     // with the composite "menu|date.foo" translation processing matched on.
     // Filtering here would drop keys that were still sent for translation.
-    if (PO_MANIFEST_FORMATS.has(formatByPath.get(path) ?? '')) {
+    if (PO_MANIFEST_FORMATS.has(formatByPath.get(path) ?? '') || isDocumentPath(path)) {
       out.set(path, keys);
       continue;
     }

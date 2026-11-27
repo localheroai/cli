@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { execSync } from 'child_process';
 import { configService, type ConfigService } from '../utils/config.js';
 import { findTranslationFiles } from '../utils/files.js';
-import { createTranslationJob, checkJobStatus, finalizeTranslationJobs } from '../api/translations.js';
+import { createTranslationJob, checkJobStatus, finalizeTranslationJobs, FinalizeError } from '../api/translations.js';
 import { updateTranslationFile } from '../utils/translation-updater/index.js';
 import { checkAuth } from '../utils/auth.js';
 import { fetchSettings } from '../api/settings.js';
@@ -27,9 +27,29 @@ import { GitHubGraphQLError } from '../utils/github-graphql.js';
 import { escapeAnnotationData } from '../utils/ci-context.js';
 import { detectTargetChanges, type TargetChangeFile } from '../utils/target-changes.js';
 import { resetUnreadableFiles, getUnreadableFiles } from '../utils/unreadable-files.js';
-import { createPullRequestImport, type PullRequestImportResponse } from '../api/pull-request-imports.js';
+import { createPullRequestImport, PullRequestImportError, type PullRequestImportResponse } from '../api/pull-request-imports.js';
 import { summarizeImport, type ImportSummary } from '../utils/import-summary.js';
-import { processTranslationBatches } from '../utils/translation-processor.js';
+import {
+  processTranslationBatches,
+  processDocumentBatches,
+  emptyDocumentResult
+} from '../utils/translation-processor.js';
+import { articleReporter, byStatus, pluralize } from '../utils/article-report.js';
+import {
+  buildDocumentBatches,
+  findMissingDocuments,
+  isDocumentPath,
+  leaveOutUnsupportedDocuments
+} from '../utils/documents.js';
+import { findDocumentsToResend } from '../utils/document-resend.js';
+import {
+  collectDocumentAlignmentCandidates,
+  emptyDocumentAlignment,
+  reportDocumentAlignment,
+  runDocumentAlignment,
+  summarizeUpdatedArticles,
+  type DocumentAlignmentResult
+} from '../utils/document-alignment.js';
 import { createIgnoreMatcher, summarizeRemoved } from '../utils/ignore-keys.js';
 import { logIgnoreSummary } from '../utils/ignore-keys-logging.js';
 import { collectAlignmentCandidates, type AlignmentCandidate } from '../utils/alignment-candidates.js';
@@ -54,10 +74,12 @@ import {
   type TargetEditAlignmentResult
 } from '../utils/target-edit-alignment.js';
 import type {
+  MissingByLocale,
   TranslationResult
 } from '../utils/translation-processor.js';
 import type {
   CommitSummary,
+  KeyIdentifier,
   ProjectConfig,
   TranslationConfig,
   TranslationFileOptions,
@@ -163,10 +185,6 @@ const defaultDeps: TranslationDependencies = {
 
 const PROJECT_NOT_FOUND_CODE = 'project_not_found';
 
-function pluralize(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
 const COMMIT_FAILURE_FIXES: Record<string, string> = {
   [MISSING_TOKEN_ERROR]: 'Pass `GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` in the step env, or install the Localhero GitHub App.'
 };
@@ -193,6 +211,18 @@ function reportUnreadableFiles(unreadable: string[]): void {
   console.error(chalk.red(`\n\u2716 Could not read ${pluralize(unreadable.length, 'translation file')}:\n`));
   unreadable.forEach(file => console.error(chalk.yellow(`  ${file}`)));
   console.error(chalk.yellow('\nNothing was sent for translation. Check that the paths in localhero.json resolve from the directory holding that file.\n'));
+}
+
+const DOCUMENTS_OFF_CODE = 'document_file';
+const DOCUMENT_IMPORT_FILES_PER_REQUEST = 10;
+
+function withoutDocuments<T>(manifest: Record<string, T> | null): Record<string, T> | null {
+  return manifest && Object.fromEntries(Object.entries(manifest).filter(([path]) => !isDocumentPath(path)));
+}
+
+
+function keyFilesOnly<T extends { documentFormat?: string }>(files: T[]): T[] {
+  return files.filter(file => !file.documentFormat);
 }
 
 function isProjectNotFound(error: unknown): boolean {
@@ -257,6 +287,7 @@ async function fetchLocalePluralCategories(
 
 export async function translate(options: TranslationOptions = {}, deps: TranslationDependencies = defaultDeps): Promise<void> {
   const { console, configUtils, authUtils, settingsUtils, fileUtils, translationUtils, gitUtils, execUtils } = deps;
+  const { reportArticles, reportRefusedArticles } = articleReporter(console);
   const { verbose } = options;
 
   const isAuthenticated = await authUtils.checkAuth();
@@ -305,8 +336,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.log(chalk.gray(`  Translation files: ${config.translationFiles.paths.join(', ')}`));
   }
 
-  const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true });
-  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [] } = result as TranslationFilesResult;
+  const result = await fileUtils.findTranslationFiles(config, { verbose, returnFullResult: true, documents: 'include' });
+  const { sourceFiles, targetFilesByLocale, allFiles, parseFailures = [], unsupported } =
+    leaveOutUnsupportedDocuments(result as TranslationFilesResult);
+  const keySourceFiles = keyFilesOnly(sourceFiles);
+  const sourceDocuments = sourceFiles.filter(file => file.documentFormat);
+  const keyTargetFilesByLocale = Object.fromEntries(
+    Object.entries(targetFilesByLocale).map(([locale, files]) => [locale, keyFilesOnly(files)])
+  );
 
   if (parseFailures.length > 0) {
     console.error(chalk.red(`\n✖ ${parseFailures.length} translation file(s) failed to parse and were skipped:`));
@@ -316,6 +353,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     console.error(chalk.red('Every key in a skipped file is missing from this run. Fix the file and re-run.\n'));
     process.exitCode = 1;
   }
+
+  reportRefusedArticles(unsupported);
 
   if (!allFiles || allFiles.length === 0) {
     console.error(chalk.red('\n✖ No translation files found in the specified paths.\n'));
@@ -352,6 +391,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   const translationPaths = config.translationFiles.paths.join(' ');
   const jobGroupId = nanoid();
   let alignment: SourceAlignmentResult | null = null;
+  let articleUpdates = emptyDocumentAlignment();
 
   async function sendPullRequestImport(targetChanges: TargetChangeFile[]): Promise<void> {
     if (targetChanges.length === 0) return;
@@ -360,8 +400,14 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     if (!branch) return;
 
     const files = await leaveOutMovedCells(targetChanges, sourceLocale, console, 'working-tree');
-    if (files.length === 0) return;
+    const keyFiles = files.filter(file => !isDocumentPath(file.path));
+    if (keyFiles.length > 0) {
+      await sendKeyFileImport(branch, keyFiles);
+    }
+    await sendDocumentImports(branch, files.filter(file => isDocumentPath(file.path)));
+  }
 
+  async function sendKeyFileImport(branch: string, files: TargetChangeFile[]): Promise<void> {
     let importResult: PullRequestImportResponse;
     try {
       importResult = await createPullRequestImport({
@@ -377,6 +423,44 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
 
     reportImport(summarizeImport(files, sourceLocale, importResult), importResult);
+  }
+
+  // Articles never share a request with key files, and go at most ten files at a time.
+  async function sendDocumentImports(branch: string, files: TargetChangeFile[]): Promise<void> {
+    let sent = 0;
+    let unchanged = 0;
+    let sourceArticles = 0;
+
+    for (let start = 0; start < files.length; start += DOCUMENT_IMPORT_FILES_PER_REQUEST) {
+      const chunk = files.slice(start, start + DOCUMENT_IMPORT_FILES_PER_REQUEST);
+      try {
+        const importResult = await createPullRequestImport({ projectId, branch, jobGroupId, files: chunk });
+        const summary = summarizeImport(chunk, sourceLocale, importResult);
+        sent += summary.importedCount;
+        unchanged += summary.unchangedCount;
+        sourceArticles += summary.sourceTextsImported;
+        for (const skipped of importResult.skipped) {
+          console.log(chalk.yellow(`  Skipped ${skipped.path} (${skipped.reason})`));
+        }
+      } catch (err) {
+        const reason = err instanceof PullRequestImportError && err.code
+          ? `${err.serverMessage ?? err.message} (${err.code})`
+          : (err as Error).message;
+        console.log(chalk.yellow(`⚠ Could not send ${pluralize(files.length - start, 'article file')} for review: ${reason}`));
+        break;
+      }
+    }
+
+    if (sent > 0) {
+      console.log(`» Sent ${pluralize(sent, 'article file')} from this PR for review`);
+    }
+    if (unchanged > 0) {
+      console.log(chalk.dim(`» ${pluralize(unchanged, 'article file')} already ${unchanged === 1 ? 'matches' : 'match'}`));
+    }
+    if (sourceArticles > 0 && !articleUpdates.available) {
+      const kept = sourceArticles === 1 ? 'Its translations were' : 'Their translations were';
+      console.log(chalk.blue(`ℹ ${pluralize(sourceArticles, 'source article')} changed. ${kept} kept and are not updated yet.`));
+    }
   }
 
   function reportImport(summary: ImportSummary, importResult: PullRequestImportResponse): void {
@@ -399,18 +483,32 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     manifest: Record<string, any>,
     removedManifest: Record<string, any> | null
   ): Promise<void> {
-    try {
+    async function finalize(
+      prKeyManifest: Record<string, KeyIdentifier[]>,
+      removedKeyManifest: Record<string, KeyIdentifier[]> | null
+    ): Promise<void> {
       const branch = await getCurrentBranch();
       await finalizeTranslationJobs({
         projectId,
         jobGroupId,
-        prKeyManifest: manifest,
-        removedKeyManifest: removedManifest,
+        prKeyManifest,
+        removedKeyManifest,
         commitSha: process.env.GITHUB_SHA,
         branch: branch || undefined
       });
       if (verbose) {
         console.log(chalk.dim('Sent key manifest for PR reconciliation'));
+      }
+    }
+
+    try {
+      try {
+        await finalize(manifest, removedManifest);
+      } catch (err) {
+        if (!(err instanceof FinalizeError) || err.code !== DOCUMENTS_OFF_CODE) throw err;
+        // With articles switched off the key files must still be reconciled.
+        await finalize(withoutDocuments(manifest) ?? {}, withoutDocuments(removedManifest));
+        console.log(chalk.yellow('⚠ Articles are not enabled for this project. Key files were reconciled without them.'));
       }
     } catch (err) {
       if (verbose) {
@@ -438,6 +536,33 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     return result;
   }
 
+  // Asked whatever the project's setting for reworded keys is.
+  async function updateEditedArticles(
+    detectedChanges: TargetChangeFile[],
+    projectConfig: ProjectConfig
+  ): Promise<DocumentAlignmentResult> {
+    const candidates = collectDocumentAlignmentCandidates(detectedChanges, targetFilesByLocale, projectConfig, !!verbose);
+    if (candidates.length === 0) return emptyDocumentAlignment();
+
+    const branch = await getCurrentBranch();
+    if (!branch) return emptyDocumentAlignment();
+
+    const headSha = await getHeadSha();
+    const result = await runDocumentAlignment(
+      candidates,
+      { projectId, branch, jobGroupId, ...(headSha && { headSha }) },
+      { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
+    );
+    reportDocumentAlignment(result, console);
+    return result;
+  }
+
+  // An article updated in this run holds new text; the text read before the run is not sent for review.
+  function withoutUpdatedArticles(changes: TargetChangeFile[]): TargetChangeFile[] {
+    const updated = new Set(articleUpdates.alignedCells.map(cell => cell.target_path));
+    return changes.filter(file => !updated.has(file.path));
+  }
+
   // Runs before missing keys are looked for: a locale without the key is then
   // translated from the source text as written here.
   async function followEditedTranslations(
@@ -445,7 +570,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     projectConfig: ProjectConfig
   ): Promise<TargetEditAlignmentResult> {
     const candidates = detectedChanges
-      ? collectTargetEditCandidates(detectedChanges, sourceFiles, targetFilesByLocale, projectConfig, !!verbose, ignoreMatcher)
+      ? collectTargetEditCandidates(detectedChanges, keySourceFiles, keyTargetFilesByLocale, projectConfig, !!verbose, ignoreMatcher)
       : [];
     if (candidates.length === 0) return emptyTargetEditResult();
 
@@ -459,7 +584,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       { console, config: projectConfig, updateTranslationFile: translationUtils.updateTranslationFile }
     );
     reportTargetEditAlignment(result, console);
-    refreshFileContent([...sourceFiles, ...Object.values(targetFilesByLocale).flat()], result.writtenPaths);
+    refreshFileContent([...keySourceFiles, ...Object.values(keyTargetFilesByLocale).flat()], result.writtenPaths);
     return result;
   }
 
@@ -494,7 +619,11 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   // Aligned values are staged on the PR only once they are in the branch: after a
   // commit that landed, or right after writing when the pipeline commits itself.
   async function commitChanges(summary: CommitSummary): Promise<void> {
-    const alignedCells = keepAlignedCellsOnDisk(alignment?.alignedCells ?? [], sourceLocale, console);
+    const alignedCells = keepAlignedCellsOnDisk(
+      [...(alignment?.alignedCells ?? []), ...articleUpdates.alignedCells],
+      sourceLocale,
+      console
+    );
     let inBranch = false;
 
     if (options.skipCommit) {
@@ -503,8 +632,9 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       try {
         const result = await gitUtils.autoCommitChanges(translationPaths, {
           ...summary,
-          ...summarizeAlignedCells(alignedCells, sourceLocale),
-          viewUrl: summary.viewUrl || alignment?.shortUrl || undefined
+          ...summarizeAlignedCells(alignedCells.filter(cell => !isDocumentPath(cell.target_path)), sourceLocale),
+          ...summarizeUpdatedArticles(alignedCells.filter(cell => isDocumentPath(cell.target_path))),
+          viewUrl: summary.viewUrl || alignment?.shortUrl || articleUpdates.shortUrl || undefined
         });
         inBranch = result === 'new';
       } catch (error) {
@@ -557,14 +687,15 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   }
 
   const findResult = translationUtils.findMissingTranslationsByLocale(
-    sourceFiles,
-    targetFilesByLocale,
+    keySourceFiles,
+    keyTargetFilesByLocale,
     config,
     !!verbose,
     console,
     { ignoreMatcher }
   );
-  let missingByLocale = findResult.missing;
+  const allMissingDocuments = findMissingDocuments(sourceDocuments, targetFilesByLocale, config);
+  let missingByLocale: Record<string, MissingLocaleEntry> = { ...findResult.missing, ...allMissingDocuments };
 
   const ignoreSummary = summarizeRemoved(findResult.removed, config.translationFiles?.ignoreKeys ?? []);
   if (verbose && (ignoreSummary.totalKeysIgnored > 0 || ignoreSummary.zeroMatchPatterns.length > 0)) {
@@ -575,30 +706,35 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   if (options.changedOnly) {
     targetChanges = withRevertedChanges(detectedChanges ?? [], targetEdits.revertedChanges);
 
-    const filtered = filterByGitChanges(
+    const changedMissing = filterByGitChanges(
       sourceFiles,
       missingByLocale,
       config,
       !!verbose
     );
+    // A new article reworded after its translation was committed is missing nothing, yet out of date.
+    const resend = changedMissing ? findDocumentsToResend(sourceDocuments, targetFilesByLocale, config) : {};
+    Object.assign(allMissingDocuments, resend);
+    const filtered = changedMissing && { ...changedMissing, ...resend };
 
     if (stoppedOnUnreadableFiles()) return;
 
     if (filtered !== null) {
       const alignmentCandidates = detectedChanges
-        ? collectAlignmentCandidates(detectedChanges, sourceFiles, targetFilesByLocale, config, !!verbose, ignoreMatcher)
+        ? collectAlignmentCandidates(detectedChanges, keySourceFiles, keyTargetFilesByLocale, config, !!verbose, ignoreMatcher)
         : [];
       alignment = addSourceCells(
         await alignRewordedSourceTexts(replaceAlignmentCandidates(alignmentCandidates, targetEdits), config),
         targetEdits.sourceCells
       );
+      articleUpdates = await updateEditedArticles(detectedChanges ?? [], config);
 
       if (Object.keys(filtered).length === 0) {
         if (manifest !== null) {
           await sendFinalize(manifest, removedManifest);
         }
-        await sendPullRequestImport(targetChanges);
-        if (alignment?.alignedCells.length) {
+        await sendPullRequestImport(withoutUpdatedArticles(targetChanges));
+        if (alignment?.alignedCells.length || articleUpdates.alignedCells.length) {
           runPostTranslateCommand(config.postTranslateCommand);
           await commitChanges({ keysTranslated: 0, languages: [] });
         }
@@ -642,7 +778,12 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
     }
   }
 
-  const { batches, errors } = translationUtils.batchKeysWithMissing(sourceFiles, missingByLocale);
+  const isDocumentEntry = ([entryKey]: [string, MissingLocaleEntry]): boolean => entryKey in allMissingDocuments;
+  const missingKeys = Object.fromEntries(Object.entries(missingByLocale).filter(entry => !isDocumentEntry(entry)));
+  const missingDocuments = Object.fromEntries(Object.entries(missingByLocale).filter(isDocumentEntry));
+
+  const { batches, errors } = translationUtils.batchKeysWithMissing(keySourceFiles, missingKeys);
+  const { batches: documentBatches, refused: refusedDocuments } = buildDocumentBatches(missingDocuments);
 
   if (errors.length > 0) {
     console.error(chalk.red('\n✖ Errors occurred while preparing translation jobs:'));
@@ -656,18 +797,28 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
   try {
     const translationResult: TranslationResult = await processTranslationBatches(
       batches,
-      missingByLocale as any,
+      missingKeys as MissingByLocale,
       config,
       !!verbose,
       { console, translationUtils },
       jobGroupId
     );
 
+    reportRefusedArticles(refusedDocuments);
+    const documentResult = documentBatches.length > 0
+      ? await processDocumentBatches(documentBatches, missingDocuments as MissingByLocale, config, !!verbose, { console, translationUtils }, jobGroupId)
+      : emptyDocumentResult();
+    const articlesWritten = byStatus(documentResult, 'written');
+    const articlesFailed = byStatus(documentResult, 'failed').length > 0 || documentResult.stopped !== null;
+    const wroteTranslations = translationResult.uniqueKeysTranslated.size > 0 || articlesWritten.length > 0;
+
     if (manifest !== null) {
       await sendFinalize(manifest, removedManifest);
     }
 
-    await sendPullRequestImport(targetChanges);
+    // An article this run translated again holds new text; the text read before the run is not sent for review.
+    const rewritten = new Set(articlesWritten.map(outcome => outcome.targetPath));
+    await sendPullRequestImport(withoutUpdatedArticles(targetChanges).filter(file => !rewritten.has(file.path)));
 
     const translatedLocales = new Set(translationResult.languages);
     const onlySkipped = translationResult.skippedLanguages.filter((locale) => !translatedLocales.has(locale));
@@ -683,7 +834,7 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       if (translationResult.uniqueKeysTranslated.size > 0) {
         console.log(`» Successfully updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
-    } else if (parseFailures.length > 0) {
+    } else if (parseFailures.length > 0 || articlesFailed) {
       if (translationResult.uniqueKeysTranslated.size > 0) {
         console.log(`» Updated ${translationResult.uniqueKeysTranslated.size} keys in ${translationResult.totalLanguages} languages`);
       }
@@ -694,27 +845,37 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       }
     }
 
-    if (translationResult.uniqueKeysTranslated.size > 0) {
-      if (translationResult.jobGroupShortUrl) {
-        console.log(`» View results at: ${translationResult.jobGroupShortUrl}`);
+    reportArticles(documentResult);
+
+    const jobGroupShortUrl = translationResult.jobGroupShortUrl || documentResult.jobGroupShortUrl;
+    if (wroteTranslations) {
+      if (jobGroupShortUrl) {
+        console.log(`» View results at: ${jobGroupShortUrl}`);
       } else if (translationResult.resultsBaseUrl && translationResult.allJobIds.length > 0) {
         const jobIdsParam = translationResult.allJobIds.join(',');
         console.log(`» View results at: ${translationResult.resultsBaseUrl}?job_ids=${jobIdsParam}`);
       }
     }
 
-    if (translationResult.uniqueKeysTranslated.size > 0 || alignment?.alignedCells.length) {
+    if (wroteTranslations || alignment?.alignedCells.length || articleUpdates.alignedCells.length) {
       runPostTranslateCommand(config.postTranslateCommand);
       await commitChanges({
         keysTranslated: translationResult.uniqueKeysTranslated.size,
         languages: translationResult.languages,
-        viewUrl: translationResult.jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
+        ...(articlesWritten.length > 0 && {
+          articlesTranslated: new Set(articlesWritten.map(outcome => outcome.path)).size,
+          articleLanguages: [...new Set(articlesWritten.map(outcome => outcome.locale))]
+        }),
+        viewUrl: jobGroupShortUrl || translationResult.resultsBaseUrl || undefined
       });
     }
 
-    if (translationResult.failedLanguages.length > 0 && translationResult.uniqueKeysTranslated.size === 0) {
+    if (translationResult.failedLanguages.length > 0 && !wroteTranslations) {
       process.exit(1);
       return;
+    }
+    if (articlesFailed) {
+      process.exitCode = 1;
     }
   } catch (error) {
     if (error instanceof ApiResponseError) {

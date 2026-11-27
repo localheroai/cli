@@ -15,6 +15,7 @@ import {
 
 export type CommitResult = 'no-changes' | 'new' | 'skipped';
 export const MISSING_TOKEN_ERROR = 'GITHUB_TOKEN is not set';
+export const TRANSLATE_COMMIT_SUBJECT = 'Update translations';
 export const MISSING_BRANCH_ERROR = 'Could not determine branch name from GITHUB_HEAD_REF';
 type SkippedCommit = 'skipped-overlap' | 'skipped-uncertain';
 type SignedCommitResult = Exclude<CommitResult, 'skipped'> | SkippedCommit;
@@ -698,12 +699,22 @@ ${buildExtractStep(options)}      - name: Translate
    * Co-authored-by trailer derived from GITHUB_ACTOR.
    */
   buildTranslateCommitMessage(translationSummary?: CommitSummary): string {
-    let commitMessage = 'Update translations';
+    let commitMessage = TRANSLATE_COMMIT_SUBJECT;
 
     const summaryLines: string[] = [];
     if (translationSummary && translationSummary.keysTranslated > 0) {
       const { keysTranslated, languages } = translationSummary;
       summaryLines.push(`${keysTranslated} ${keysTranslated > 1 ? 'keys' : 'key'} in ${languages.join(', ')}`);
+    }
+    const articlesTranslated = translationSummary?.articlesTranslated ?? 0;
+    if (articlesTranslated > 0) {
+      const articleLanguages = (translationSummary?.articleLanguages ?? []).join(', ');
+      summaryLines.push(`${articlesTranslated} ${articlesTranslated > 1 ? 'articles' : 'article'} in ${articleLanguages}`);
+    }
+    const articlesUpdated = translationSummary?.articlesUpdated ?? 0;
+    if (articlesUpdated > 0) {
+      const languages = (translationSummary?.articleUpdateLanguages ?? []).join(', ');
+      summaryLines.push(`Updated ${articlesUpdated} ${articlesUpdated > 1 ? 'articles' : 'article'} in ${languages} to the changed source text`);
     }
     const sourceTextsUpdated = translationSummary?.sourceTextsUpdated ?? 0;
     if (sourceTextsUpdated > 0) {

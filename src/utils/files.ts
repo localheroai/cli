@@ -14,6 +14,14 @@ import type {
 import { parsePoFile, poEntriesToApiFormat } from './po-utils.js';
 import { formatFileSize, isFileTooLarge, getFileSize, FILE_SIZE_LIMITS } from './file-size.js';
 import { detectMultiLanguage, sourceKeyedLocales } from './multi-language-detection.js';
+import {
+  documentFormatFor,
+  documentKeyName,
+  documentLocale,
+  isDocumentExtension,
+  patternNamesExtension,
+  toLfText
+} from './documents.js';
 
 
 /**
@@ -26,6 +34,9 @@ export function parseFile(
   options?: { sourceLanguage?: string; currentLanguage?: string }
 ): Record<string, any> {
   try {
+    if (isDocumentExtension(format)) {
+      return { [documentKeyName(filePath)]: toLfText(content) };
+    }
     if (format === 'json') {
       try {
         return JSON.parse(content);
@@ -122,6 +133,14 @@ export function extractLocaleFromPath(filePath: string, localeRegex?: string, kn
   }
 
   throw new Error(`Could not extract locale from path: ${filePath}`);
+}
+
+function documentLocaleOrThrow(filePath: string, basePath: string, knownLocales: string[]): string {
+  const locale = documentLocale(path.relative(basePath, path.resolve(filePath)), knownLocales);
+  if (!locale) {
+    throw new Error(`Could not extract locale from path: ${filePath}`);
+  }
+  return locale;
 }
 
 function pathHasLocale(filePath: string, localeRegex: string | undefined, knownLocales: string[]): boolean {
@@ -375,6 +394,7 @@ export async function findTranslationFiles(
     includeNamespace = false,
     verbose = false,
     returnFullResult = false,
+    documents = 'exclude',
     logger = console
   } = options;
 
@@ -437,6 +457,11 @@ export async function findTranslationFiles(
       try {
         const filePath = file;
         const format = path.extname(file).slice(1);
+        const documentFormat = documentFormatFor(file);
+
+        if (documentFormat && (documents !== 'include' || !patternNamesExtension(pattern, format))) {
+          continue;
+        }
 
         if (
           translationFiles?.multiLanguageFiles &&
@@ -504,6 +529,8 @@ export async function findTranslationFiles(
         let locale: string;
         if (format === 'pot') {
           locale = sourceLocale;
+        } else if (documentFormat) {
+          locale = documentLocaleOrThrow(file, basePath, knownLocales);
         } else {
           locale = extractLocaleFromPath(file, localeRegex, knownLocales);
         }
@@ -511,7 +538,8 @@ export async function findTranslationFiles(
         const result: TranslationFile = {
           path: filePath,
           format,
-          locale
+          locale,
+          ...(documentFormat && { documentFormat })
         };
 
         if (parseContent) {

@@ -111,6 +111,20 @@ describe('translations API', () => {
       ]);
     });
 
+    it('passes skipped_documents through to the caller', async () => {
+      mockGetCurrentBranch.mockResolvedValueOnce('feature/articles');
+      const skipped = [{ path: 'articles/en/export-reports.md', language: 'sv', reason: 'new_language_waits_for_updates' }];
+      mockApiRequest.mockResolvedValueOnce({ jobs: [], skipped_documents: skipped });
+
+      const result = await createTranslationJob({
+        projectId: 'proj_123',
+        sourceFiles: [{ path: 'articles/en/export-reports.md', content: 'x', format: 'markdown' }],
+        targetLocales: ['sv']
+      });
+
+      expect(result.skipped_documents).toEqual(skipped);
+    });
+
     it('returns an empty jobs no-op instead of throwing (#432)', async () => {
       // The backend returns { jobs: [] } when no key is eligible for translation
       // (e.g. only a `.one` form for an other-only locale). That is a benign
@@ -257,6 +271,20 @@ describe('translations API', () => {
         jobGroupId: 'grp_abc',
         prKeyManifest: {}
       })).rejects.toThrow('Finalize failed with status 500');
+    });
+
+    it('carries the error code of a refused finalize', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 422,
+        json: async () => ({ error: { code: 'document_file', message: 'Articles are not enabled for this project' } })
+      });
+
+      await expect(finalizeTranslationJobs({
+        projectId: 'proj_123',
+        jobGroupId: 'grp_abc',
+        prKeyManifest: { 'articles/en/export-reports.md': [{ name: 'export-reports.md' }] }
+      })).rejects.toMatchObject({ message: 'Finalize failed with status 422', code: 'document_file' });
     });
 
     it('omits removed_key_manifest when not provided', async () => {

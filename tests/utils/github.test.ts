@@ -490,6 +490,29 @@ describe('githubService', () => {
       expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
     });
 
+    it.each([
+      [{ keysTranslated: 0, languages: [], articlesTranslated: 1, articleLanguages: ['sv'] }, '1 article in sv'],
+      [{ keysTranslated: 0, languages: [], articlesTranslated: 6, articleLanguages: ['sv', 'de'] }, '6 articles in sv, de'],
+      [{ keysTranslated: 2, languages: ['sv'], articlesTranslated: 3, articleLanguages: ['sv', 'de'] }, '2 keys in sv\n3 articles in sv, de'],
+      [{ keysTranslated: 0, languages: [], articlesUpdated: 1, articleUpdateLanguages: ['sv'] }, 'Updated 1 article in sv to the changed source text'],
+      [{ keysTranslated: 0, languages: [], articlesUpdated: 2, articleUpdateLanguages: ['sv', 'de'] }, 'Updated 2 articles in sv, de to the changed source text']
+    ])('describes translated articles on their own line', async (summary, lines) => {
+      mockEnv.GITHUB_ACTIONS = 'true';
+      mockEnv.GITHUB_HEAD_REF = 'feature-branch';
+      mockEnv.GITHUB_TOKEN = 'fake-token';
+      mockEnv.GITHUB_REPOSITORY = 'owner/repo';
+
+      mockExec.mockImplementation((cmd: string) => {
+        if (cmd === 'git status --porcelain') return Buffer.from('M articles/sv/export-reports.md');
+        return Buffer.from('');
+      });
+
+      await autoCommitChanges('articles/', { ...summary, viewUrl: 'https://localhero.ai/r/abc123' });
+
+      const expectedMessage = `Update translations\n\n${lines}\n\nhttps://localhero.ai/r/abc123`;
+      expect(mockExec).toHaveBeenCalledWith(`git commit -m '${expectedMessage}'`, { stdio: 'inherit' });
+    });
+
     it('describes source texts updated to match edited translations on their own line', async () => {
       mockEnv.GITHUB_ACTIONS = 'true';
       mockEnv.GITHUB_HEAD_REF = 'feature-branch';

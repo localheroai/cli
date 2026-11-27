@@ -1,7 +1,8 @@
 import { getApiKey } from '../utils/auth.js';
 import { apiRequest, getApiHost } from './client.js';
+import { readErrorBody } from './error-body.js';
 import { getCurrentBranch } from '../utils/git.js';
-import type { KeyIdentifier, SkippedLanguage } from '../types/index.js';
+import type { KeyIdentifier, SkippedDocument, SkippedLanguage } from '../types/index.js';
 
 // Source file for translation
 export interface SourceFile {
@@ -37,6 +38,7 @@ export interface TranslationJobsResponse {
     short_url: string;
   };
   skipped_languages?: SkippedLanguage[];
+  skipped_documents?: SkippedDocument[];
 }
 
 /**
@@ -73,7 +75,8 @@ export async function createTranslationJob(params: CreateTranslationJobParams): 
     jobs: response.jobs,
     totalJobs: response.jobs.length,
     ...(response.job_group && { job_group: response.job_group }),
-    ...(response.skipped_languages && { skipped_languages: response.skipped_languages })
+    ...(response.skipped_languages && { skipped_languages: response.skipped_languages }),
+    ...(response.skipped_documents && { skipped_documents: response.skipped_documents })
   };
 }
 
@@ -187,6 +190,16 @@ export interface FinalizeParams {
   branch?: string;
 }
 
+export class FinalizeError extends Error {
+  readonly code?: string;
+
+  constructor(status: number, code?: string) {
+    super(`Finalize failed with status ${status}`);
+    this.name = 'FinalizeError';
+    this.code = code;
+  }
+}
+
 export async function finalizeTranslationJobs(params: FinalizeParams): Promise<void> {
   const apiKey = await getApiKey();
   const apiHost = getApiHost();
@@ -212,6 +225,6 @@ export async function finalizeTranslationJobs(params: FinalizeParams): Promise<v
   });
 
   if (!response.ok) {
-    throw new Error(`Finalize failed with status ${response.status}`);
+    throw new FinalizeError(response.status, (await readErrorBody(response))?.code);
   }
 }

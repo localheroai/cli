@@ -2,11 +2,13 @@ import chalk from 'chalk';
 import {
   createPullRequestImport,
   PullRequestImportError,
-  type PullRequestImportParams
+  type PullRequestImportParams,
+  type PullRequestImportResponse
 } from '../api/pull-request-imports.js';
 import { leaveOutMovedCells, triggerPathKey, type SentValuesFrom, type TriggerPaths } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
 import type { AlignedCell, Logger } from './source-alignment.js';
+import { isDocumentPath } from './documents.js';
 
 type ImportRequest = Omit<PullRequestImportParams, 'files'> & { sourceLocale: string; valuesFrom: SentValuesFrom };
 
@@ -16,6 +18,8 @@ interface ImportDependencies {
 }
 
 const MAX_FILES_PER_REQUEST = 50;
+const MAX_DOCUMENT_FILES_PER_REQUEST = 10;
+const BASELINE_CHANGED = 'baseline_changed';
 const MAX_CHANGES_PER_REQUEST = 1000;
 const RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -38,7 +42,13 @@ export async function sendAlignedImport(
   const triggerPaths = triggerPathsOf(cells);
   let importedCount = 0;
 
-  for (const chunk of chunkFiles(buildImportFiles(cells))) {
+  const importFiles = buildImportFiles(cells);
+  const keyFiles = importFiles.filter(file => !isDocumentPath(file.path));
+  const documentFiles = importFiles.filter(file => isDocumentPath(file.path));
+  // Articles never share a request with key files and go fewer to a request.
+  const chunks = [...chunkFiles(keyFiles), ...chunkFiles(documentFiles, MAX_DOCUMENT_FILES_PER_REQUEST)];
+
+  for (const chunk of chunks) {
     let files = chunk;
     // Checked again before every attempt: a sync can land between requests or during a retry's wait.
     const sendUnmoved = async () => {
@@ -48,6 +58,7 @@ export async function sendAlignedImport(
     try {
       const response = await withRetries(sendUnmoved, sleep);
       importedCount += response?.imported_count ?? 0;
+      reportArticlesNotTaken(response?.skipped ?? [], deps.console);
     } catch (error) {
       const changeCount = files.reduce((sum, file) => sum + file.changes.length, 0);
       deps.console.log(chalk.yellow(`⚠ Could not send ${changeCount} aligned values to Localhero: ${(error as Error).message}. They are committed to the branch and will be picked up on the next push.`));
@@ -56,6 +67,15 @@ export async function sendAlignedImport(
 
   if (importedCount > 0) {
     deps.console.log(`» Sent ${importedCount} aligned ${importedCount === 1 ? 'value' : 'values'} for review`);
+  }
+}
+
+// The article changed on Localhero after the update was made; the next push makes it again.
+function reportArticlesNotTaken(skipped: PullRequestImportResponse['skipped'], logger: Logger): void {
+  for (const entry of skipped) {
+    if (!isDocumentPath(entry.path) || entry.reason !== BASELINE_CHANGED) continue;
+    const article = `${entry.locale ? `${entry.locale}: ` : ''}${entry.path.split('/').pop()}`;
+    logger.log(chalk.yellow(`⚠ ${article} was not taken for review: the article changed on Localhero meanwhile. The next push sends it again.`));
   }
 }
 
@@ -87,7 +107,10 @@ function buildImportFiles(cells: AlignedCell[]): TargetChangeFile[] {
       status: 'updated',
       value: cell.value,
       old_value: cell.target_base,
-      source_value: cell.source,
+      // An article is never hydrated from a source value; it names the text it was updated from instead.
+      ...(isDocumentPath(cell.target_path)
+        ? cell.aligned_from_digest && { aligned_from_digest: cell.aligned_from_digest }
+        : { source_value: cell.source }),
       aligned_source: cell.aligned_source ?? cell.source,
       ...(cell.trigger_locale && { trigger_locale: cell.trigger_locale })
     });
@@ -95,7 +118,7 @@ function buildImportFiles(cells: AlignedCell[]): TargetChangeFile[] {
   return [...files.values()];
 }
 
-function chunkFiles(files: TargetChangeFile[]): TargetChangeFile[][] {
+function chunkFiles(files: TargetChangeFile[], maxFiles = MAX_FILES_PER_REQUEST): TargetChangeFile[][] {
   const chunks: TargetChangeFile[][] = [];
   let current: TargetChangeFile[] = [];
   let currentChanges = 0;
@@ -103,7 +126,7 @@ function chunkFiles(files: TargetChangeFile[]): TargetChangeFile[][] {
   for (const file of files) {
     for (let start = 0; start < file.changes.length; start += MAX_CHANGES_PER_REQUEST) {
       const piece = { ...file, changes: file.changes.slice(start, start + MAX_CHANGES_PER_REQUEST) };
-      const full = current.length === MAX_FILES_PER_REQUEST ||
+      const full = current.length === maxFiles ||
         currentChanges + piece.changes.length > MAX_CHANGES_PER_REQUEST;
       if (full) {
         chunks.push(current);

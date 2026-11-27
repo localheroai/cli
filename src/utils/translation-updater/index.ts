@@ -3,6 +3,8 @@ import { fileExists, ensureDirectoryExists } from './common.js';
 import { updateYamlFile, deleteKeysFromYamlFile } from './yaml-handler.js';
 import { updateJsonFile, deleteKeysFromJsonFile } from './json-handler.js';
 import { updatePoFile, deleteKeysFromPoFile } from './po-handler.js';
+import { writeDocumentFile } from './document-handler.js';
+import { isDocumentPath } from '../documents.js';
 import { isDjangoWorkflow, getDjangoSourcePath } from '../translation-utils.js';
 import { runSerializedByPath } from './path-serializer.js';
 import type { ProjectConfig, TranslationWithMetadata } from '../../types/index.js';
@@ -57,8 +59,6 @@ async function _updateTranslationFile(
 ): Promise<UpdateResult> {
   const fileExt = path.extname(filePath).slice(1).toLowerCase();
 
-  await ensureDirectoryExists(filePath);
-
   let filteredTranslations: Record<string, unknown>;
   if (Array.isArray(translations)) {
     filteredTranslations = Object.fromEntries(
@@ -70,6 +70,12 @@ async function _updateTranslationFile(
       Object.entries(translations).filter(([_, value]) => value !== null)
     );
   }
+
+  if (isDocumentPath(filePath)) {
+    return writeDocumentFile(filePath, filteredTranslations, sourceFilePath);
+  }
+
+  await ensureDirectoryExists(filePath);
 
   if (fileExt === 'json') {
     const jsonResult = await updateJsonFile(filePath, filteredTranslations, languageCode, sourceFilePath);
@@ -123,7 +129,7 @@ export async function deleteKeysFromTranslationFile(
   languageCode: string = 'en'
 ): Promise<string[]> {
   const exists = await fileExists(filePath);
-  if (!exists) {
+  if (!exists || isDocumentPath(filePath)) {
     return [];
   }
 

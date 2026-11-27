@@ -1,6 +1,6 @@
 import chalk from 'chalk';
-import { ProjectConfig } from '../types/index.js';
-import type { SkippedLanguage } from '../types/index.js';
+import { ApiResponseError, ProjectConfig } from '../types/index.js';
+import type { SkippedDocument, SkippedLanguage } from '../types/index.js';
 import { Spinner } from './spinner.js';
 
 /**
@@ -29,6 +29,7 @@ export interface TranslationJobResponse {
     short_url: string;
   };
   skipped_languages?: SkippedLanguage[];
+  skipped_documents?: SkippedDocument[];
 }
 
 export interface JobSourceInfo {
@@ -650,4 +651,210 @@ export async function processTranslationBatches(
     uniqueKeysTranslated,
     failedLanguages: Array.from(stats.failedLanguages)
   };
+}
+
+export const DOCUMENT_BATCH_CONCURRENCY = 4;
+
+const STOP_CODES = new Set(['document_file', 'job_group_required', 'insufficient_credits']);
+const REFUSAL_CODES = new Set(['invalid_document', 'document_too_large']);
+const NETWORK_ERROR_CODE = 'network_error';
+
+export type DocumentStatus = 'written' | 'skipped' | 'refused' | 'failed' | 'not_sent';
+
+export interface DocumentOutcome {
+  path: string;
+  locale: string;
+  targetPath: string;
+  status: DocumentStatus;
+  reason?: string;
+}
+
+export interface DocumentResult {
+  outcomes: DocumentOutcome[];
+  stopped: { code: string; message: string } | null;
+  jobGroupShortUrl: string | null;
+}
+
+export function emptyDocumentResult(): DocumentResult {
+  return { outcomes: [], stopped: null, jobGroupShortUrl: null };
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof ApiResponseError) return error.message;
+  const cliMessage = (error as { cliErrorMessage?: unknown })?.cliErrorMessage;
+  if (typeof cliMessage === 'string') return cliMessage;
+  return error instanceof Error ? error.message : String(error);
+}
+
+// The API client marks a request that never reached the server with a CLI message.
+function isNetworkError(error: unknown): boolean {
+  return !(error instanceof ApiResponseError) && typeof (error as { cliErrorMessage?: unknown })?.cliErrorMessage === 'string';
+}
+
+function settle(result: DocumentResult, entry: MissingTranslationEntry, status: DocumentStatus, reason?: string): void {
+  result.outcomes.push({
+    path: entry.path,
+    locale: entry.locale,
+    targetPath: entry.targetPath,
+    status,
+    ...(reason && { reason })
+  });
+}
+
+function matchingLocale<T>(byLanguage: Map<string, T>, locale: string): T | undefined {
+  return [...byLanguage.entries()].find(([language]) => localeCodesMatch(language, locale))?.[1];
+}
+
+function includesLocale(languages: Set<string>, locale: string): boolean {
+  return [...languages].some(language => localeCodesMatch(language, locale));
+}
+
+function stopReason(error: unknown): DocumentResult['stopped'] {
+  if (error instanceof ApiResponseError && STOP_CODES.has(error.code)) {
+    return { code: error.code, message: error.message };
+  }
+  return isNetworkError(error) ? { code: NETWORK_ERROR_CODE, message: errorMessage(error) } : null;
+}
+
+/**
+ * Translates one article: a job per locale, each written whole as it completes.
+ * Every locale settles before this returns, so the commit can never start
+ * while an article is still being written.
+ */
+async function processDocumentBatch(
+  batch: TranslationBatch,
+  missingByLocale: MissingByLocale,
+  config: ProjectConfig,
+  verbose: boolean,
+  deps: TranslationDependencies,
+  result: DocumentResult,
+  jobGroupId?: string
+): Promise<void> {
+  const { console, translationUtils } = deps;
+  const entries = batch.localeEntries.map(entryKey => missingByLocale[entryKey]);
+
+  let response: TranslationJobResponse;
+  try {
+    response = await translationUtils.createTranslationJob(createJobRequest(batch, missingByLocale, config, jobGroupId));
+  } catch (error) {
+    const stopped = stopReason(error);
+    if (stopped) {
+      result.stopped ??= stopped;
+      entries.forEach(entry => settle(result, entry, 'not_sent'));
+      return;
+    }
+    const refused = error instanceof ApiResponseError && REFUSAL_CODES.has(error.code);
+    entries.forEach(entry => settle(result, entry, refused ? 'refused' : 'failed', errorMessage(error)));
+    return;
+  }
+
+  if (response.job_group?.short_url && !result.jobGroupShortUrl) {
+    result.jobGroupShortUrl = response.job_group.short_url;
+  }
+
+  const stats: TranslationStats = {
+    totalLanguages: 0,
+    languages: new Set<string>(),
+    resultsBaseUrl: null,
+    jobGroupShortUrl: null,
+    failedLanguages: new Set<string>(),
+    skippedLanguages: new Set<string>()
+  };
+  const skipReasons = new Map<string, string>();
+  for (const skipped of response.skipped_documents ?? []) skipReasons.set(skipped.language, skipped.reason);
+  for (const skipped of response.skipped_languages ?? []) skipReasons.set(skipped.code, skipped.reason);
+
+  const jobSourceMapping = createJobSourceMapping(response.jobs, batch.sourceFilePath);
+  const batchScope = createBatchScope(batch);
+  const failures = new Map<string, string>();
+  const pendingJobs = new Set(response.jobs.map(job => job.id));
+  const startedAt = Date.now();
+  let lastProgressAt = startedAt;
+  const lastProgressMarkers = new Map<string, string>();
+
+  while (pendingJobs.size > 0) {
+    const now = Date.now();
+    const endReason = waitEndReason(now - startedAt, now - lastProgressAt);
+    if (endReason) {
+      pendingJobs.forEach(jobId => failures.set(jobSourceMapping[jobId].locale, `the translation job ${endReason}`));
+      break;
+    }
+
+    const jobIds = Array.from(pendingJobs);
+    const settled = await Promise.allSettled(jobIds.map(async (jobId): Promise<JobStatus> => {
+      const jobStatus = await monitorJobStatus(jobId, verbose, translationUtils, console, pollIntervalSeconds(now - startedAt));
+      if (jobStatus.status === 'completed') {
+        await applyTranslations(
+          jobStatus, jobSourceMapping, missingByLocale, translationUtils, verbose, console,
+          batchScope, new Set<string>(), stats, config
+        );
+      }
+      return jobStatus;
+    }));
+
+    settled.forEach((outcome, index) => {
+      const jobId = jobIds[index];
+      if (outcome.status === 'rejected') {
+        pendingJobs.delete(jobId);
+        failures.set(jobSourceMapping[jobId].locale, errorMessage(outcome.reason));
+        result.stopped ??= stopReason(outcome.reason);
+      } else if (outcome.value.status === 'completed') {
+        pendingJobs.delete(jobId);
+        lastProgressAt = Date.now();
+      } else if (outcome.value.progressMarker && outcome.value.progressMarker !== lastProgressMarkers.get(jobId)) {
+        lastProgressMarkers.set(jobId, outcome.value.progressMarker);
+        lastProgressAt = Date.now();
+      }
+    });
+  }
+
+  for (const entry of entries) {
+    const skipReason = matchingLocale(skipReasons, entry.locale);
+    if (includesLocale(stats.languages, entry.locale)) {
+      settle(result, entry, 'written');
+    } else if (skipReason !== undefined || includesLocale(stats.skippedLanguages, entry.locale)) {
+      settle(result, entry, 'skipped', skipReason ?? 'auto_translate_disabled');
+    } else {
+      settle(result, entry, 'failed', matchingLocale(failures, entry.locale) ?? 'the server returned no translation');
+    }
+  }
+}
+
+/**
+ * Translates articles after the key files, a few at a time. One article failing
+ * never stops the next; only an answer that holds for every article does
+ * (documents switched off, no credits, no connection).
+ */
+export async function processDocumentBatches(
+  batches: TranslationBatch[],
+  missingByLocale: MissingByLocale,
+  config: ProjectConfig,
+  verbose: boolean,
+  deps: TranslationDependencies,
+  jobGroupId?: string
+): Promise<DocumentResult> {
+  const result = emptyDocumentResult();
+  const queue = [...batches];
+
+  const worker = async (): Promise<void> => {
+    while (queue.length > 0 && !result.stopped) {
+      await processDocumentBatch(queue.shift() as TranslationBatch, missingByLocale, config, verbose, deps, result, jobGroupId);
+    }
+  };
+
+  const spinner = !verbose ? new Spinner('Translating articles...') : null;
+  spinner?.start();
+  try {
+    await Promise.all(Array.from({ length: Math.min(DOCUMENT_BATCH_CONCURRENCY, batches.length) }, worker));
+  } finally {
+    spinner?.stop();
+  }
+
+  for (const batch of queue) {
+    for (const entryKey of batch.localeEntries) {
+      settle(result, missingByLocale[entryKey], 'not_sent');
+    }
+  }
+
+  return result;
 }
