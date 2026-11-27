@@ -1,5 +1,177 @@
 // Jest Snapshot v1, https://goo.gl/fbAQLP
 
+exports[`key files only: recorded API calls sends the same alignment request for reworded and added source texts: files 1`] = `
+"sv:
+  greeting: sv aligned greeting
+  farewell: Hej då
+  nested:
+    title: sv aligned nested.title
+  added: sv aligned added
+"
+`;
+
+exports[`key files only: recorded API calls sends the same alignment request for reworded and added source texts: requests 1`] = `
+[
+  {
+    "body": null,
+    "method": "GET",
+    "path": "/api/v1/projects/keys-only-project/settings",
+  },
+  {
+    "body": {
+      "branch": "feature/reword",
+      "head_sha": "<head>",
+      "items": [
+        {
+          "format": "yml",
+          "key": "greeting",
+          "source": "Hello there",
+          "source_base": "Hello",
+          "source_path": "locales/en/common.yml",
+          "targets": [
+            {
+              "base": "Hej",
+              "current": "Hej",
+              "locale": "sv",
+              "target_path": "locales/sv/common.yml",
+            },
+          ],
+        },
+        {
+          "format": "yml",
+          "key": "nested.title",
+          "source": "Preferences",
+          "source_base": "Settings",
+          "source_path": "locales/en/common.yml",
+          "targets": [
+            {
+              "base": "Inställningar",
+              "current": "Inställningar",
+              "locale": "sv",
+              "target_path": "locales/sv/common.yml",
+            },
+          ],
+        },
+      ],
+      "job_group_id": "<job-group>",
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/target_edit_alignments",
+  },
+  {
+    "body": {
+      "branch": "feature/reword",
+      "head_sha": "<head>",
+      "items": [
+        {
+          "format": "yml",
+          "key": "greeting",
+          "previous_source": "Hello",
+          "source": "Hello there",
+          "source_path": "locales/en/common.yml",
+          "target_base": "Hej",
+          "target_current": "Hej",
+          "target_path": "locales/sv/common.yml",
+        },
+        {
+          "format": "yml",
+          "key": "nested.title",
+          "previous_source": "Settings",
+          "source": "Preferences",
+          "source_path": "locales/en/common.yml",
+          "target_base": "Inställningar",
+          "target_current": "Inställningar",
+          "target_path": "locales/sv/common.yml",
+        },
+        {
+          "format": "yml",
+          "key": "added",
+          "previous_source": null,
+          "source": "Added with its translation",
+          "source_path": "locales/en/common.yml",
+          "target_base": null,
+          "target_current": "Tillagd med sin översättning",
+          "target_path": "locales/sv/common.yml",
+        },
+      ],
+      "job_group_id": "<job-group>",
+      "locale": "sv",
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/source_alignments",
+  },
+  {
+    "body": {
+      "branch": "feature/reword",
+      "commit_sha": null,
+      "job_group_id": "<job-group>",
+      "pr_key_manifest": {
+        "locales/en/common.yml": [
+          {
+            "name": "greeting",
+          },
+          {
+            "name": "nested.title",
+          },
+          {
+            "name": "added",
+          },
+        ],
+      },
+      "removed_key_manifest": {},
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/translation_jobs/finalize",
+  },
+  {
+    "body": {
+      "branch": "feature/reword",
+      "files": [
+        {
+          "changes": [
+            {
+              "key": "added",
+              "source_value": "Added with its translation",
+              "status": "added",
+              "value": "Tillagd med sin översättning",
+            },
+          ],
+          "format": "yml",
+          "locale": "sv",
+          "path": "locales/sv/common.yml",
+          "source_path": "locales/en/common.yml",
+        },
+        {
+          "changes": [
+            {
+              "key": "greeting",
+              "old_value": "Hello",
+              "source_value": "Hello there",
+              "status": "updated",
+              "value": "Hello there",
+            },
+            {
+              "key": "nested.title",
+              "old_value": "Settings",
+              "source_value": "Preferences",
+              "status": "updated",
+              "value": "Preferences",
+            },
+          ],
+          "format": "yml",
+          "locale": "en",
+          "path": "locales/en/common.yml",
+          "source_path": "locales/en/common.yml",
+        },
+      ],
+      "job_group_id": "<job-group>",
+    },
+    "method": "POST",
+    "path": "/api/v1/projects/keys-only-project/pull_request_imports",
+  },
+]
+`;
+
 exports[`key files only: recorded API calls sends the same requests and writes the same files for a full translate run: files 1`] = `
 {
   "locales/sv/common.yml": "sv:

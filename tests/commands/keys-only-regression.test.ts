@@ -46,7 +46,11 @@ function decodeFiles(body: any): unknown {
 
 function normalize(body: any): unknown {
   if (!body || typeof body !== 'object') return body;
-  return decodeFiles({ ...body, ...(body.job_group_id && { job_group_id: '<job-group>' }) });
+  return decodeFiles({
+    ...body,
+    ...(body.job_group_id && { job_group_id: '<job-group>' }),
+    ...(body.head_sha && { head_sha: '<head>' })
+  });
 }
 
 function jsonResponse(data: unknown): Response {
@@ -135,6 +139,17 @@ describe('key files only: recorded API calls', () => {
         return jsonResponse({ settings: { target_languages: [] } });
       }
 
+      if (url.pathname.endsWith('/source_alignments')) {
+        const items = body.items.map((item: any) => ({
+          source_path: item.source_path,
+          target_path: item.target_path,
+          key: item.key,
+          status: 'aligned',
+          value: `sv aligned ${item.key}`
+        }));
+        return jsonResponse({ enabled: true, items, notices: [] });
+      }
+
       if (url.pathname.endsWith('/pull_request_imports')) {
         return jsonResponse({ imported_count: 0, skipped: [], unchanged: [] });
       }
@@ -204,6 +219,28 @@ describe('key files only: recorded API calls', () => {
 
     await runTranslate({ changedOnly: true });
 
+    expect(calls).toMatchSnapshot('requests');
+    expect(readFileSync('locales/sv/common.yml', 'utf-8')).toMatchSnapshot('files');
+  });
+
+  it('sends the same alignment request for reworded and added source texts', async () => {
+    execSync('git init -q -b main', { stdio: 'pipe' });
+    writeBaseFiles();
+    write('locales/sv/common.yml', 'sv:\n  greeting: Hej\n  farewell: Hej då\n  nested:\n    title: Inställningar\n');
+    write('web/sv/app.json', '{\n  "save": "Spara",\n  "cancel": "Avbryt"\n}\n');
+    git('add .');
+    git('commit -qm base');
+
+    git('checkout -q -b feature/reword');
+    write('locales/en/common.yml', 'en:\n  greeting: Hello there\n  farewell: Goodbye\n  nested:\n    title: Preferences\n  added: Added with its translation\n');
+    write('locales/sv/common.yml', 'sv:\n  greeting: Hej\n  farewell: Hej då\n  nested:\n    title: Inställningar\n  added: Tillagd med sin översättning\n');
+    write('locales/en/README.md', '# Notes\n\nReworded on the branch.\n');
+    git('add -A');
+    git('commit -qm "reword source texts"');
+
+    await runTranslate({ changedOnly: true });
+
+    expect(calls.filter(call => call.path.endsWith('/source_alignments'))).toHaveLength(1);
     expect(calls).toMatchSnapshot('requests');
     expect(readFileSync('locales/sv/common.yml', 'utf-8')).toMatchSnapshot('files');
   });
