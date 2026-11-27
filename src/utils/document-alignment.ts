@@ -51,7 +51,8 @@ export function emptyDocumentAlignment(): DocumentAlignmentResult {
 /**
  * An article that was on the base branch and whose source text changed in this
  * branch, paired with each translation of it that exists. The whole file is the
- * one value. A missing or blank translation is left to the translation jobs.
+ * one value. A missing or blank translation is left to the translation jobs,
+ * and one added in this branch to the review import.
  */
 export function collectDocumentAlignmentCandidates(
   targetChanges: TargetChangeFile[],
@@ -83,6 +84,10 @@ export function collectDocumentAlignmentCandidates(
       const targetCurrent = toLfText(Buffer.from(target.content ?? '', 'base64').toString());
       if (targetCurrent.trim() === '') continue;
 
+      // A translation added in this branch is sent for review as it is; there is no earlier text to update.
+      const targetBase = textAt(target, mergeBase);
+      if (targetBase === null) continue;
+
       candidates.set(`${locale}\0${target.path}`, {
         locale,
         source_path: file.path,
@@ -91,7 +96,7 @@ export function collectDocumentAlignmentCandidates(
         key: change.key,
         previous_source: change.old_value as string,
         source: change.value,
-        target_base: textAt(target, mergeBase),
+        target_base: targetBase,
         target_current: targetCurrent
       });
     }

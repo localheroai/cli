@@ -301,6 +301,17 @@ describe('translate --changed-only with an edited article', () => {
     ]);
   });
 
+  it('asks for no update of a translation that is new in this pull request', async () => {
+    rewordEnglish('articles/en/notes-en.md');
+    write('articles/sv/notes-en.md', '# Anteckningar\n\nSkriven för hand i den här grenen.\n');
+    commitAll('reword an article and add its translation by hand');
+
+    await translateRunner(config).run({ changedOnly: true });
+
+    expect(articleAlignments().map(call => call.body.items[0].key)).toEqual(['export-reports.md']);
+    expect(articleAlignments().every(call => typeof call.body.items[0].target_base === 'string')).toBe(true);
+  });
+
   it('reports an update the server no longer takes and keeps going', async () => {
     serve((call) => {
       if (isArticleAlignment(call)) return answer(call, { status: 'aligned', value: UPDATED, anchor_digest: 'a1b2c3' });
