@@ -48,7 +48,7 @@ describe('flatValuesAt against a real git repository', () => {
     process.chdir(repo);
     execSync('git init -q');
     writeFileSync('multi.yml', 'en:\n  hello: Hello\nsv:\n  hello: Hej\n');
-    writeFileSync('sv.po', 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\nmsgid "Hello"\nmsgstr "Hej"\n');
+    writeFileSync('sv.po', 'msgid ""\nmsgstr ""\n"Content-Type: text/plain; charset=UTF-8\\n"\n\nmsgid "Hello"\nmsgstr "Hej"\n\nmsgid "%s file"\nmsgid_plural "%s files"\nmsgstr[0] "%s fil"\nmsgstr[1] "%s filer"\n');
     execSync('git add . && git -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm base');
     writeFileSync('multi.yml', 'en:\n  hello: Hello\nsv:\n  hello: Hallå\n');
   });
@@ -63,7 +63,11 @@ describe('flatValuesAt against a real git repository', () => {
   });
 
   it('reads a PO file keyed the way change detection keys it', () => {
-    expect(flatValuesAt({ path: 'sv.po', format: 'po', locale: 'sv' }, 'HEAD')).toMatchObject({ Hello: 'Hej' });
+    expect(flatValuesAt({ path: 'sv.po', format: 'po', locale: 'sv' }, 'HEAD')).toEqual({
+      Hello: 'Hej',
+      '%s file': '%s fil',
+      '%s file__plural_1': '%s filer'
+    });
   });
 
   it('returns null for a file the ref does not have', () => {

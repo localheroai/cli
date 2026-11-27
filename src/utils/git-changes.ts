@@ -181,6 +181,21 @@ function extractPoKeys(poObject: Record<string, any>): Record<string, any> {
 }
 
 /**
+ * With empty source msgstr (Django's default) every plural form is '' on both
+ * sides, so a msgid_plural-only change would go unseen. Comparing each form
+ * with its entry's msgid_plural marks the whole entry changed.
+ */
+function extractPoSourceKeys(poObject: Record<string, any>): Record<string, any> {
+  const result = extractPoKeys(poObject);
+  for (const [key, data] of Object.entries(poObject)) {
+    if (!data?.metadata?.po_plural) continue;
+    const singular = poObject[key.replace(PLURAL_SUFFIX_REGEX, '')];
+    result[key] = { value: result[key], msgid_plural: singular?.metadata?.msgid_plural };
+  }
+  return result;
+}
+
+/**
  * Compare two flattened translation values structurally.
  *
  * flattenTranslations leaves arrays intact, and old/new come from separate
@@ -423,14 +438,36 @@ export function diffFileKeys(
   resolvedRef: string,
   verbose: boolean
 ): FileDiff | null {
-  const oldFlat = flatValuesAt(file, resolvedRef);
-  if (oldFlat === null && verbose) {
+  return diffFlattened(file, resolvedRef, verbose, flattenFileContent);
+}
+
+/**
+ * The diff that decides which source keys changed. Unlike diffFileKeys, its
+ * values are for comparing only and never go on the wire.
+ */
+function diffSourceFileKeys(
+  file: TranslationFile,
+  resolvedRef: string,
+  verbose: boolean
+): FileDiff {
+  return diffFlattened(file, resolvedRef, verbose, flattenSourceContent);
+}
+
+function diffFlattened(
+  file: TranslationFile,
+  resolvedRef: string,
+  verbose: boolean,
+  flatten: (content: string, file: FileLocation) => Record<string, any>
+): FileDiff {
+  const oldContent = contentAt(file, resolvedRef);
+  if (oldContent === null && verbose) {
     console.log(chalk.dim(`  ${file.path}: new file (all keys changed)`));
   }
+  const oldFlat = oldContent === null ? {} : flatten(oldContent, file);
 
-  const newFlat = flattenFileContent(readFileSync(file.path, 'utf-8'), file);
+  const newFlat = flatten(readFileSync(file.path, 'utf-8'), file);
 
-  return { oldFlat: oldFlat ?? {}, newFlat };
+  return { oldFlat, newFlat };
 }
 
 export type FileLocation = Pick<TranslationFile, 'path' | 'format' | 'locale'>;
@@ -440,10 +477,18 @@ export type FileLocation = Pick<TranslationFile, 'path' | 'format' | 'locale'>;
  * not have the file.
  */
 export function flatValuesAt(file: FileLocation, ref: string): Record<string, any> | null {
-  let content: string;
+  const content = contentAt(file, ref);
+  return content === null ? null : flattenFileContent(content, file);
+}
+
+/**
+ * A file's content as committed at `ref`, or null when the ref does not have
+ * the file.
+ */
+function contentAt(file: FileLocation, ref: string): string | null {
   try {
     // stderr is piped and git's locale pinned: the missing-at-ref check below reads git's English message
-    content = execSync(
+    return execSync(
       `git show ${ref}:"${gitShowPath(file.path)}"`,
       {
         encoding: 'utf-8',
@@ -458,16 +503,21 @@ export function flatValuesAt(file: FileLocation, ref: string): Record<string, an
     if (missingAtRef) return null;
     // A git failure is NOT an empty file: falling through would report every key
     // as added, and the backend trusts those. Callers catch per-file and skip.
+    // An unparsable file throws when flattened, for the same reason.
     throw error;
   }
-  // An unparsable file throws too, for the same reason.
-  return flattenFileContent(content, file);
 }
 
 function flattenFileContent(content: string, file: FileLocation): Record<string, any> {
   const isPo = file.format === 'po' || file.format === 'pot';
   const parsed = parseFile(content, file.format, file.path);
   return isPo ? extractPoKeys(parsed) : flattenTranslations(extractLocaleContent(parsed, file.locale));
+}
+
+function flattenSourceContent(content: string, file: FileLocation): Record<string, any> {
+  const isPo = file.format === 'po' || file.format === 'pot';
+  if (!isPo) return flattenFileContent(content, file);
+  return extractPoSourceKeys(parseFile(content, file.format, file.path));
 }
 
 /**
@@ -498,10 +548,7 @@ function getChangedKeys(
 
   for (const file of sourceFiles) {
     try {
-      const diff = diffFileKeys(file, resolvedRef, verbose);
-      if (!diff) continue;
-
-      const { oldFlat, newFlat } = diff;
+      const { oldFlat, newFlat } = diffSourceFileKeys(file, resolvedRef, verbose);
       const fileChangedKeys: string[] = [];
       let totalChangedInFile = 0;
       const perFileSet = new Set<string>();
@@ -594,10 +641,7 @@ export function diffSourceFilesPerFile(
 
   for (const file of sourceFiles) {
     try {
-      const diff = diffFileKeys(file, resolvedRef, false);
-      if (!diff) continue;
-
-      const { oldFlat, newFlat } = diff;
+      const { oldFlat, newFlat } = diffSourceFileKeys(file, resolvedRef, false);
       const isPo = file.format === 'po' || file.format === 'pot';
       const added: KeyIdentifier[] = [];
       const removed: KeyIdentifier[] = [];
