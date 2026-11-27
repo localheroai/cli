@@ -113,8 +113,8 @@ type AlignmentRequest = Omit<SourceAlignmentParams, 'locale' | 'items'>;
 /**
  * Ask the server to bring each translation of an edited article up to date, one
  * article and language per request, and write what comes back as the whole
- * file. Asked whatever the project's setting for reworded keys is. One article
- * failing never stops the next; a server that takes no article updates does.
+ * file. One article failing never stops the next; a server that takes no
+ * article updates does.
  */
 export async function runDocumentAlignment(
   candidates: AlignmentCandidate[],
@@ -131,8 +131,7 @@ export async function runDocumentAlignment(
       try {
         await alignDocument(candidate, request, deps, result);
       } catch (error) {
-        const refused = error instanceof SourceAlignmentRequestError;
-        if (refused && (error.status === NOT_FOUND_STATUS || error.code === DOCUMENTS_OFF_CODE)) {
+        if (error instanceof SourceAlignmentRequestError && (error.status === NOT_FOUND_STATUS || error.code === DOCUMENTS_OFF_CODE)) {
           result.available = false;
           unavailable = error.code === DOCUMENTS_OFF_CODE ? error.message : null;
         } else {

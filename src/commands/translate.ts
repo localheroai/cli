@@ -677,7 +677,6 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       sourceLocale,
       console
     );
-    const isArticle = (cell: { target_path: string }): boolean => isDocumentPath(cell.target_path);
     let inBranch = false;
 
     if (options.skipCommit) {
@@ -686,8 +685,8 @@ export async function translate(options: TranslationOptions = {}, deps: Translat
       try {
         const result = await gitUtils.autoCommitChanges(translationPaths, {
           ...summary,
-          ...summarizeAlignedCells(alignedCells.filter(cell => !isArticle(cell)), sourceLocale),
-          ...summarizeUpdatedArticles(alignedCells.filter(isArticle)),
+          ...summarizeAlignedCells(alignedCells.filter(cell => !isDocumentPath(cell.target_path)), sourceLocale),
+          ...summarizeUpdatedArticles(alignedCells.filter(cell => isDocumentPath(cell.target_path))),
           viewUrl: summary.viewUrl || alignment?.shortUrl || articleUpdates.shortUrl || undefined
         });
         inBranch = result === 'new';

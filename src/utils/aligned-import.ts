@@ -2,7 +2,8 @@ import chalk from 'chalk';
 import {
   createPullRequestImport,
   PullRequestImportError,
-  type PullRequestImportParams
+  type PullRequestImportParams,
+  type PullRequestImportResponse
 } from '../api/pull-request-imports.js';
 import { leaveOutMovedCells, triggerPathKey, type SentValuesFrom, type TriggerPaths } from './import-guard.js';
 import type { TargetChangeFile } from './target-changes.js';
@@ -70,7 +71,7 @@ export async function sendAlignedImport(
 }
 
 // The article changed on Localhero after the update was made; the next push makes it again.
-function reportArticlesNotTaken(skipped: Array<{ path: string; locale?: string; reason: string }>, logger: Logger): void {
+function reportArticlesNotTaken(skipped: PullRequestImportResponse['skipped'], logger: Logger): void {
   for (const entry of skipped) {
     if (!isDocumentPath(entry.path) || entry.reason !== BASELINE_CHANGED) continue;
     const article = `${entry.locale ? `${entry.locale}: ` : ''}${entry.path.split('/').pop()}`;
