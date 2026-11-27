@@ -47,6 +47,8 @@ describe('translate with articles', () => {
   const articleRequests = () => jobRequests().filter(isArticleJob);
 
   beforeEach(() => {
+
+    process.exitCode = undefined;
     originalCwd = process.cwd();
     directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'translate-documents-')));
     cpSync(fixtures, directory, { recursive: true });

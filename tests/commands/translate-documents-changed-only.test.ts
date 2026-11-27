@@ -56,6 +56,8 @@ describe('translate --changed-only with articles', () => {
   const importCalls = () => api.callsTo('/pull_request_imports');
 
   beforeEach(() => {
+
+    process.exitCode = undefined;
     originalCwd = process.cwd();
     directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'documents-changed-only-')));
     cpSync(fixtures, directory, { recursive: true });

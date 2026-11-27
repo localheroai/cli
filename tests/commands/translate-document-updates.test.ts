@@ -82,6 +82,8 @@ describe('translate --changed-only with an edited article', () => {
   };
 
   beforeEach(() => {
+
+    process.exitCode = undefined;
     originalCwd = process.cwd();
     directory = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'document-updates-')));
     cpSync(fixtures, directory, { recursive: true });
